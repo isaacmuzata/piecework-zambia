@@ -1,6 +1,6 @@
 // PieceWork Zambia service worker: offline shell for static assets only.
 // API responses are NEVER cached — job listings are always fresh from the server.
-const CACHE = 'pwz-v1';
+const CACHE = 'pwz-v2';
 const CORE = [
   '/', '/index.html', '/styles.css', '/app.js',
   '/manifest.json', '/icon-192.png', '/icon-512.png',

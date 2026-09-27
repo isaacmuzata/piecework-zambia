@@ -35,7 +35,7 @@ app.use(cors({
   origin: allowedOrigins.length ? allowedOrigins : true,
   credentials: true,
 }));
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '400kb' }));
 app.use(cookieParser());
 
 // ---------------------------------------------------------------- constants
@@ -104,7 +104,7 @@ function publicUser(row) {
   if (!row) return null;
   return {
     id: row.id, name: row.name, phone: row.phone, city: row.city,
-    bio: row.bio || '', skills: row.skills || '',
+    bio: row.bio || '', skills: row.skills || '', avatar: row.avatar || '',
     rating_avg: row.rating_avg || 0, rating_count: row.rating_count || 0,
     lat: row.lat != null ? Number(row.lat) : null,
     lng: row.lng != null ? Number(row.lng) : null,
@@ -271,6 +271,7 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
   const rows = await getAll(`
     SELECT j.*, u.name AS poster_name, u.city AS poster_city,
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
+           u.avatar AS poster_avatar,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count
     FROM jobs j JOIN users u ON u.id = j.poster_id
@@ -334,6 +335,7 @@ function serializeJob(j) {
     poster: {
       id: j.poster_id, name: j.poster_name, city: j.poster_city,
       rating_avg: j.poster_rating || 0, rating_count: j.poster_rating_count || 0,
+      avatar: j.poster_avatar || '',
     },
     applicant_count: j.applicant_count || 0,
     accepted_count: j.accepted_count || 0,
@@ -347,6 +349,7 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
   const j = await getOne(`
     SELECT j.*, u.name AS poster_name, u.city AS poster_city,
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
+           u.avatar AS poster_avatar,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count
     FROM jobs j JOIN users u ON u.id = j.poster_id WHERE j.id = ?
@@ -378,7 +381,7 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
       SELECT a.id, a.message, a.status, a.created_at,
              u.id AS worker_id, u.name AS worker_name, u.city AS worker_city,
              u.rating_avg AS worker_rating, u.rating_count AS worker_rating_count,
-             u.phone AS worker_phone
+             u.phone AS worker_phone, u.avatar AS worker_avatar
       FROM applications a JOIN users u ON u.id = a.worker_id
       WHERE a.job_id = ? AND a.status != 'withdrawn'
       ORDER BY a.created_at ASC
@@ -637,6 +640,12 @@ app.patch('/api/users/me', ah(auth), ah(async (req, res) => {
   }
   if ('bio' in b) { updates.push('bio = ?'); params.push(String(b.bio).slice(0, 500)); }
   if ('skills' in b) { updates.push('skills = ?'); params.push(String(b.skills).slice(0, 300)); }
+  if ('avatar' in b) {
+    const av = String(b.avatar || '');
+    if (av && !/^data:image\/(jpeg|png|webp);base64,/.test(av)) fields.avatar = 'Avatar must be a JPEG, PNG or WebP image.';
+    else if (av.length > 300000) fields.avatar = 'That photo is too large. Try a smaller one.';
+    else { updates.push('avatar = ?'); params.push(av); }
+  }
   if ('lat' in b || 'lng' in b) {
     const c = parseLatLng(b);
     if (c && c.error) fields.location = c.error;
