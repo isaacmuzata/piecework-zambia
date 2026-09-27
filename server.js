@@ -714,6 +714,13 @@ app.post('/api/reviews', ah(auth), ah(async (req, res) => {
 }));
 
 // ---------------------------------------------------------------- frontend
+// The service worker script itself must never be HTTP-cached: browsers check
+// for SW updates against the HTTP cache, so a cached sw.js would delay every
+// future frontend deploy by up to maxAge for returning visitors.
+app.get('/sw.js', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
+});
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: IS_PROD ? '1h' : 0 }));
 // SPA fallback: anything that isn't /api serves index.html.
 app.get('*', (req, res, next) => {
