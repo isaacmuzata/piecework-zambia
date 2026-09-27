@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: piecework-zambia
+    runtime: docker
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      # Turso cloud database (free tier). The free plan cannot attach a
+      # persistent disk, so the SQLite file would be wiped on every restart —
+      # the database lives in Turso instead. Set both values in the Render
+      # dashboard: service → Environment → add them manually.
+      # Create a free database at https://turso.tech, then copy:
+      #   TURSO_DATABASE_URL = libsql://<your-db>-<org>.turso.io
+      #   TURSO_AUTH_TOKEN   = the token from `turso db tokens create <your-db>`
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      # - key: ALLOWED_ORIGINS
+      #   value: https://your-custom-domain.com
