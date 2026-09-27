@@ -721,10 +721,25 @@ app.get('/sw.js', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, 'public', 'sw.js'));
 });
+// The app shell (HTML/JS/CSS) is managed by the service worker's
+// stale-while-revalidate cache, so it must revalidate on every load too:
+// otherwise returning visitors (and the SW's own background revalidation)
+// keep serving the previous deploy's bundle for up to maxAge.
+for (const shellFile of ['/app.js', '/styles.css']) {
+  app.get(shellFile, (req, res) => {
+    res.set('Cache-Control', 'no-cache');
+    res.sendFile(path.join(__dirname, 'public', shellFile));
+  });
+}
+app.get(['/', '/index.html'], (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: IS_PROD ? '1h' : 0 }));
 // SPA fallback: anything that isn't /api serves index.html.
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
+  res.set('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
