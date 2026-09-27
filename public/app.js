@@ -873,7 +873,7 @@ function viewAbout() {
       <h3 style="margin-top:0">Our story</h3>
       <p>PieceWork Zambia is a product of <b>Isaac Muzata</b>, known as <b>Zac</b> — CEO of <b>2911 IT Services</b>, a Zambian based in Georgia, United States.</p>
       <p>Zac has a deep love for seeing young people grow and become the best they can be in life. That love is what built this platform: a simple system that connects young people to piece work — quick jobs, quick cash — so they can earn with dignity, build real skills, and take charge of their future.</p>
-      <p>PieceWork Zambia is his effort to support the fight against youth unemployment and to stand behind every effort — including government's — to create opportunity for the next generation.</p>
+      <p>PieceWork Zambia is his effort to complement the government's efforts on unemployment — and to stand behind every push to create opportunity for the next generation.</p>
       <p style="margin-bottom:0"><b>One job at a time, we're putting Zambia's youth to work. 💪</b></p>
     </div>
     <div class="card" style="text-align:center">
