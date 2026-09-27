@@ -881,7 +881,7 @@ function viewLanding() {
       <img src="/img/landing/hero.jpg" alt="Zambian workers doing piece work — bricklaying, gardening, painting and deliveries" fetchpriority="high">
       <div class="hero-overlay">
         <h1>Quick jobs.<br>Quick cash. 🇿🇲</h1>
-        <p>PieceWork connects you to piece work near you — construction, gardening, painting, cleaning, deliveries and more. Do the work, get paid by mobile money.</p>
+        <p>Need a quick gig done today? Post it in minutes and hire helping hands near you. Looking for work? Find piece work near you and get paid by mobile money — as soon as the job is done.</p>
         <div class="hero-ctas">
           <a class="btn btn-orange" href="#/jobs">Find work</a>
           <a class="btn" href="#/post">Post a job</a>
@@ -895,7 +895,7 @@ function viewLanding() {
     <h2 class="section-title">How it works</h2>
     <div class="card">
       <ol class="steps" style="margin-bottom:0">
-        <li><h4>Browse jobs near you</h4><p>Jobs are matched by kilometres — nearest first. Or post a job in minutes.</p></li>
+        <li><h4>Browse quick gigs near you</h4><p>Jobs are matched by kilometres — nearest first. Or post a gig in minutes.</p></li>
         <li><h4>Apply in one tap</h4><p>Posters review applicants, check ratings, and hire.</p></li>
         <li><h4>Get paid by mobile money</h4><p>MTN Mobile Money or Airtel Money — the amount is agreed before you start.</p></li>
       </ol>
