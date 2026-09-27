@@ -88,12 +88,16 @@ function insertId(result) {
  */
 function normalizePhone(raw) {
   if (typeof raw !== 'string') return null;
-  let d = raw.replace(/\D/g, '');
+  const digits = raw.replace(/\D/g, '');
+  let d = digits;
   if (d.startsWith('260')) d = d.slice(3);
   else if (d.startsWith('0')) d = d.slice(1);
   // Zambian mobile numbers are 9 digits starting with 9, 7 or 6.
-  if (!/^[976]\d{8}$/.test(d)) return null;
-  return '+260' + d;
+  if (/^[976]\d{8}$/.test(d)) return '+260' + d;
+  // Otherwise accept any plausible international number (E.164: 7-15 digits),
+  // so the founder and diaspora users can register with non-Zambian numbers.
+  if (/^\d{7,15}$/.test(digits)) return '+' + digits;
+  return null;
 }
 
 function publicUser(row) {
@@ -163,7 +167,7 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   const fields = {};
   if (!name || String(name).trim().length < 2) fields.name = 'Please enter your full name.';
   const normPhone = normalizePhone(phone);
-  if (!normPhone) fields.phone = 'Enter a valid Zambian number, e.g. 0977 123 456.';
+  if (!normPhone) fields.phone = 'Enter a valid phone number, e.g. 0977 123 456.';
   if (!password || String(password).length < 8) fields.password = 'Password must be at least 8 characters.';
   if (!city || !CITIES.includes(city)) fields.city = 'Please choose your city.';
   if (Object.keys(fields).length) return err(res, 422, 'Please fix the highlighted fields.', fields);
@@ -564,17 +568,15 @@ app.patch('/api/applications/:id', ah(auth), ah(async (req, res) => {
     if ((await acceptedCount(job.id)) >= job.workers_needed) {
       return err(res, 409, 'You already have enough workers for this job.');
     }
-    await client.execute('BEGIN');
-    try {
-      await runWrite('UPDATE applications SET status = ? WHERE id = ?', ['accepted', id]);
-      if ((await acceptedCount(job.id)) >= job.workers_needed) {
-        await runWrite("UPDATE jobs SET status = 'filled' WHERE id = ?", [job.id]);
-      }
-      await client.execute('COMMIT');
-    } catch (e) {
-      await client.execute('ROLLBACK');
-      throw e;
-    }
+    // One atomic batch: BEGIN/COMMIT across separate requests cannot hold a
+    // transaction on Turso remote, so accept the application and fill the job
+    // in a single batch instead.
+    await client.batch([
+      { sql: 'UPDATE applications SET status = ? WHERE id = ?', args: ['accepted', id] },
+      { sql: `UPDATE jobs SET status = 'filled' WHERE id = ? AND status = 'open'
+              AND (SELECT COUNT(*) FROM applications WHERE job_id = ? AND status = 'accepted') >= workers_needed`,
+        args: [job.id, job.id] },
+    ], 'write');
   } else {
     await runWrite('UPDATE applications SET status = ? WHERE id = ?', ['declined', id]);
   }
@@ -667,25 +669,17 @@ app.post('/api/reviews', ah(auth), ah(async (req, res) => {
   );
   if (dup) return err(res, 409, 'You have already reviewed this person for this job.');
 
-  await client.execute('BEGIN');
-  try {
-    await runWrite(
-      'INSERT INTO reviews (job_id, reviewer_id, reviewee_id, rating, comment) VALUES (?, ?, ?, ?, ?)',
-      [jid, req.user.id, rid, r, String(comment || '').slice(0, 500)]
-    );
-    const agg = await getOne(
-      'SELECT AVG(rating) AS avg, COUNT(*) AS c FROM reviews WHERE reviewee_id = ?',
-      [rid]
-    );
-    await runWrite(
-      'UPDATE users SET rating_avg = ?, rating_count = ? WHERE id = ?',
-      [Math.round(agg.avg * 10) / 10, agg.c, rid]
-    );
-    await client.execute('COMMIT');
-  } catch (e) {
-    await client.execute('ROLLBACK');
-    throw e;
-  }
+  // One atomic batch (same Turso-remote reason as above): insert the review
+  // and recompute the reviewee's aggregate rating from the reviews table.
+  await client.batch([
+    { sql: 'INSERT INTO reviews (job_id, reviewer_id, reviewee_id, rating, comment) VALUES (?, ?, ?, ?, ?)',
+      args: [jid, req.user.id, rid, r, String(comment || '').slice(0, 500)] },
+    { sql: `UPDATE users SET
+              rating_avg = (SELECT ROUND(AVG(rating), 1) FROM reviews WHERE reviewee_id = ?),
+              rating_count = (SELECT COUNT(*) FROM reviews WHERE reviewee_id = ?)
+            WHERE id = ?`,
+      args: [rid, rid, rid] },
+  ], 'write');
   res.status(201).json({ ok: true });
 }));
 

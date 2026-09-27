@@ -831,7 +831,7 @@ function viewRegister() {
         <div class="field">
           <label for="rg-phone">Phone number</label>
           <input name="phone" id="rg-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0977 123 456">
-          <div class="hint">Your Zambian mobile number — this is how posters reach you.</div>
+          <div class="hint">Your mobile number — this is how posters reach you on call or WhatsApp.</div>
         </div>
         <div class="field">
           <label for="rg-city">City</label>
@@ -923,3 +923,10 @@ window.addEventListener('hashchange', router);
   if (!location.hash) location.hash = '#/';
   router();
 })();
+
+// Installable PWA: cache the app shell for fast, offline-capable loads.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
