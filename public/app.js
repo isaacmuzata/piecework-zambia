@@ -866,6 +866,23 @@ function viewRegister() {
   });
 }
 
+function viewAbout() {
+  app.innerHTML = `
+    <h1 class="page-title">About PieceWork 🇿🇲</h1>
+    <div class="card">
+      <h3 style="margin-top:0">Our story</h3>
+      <p>PieceWork Zambia is a product of <b>Isaac Muzata</b>, known as <b>Zac</b> — CEO of <b>2911 IT Services</b>, a Zambian based in Georgia, United States.</p>
+      <p>Zac has a deep love for seeing young people grow and become the best they can be in life. That love is what built this platform: a simple system that connects young people to piece work — quick jobs, quick cash — so they can earn with dignity, build real skills, and take charge of their future.</p>
+      <p>PieceWork Zambia is his effort to support the fight against youth unemployment and to stand behind every effort — including government's — to create opportunity for the next generation.</p>
+      <p style="margin-bottom:0"><b>One job at a time, we're putting Zambia's youth to work. 💪</b></p>
+    </div>
+    <div class="card" style="text-align:center">
+      <h3 style="margin-top:0">Meet the founder</h3>
+      <p style="color:var(--muted);font-size:14px">Isaac "Zac" Muzata · CEO, 2911 IT Services<br><a href="https://2911itservices.com" target="_blank" rel="noopener">2911itservices.com</a></p>
+      <a class="btn" href="#/register">Join free today</a>
+    </div>`;
+}
+
 function viewHow() {
   app.innerHTML = `
     <h1 class="page-title">How PieceWork works</h1>
@@ -888,6 +905,7 @@ function viewHow() {
       <h3 style="margin-top:0">Stay safe 🤝</h3>
       <p style="color:var(--muted);font-size:14px">Meet in public places for first jobs. Never pay any "registration fee" to get work — real jobs on PieceWork never ask for money up front.</p>
       <a class="btn" href="#/register">Get started — it's free</a>
+      <div style="margin-top:10px"><a class="link-btn" href="#/about">📖 Our story — why Zac built this</a></div>
     </div>`;
 }
 
@@ -902,6 +920,7 @@ const routes = [
   [/^#\/login$/, viewLogin],
   [/^#\/register$/, viewRegister],
   [/^#\/how$/, viewHow],
+  [/^#\/about$/, viewAbout],
 ];
 
 async function router() {
