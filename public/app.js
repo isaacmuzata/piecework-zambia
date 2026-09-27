@@ -10,6 +10,21 @@ const CITIES = [
   'Lusaka', 'Kitwe', 'Ndola', 'Kabwe', 'Chipata', 'Livingstone',
   'Chingola', 'Luanshya', 'Kasama', 'Solwezi', 'Mongu', 'Choma', 'Other',
 ];
+const CATEGORY_ICONS = {
+  'Events Setup': '🎪',
+  'Moving Help': '🚚',
+  'Cleaning': '🧹',
+  'Construction & Labor': '🧱',
+  'Delivery & Errands': '🛵',
+  'Cooking & Catering': '🍳',
+  'Gardening': '🌱',
+  'Painting': '🎨',
+  'Security & Ushering': '🛡️',
+  'Other': '💼',
+};
+function jobThumb(cat) {
+  return `<div class="job-thumb" aria-hidden="true">${CATEGORY_ICONS[cat] || '💼'}</div>`;
+}
 const PAY_LABEL = { per_job: 'per job', per_hour: 'per hour', per_day: 'per day' };
 const PAY_SHORT = { per_job: '/job', per_hour: '/hr', per_day: '/day' };
 
@@ -142,16 +157,17 @@ function renderChrome() {
     topbarAuth.innerHTML = `<a href="#/login">Sign in</a>`;
   }
   const tabs = [
+    { href: '#/', label: 'Home', ico: '🏠', match: (h) => h === '#/' || h === '' },
     { href: '#/jobs', label: 'Jobs', ico: '💼', match: (h) => h === '#/jobs' || h.startsWith('#/job/') },
-    { href: '#/post', label: 'Post', ico: '➕', match: (h) => h.startsWith('#/post') },
+    { href: '#/post', label: 'Post', fab: true, match: (h) => h.startsWith('#/post') },
     { href: '#/dashboard', label: 'My Gigs', ico: '📋', match: (h) => h.startsWith('#/dashboard') },
-    { href: '#/how', label: 'How it works', ico: '❓', match: (h) => h.startsWith('#/how') },
     { href: currentUser ? '#/profile' : '#/login', label: currentUser ? 'Profile' : 'Sign in', ico: '👤',
       match: (h) => h.startsWith('#/profile') || h.startsWith('#/user/') || h.startsWith('#/login') || h.startsWith('#/register') },
   ];
   const h = location.hash || '#/';
-  tabbar.innerHTML = tabs.map(t =>
-    `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}"><span class="ico">${t.ico}</span>${t.label}</a>`
+  tabbar.innerHTML = tabs.map(t => t.fab
+    ? `<a href="${t.href}" class="tab-post ${t.match(h) ? 'active' : ''}"><span class="post-fab">+</span><span class="tab-label">${t.label}</span></a>`
+    : `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}"><span class="ico">${t.ico}</span>${t.label}</a>`
   ).join('');
 }
 
@@ -173,18 +189,20 @@ function afterAuthRedirect() {
 function jobCard(job) {
   return `
   <a class="card job-card" href="#/job/${job.id}">
-    <div class="card-row">
-      <span class="badge badge-cat">${esc(job.category)}</span>
-      <span class="badge badge-status-${job.status}">${esc(job.status)}</span>
+    ${jobThumb(job.category)}
+    <div class="job-body">
+      <div class="card-row">
+        <span class="badge badge-cat">${esc(job.category)}</span>
+        <span class="badge badge-status-${job.status}">${esc(job.status)}</span>
+      </div>
+      <h3>${esc(job.title)}</h3>
+      <div class="pay">${kwacha(job.pay_amount)}<small> ${esc(PAY_LABEL[job.pay_type] || '')}</small></div>
+      <div class="job-meta">
+        <span>📍 <b>${esc(job.city)}</b>${job.area ? ' · ' + esc(job.area) : ''}${job.distance_km != null ? ` · 📏 <b>${esc(fmtKm(job.distance_km))}</b> away` : ''}</span>
+        <span>📅 ${esc(fmtDate(job.date_needed))}</span>
+      </div>
+      <div class="job-meta"><span>👥 ${job.workers_needed} needed${job.accepted_count ? ` · ${job.accepted_count} hired` : ''} · by ${esc(job.poster.name)}</span></div>
     </div>
-    <h3>${esc(job.title)}</h3>
-    <div class="pay">${kwacha(job.pay_amount)}<small> ${esc(PAY_LABEL[job.pay_type] || '')}</small></div>
-    <div class="job-meta">
-      <span>📍 <b>${esc(job.city)}</b>${job.area ? ' · ' + esc(job.area) : ''}${job.distance_km != null ? ` · 📏 <b>${esc(fmtKm(job.distance_km))}</b> away` : ''}</span>
-      <span>📅 ${esc(fmtDate(job.date_needed))}</span>
-      <span>👥 ${job.workers_needed} needed${job.accepted_count ? ` · ${job.accepted_count} hired` : ''}</span>
-    </div>
-    <div class="job-meta"><span>by ${esc(job.poster.name)}</span></div>
   </a>`;
 }
 
@@ -205,12 +223,12 @@ function momoNoteHtml() {
 /* ---------------- views ---------------- */
 async function viewBrowse() {
   app.innerHTML = `
-    <div class="hero">
-      <h2>Quick jobs. Quick cash. 💪</h2>
-      <p>Find piece work near you in Zambia — or post a job and hire helping hands today.</p>
-    </div>
-    <div class="searchbar">
-      <input id="q" type="search" placeholder="Search jobs… e.g. moving, cleaning" value="${esc(browseState.q)}" aria-label="Search jobs">
+    <div class="browse-hero">
+      <div class="hello">${currentUser ? `👋 Hi, ${esc(currentUser.name.split(' ')[0])}` : `👋 Welcome to PieceWork`}</div>
+      <h2>Find your next gig</h2>
+      <div class="searchbar">
+        <input id="q" type="search" placeholder="Search jobs… e.g. moving, cleaning" value="${esc(browseState.q)}" aria-label="Search jobs">
+      </div>
     </div>
     <div class="filters">
       <select id="f-city" aria-label="Filter by city">
@@ -224,7 +242,8 @@ async function viewBrowse() {
       ${CATEGORIES.map(c => `<button class="chip ${browseState.category === c ? 'active' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
     </div>
     <div id="results">${loadingHtml('Finding jobs…')}</div>
-    <div id="more-wrap" style="text-align:center;margin:8px 0 16px"></div>`;
+    <div id="more-wrap" style="text-align:center;margin:8px 0 16px"></div>
+    <div style="text-align:center;margin:18px 0 8px"><a class="link-btn" href="#/how">How PieceWork works →</a></div>`;
 
   const q = document.getElementById('q');
   let debounce;
@@ -413,18 +432,22 @@ async function viewJobDetail(id) {
 
   app.innerHTML = `
     <a href="#/" style="font-size:14px;font-weight:700">← Back to jobs</a>
-    <div class="card" style="margin-top:10px">
+    <div class="detail-hero">
       <div class="card-row">
         <span class="badge badge-cat">${esc(job.category)}</span>
         <span class="badge badge-status-${job.status}">${esc(job.status)}</span>
       </div>
-      <h2 style="margin:8px 0">${esc(job.title)}</h2>
-      <div class="pay" style="font-size:22px">${kwacha(job.pay_amount)}<small> ${esc(PAY_LABEL[job.pay_type] || '')}</small></div>
+      <h2>${esc(job.title)}</h2>
+      <div class="pay" style="font-size:24px">${kwacha(job.pay_amount)}<small> ${esc(PAY_LABEL[job.pay_type] || '')}</small></div>
+      <div class="job-meta">
+        <span>📍 <b>${esc(job.city)}</b>${job.area ? ' · ' + esc(job.area) : ''}${job.distance_km != null ? ` · 📏 <b>${esc(fmtKm(job.distance_km))} away</b>` : ''}</span>
+        <span>📅 ${esc(fmtDate(job.date_needed))}</span>
+        <span>👥 ${job.workers_needed} needed · ${job.accepted_count} hired · ${job.applicant_count} applied</span>
+      </div>
+    </div>
+    <div class="card">
       <dl class="detail-list">
         <dt>What needs doing</dt><dd>${esc(job.description).replace(/\n/g, '<br>')}</dd>
-        <dt>Location</dt><dd>📍 ${esc(job.city)}${job.area ? ' · ' + esc(job.area) : ''}${job.distance_km != null ? ` · <b>${esc(fmtKm(job.distance_km))} away</b>` : ''}</dd>
-        <dt>Date needed</dt><dd>📅 ${esc(fmtDate(job.date_needed))}</dd>
-        <dt>Workers</dt><dd>👥 ${job.workers_needed} needed · ${job.accepted_count} hired · ${job.applicant_count} applied</dd>
         <dt>Posted by</dt><dd><a href="#/user/${job.poster.id}"><b>${esc(job.poster.name)}</b></a>
           ${stars(job.poster.rating_avg)} <span style="color:var(--muted);font-size:13px">(${job.poster.rating_count})</span></dd>
         <dt>Posted</dt><dd style="color:var(--muted)">${esc(fmtDateTime(job.created_at))}</dd>
@@ -673,15 +696,17 @@ async function viewDashboard() {
       }
       body.innerHTML = applications.map(a => `
         <a class="card job-card" href="#/job/${a.job_id}">
-          <div class="card-row">
-            <span class="badge badge-cat">${esc(a.category)}</span>
-            <span class="badge badge-app-${a.app_status}">${esc(a.app_status)}</span>
+          ${jobThumb(a.category)}
+          <div class="job-body">
+            <div class="card-row">
+              <span class="badge badge-cat">${esc(a.category)}</span>
+              <span class="badge badge-app-${a.app_status}">${esc(a.app_status)}</span>
+            </div>
+            <h3>${esc(a.title)}</h3>
+            <div class="pay">${kwacha(a.pay_amount)}<small> ${esc(PAY_LABEL[a.pay_type] || '')}</small></div>
+            <div class="job-meta"><span>📍 <b>${esc(a.city)}</b></span><span>📅 ${esc(fmtDate(a.date_needed))}</span></div>
+            <div class="job-meta"><span>by ${esc(a.poster_name)} · applied ${esc(fmtDateTime(a.applied_at))}</span></div>
           </div>
-          <h3>${esc(a.title)}</h3>
-          <div class="pay">${kwacha(a.pay_amount)}<small> ${esc(PAY_LABEL[a.pay_type] || '')}</small></div>
-          <div class="job-meta"><span>📍 <b>${esc(a.city)}</b></span><span>📅 ${esc(fmtDate(a.date_needed))}</span>
-          <span>Job: <b>${esc(a.job_status)}</b></span></div>
-          <div class="job-meta"><span>by ${esc(a.poster_name)} · applied ${esc(fmtDateTime(a.applied_at))}</span></div>
         </a>`).join('');
     } catch (e) { body.innerHTML = emptyHtml('⚠️', 'Could not load', e.message); }
   }
