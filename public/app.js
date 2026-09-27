@@ -142,7 +142,7 @@ function renderChrome() {
     topbarAuth.innerHTML = `<a href="#/login">Sign in</a>`;
   }
   const tabs = [
-    { href: '#/', label: 'Jobs', ico: '💼', match: (h) => h === '#/' || h.startsWith('#/job/') },
+    { href: '#/jobs', label: 'Jobs', ico: '💼', match: (h) => h === '#/jobs' || h.startsWith('#/job/') },
     { href: '#/post', label: 'Post', ico: '➕', match: (h) => h.startsWith('#/post') },
     { href: '#/dashboard', label: 'My Gigs', ico: '📋', match: (h) => h.startsWith('#/dashboard') },
     { href: '#/how', label: 'How it works', ico: '❓', match: (h) => h.startsWith('#/how') },
@@ -866,6 +866,60 @@ function viewRegister() {
   });
 }
 
+function viewLanding() {
+  if (currentUser) { location.hash = '#/jobs'; return; }
+  const cats = [
+    ['construction.jpg', 'Construction'],
+    ['gardening.jpg', 'Gardening'],
+    ['painting.jpg', 'Painting'],
+    ['cleaning.jpg', 'Cleaning'],
+    ['deliveries.jpg', 'Deliveries'],
+    ['carwash.jpg', 'Car wash'],
+  ];
+  app.innerHTML = `
+    <section class="hero">
+      <img src="/img/landing/hero.jpg" alt="Zambian workers doing piece work — bricklaying, gardening, painting and deliveries" fetchpriority="high">
+      <div class="hero-overlay">
+        <h1>Quick jobs.<br>Quick cash. 🇿🇲</h1>
+        <p>PieceWork connects you to piece work near you — construction, gardening, painting, cleaning, deliveries and more. Do the work, get paid by mobile money.</p>
+        <div class="hero-ctas">
+          <a class="btn btn-orange" href="#/jobs">Find work</a>
+          <a class="btn" href="#/post">Post a job</a>
+        </div>
+      </div>
+    </section>
+    <h2 class="section-title">Popular piece work</h2>
+    <div class="cat-grid">
+      ${cats.map(([img, label]) => `<a class="cat-card" href="#/jobs"><img src="/img/landing/${img}" alt="${label} piece work in Zambia" loading="lazy"><span>${label}</span></a>`).join('')}
+    </div>
+    <h2 class="section-title">How it works</h2>
+    <div class="card">
+      <ol class="steps" style="margin-bottom:0">
+        <li><h4>Browse jobs near you</h4><p>Jobs are matched by kilometres — nearest first. Or post a job in minutes.</p></li>
+        <li><h4>Apply in one tap</h4><p>Posters review applicants, check ratings, and hire.</p></li>
+        <li><h4>Get paid by mobile money</h4><p>MTN Mobile Money or Airtel Money — the amount is agreed before you start.</p></li>
+      </ol>
+    </div>
+    <div class="split">
+      <div class="card">
+        <h3 style="margin-top:0">For workers 🙋🏾</h3>
+        <p style="color:var(--muted);font-size:14px">Free for workers, always. Create an account, find piece work near you, build your rating.</p>
+        <a class="btn btn-sm" href="#/register">Join free</a>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">For posters 📢</h3>
+        <p style="color:var(--muted);font-size:14px">Need hands? Post the job with the pay in Kwacha and hire today.</p>
+        <a class="btn btn-sm" href="#/post">Post a job</a>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px;text-align:center">
+      <h3 style="margin-top:0">Built for Zambia's youth 💪</h3>
+      <p style="color:var(--muted);font-size:14px">PieceWork is a product of Isaac "Zac" Muzata — complementing government's efforts on unemployment, one job at a time.</p>
+      <a class="link-btn" href="#/about">📖 Our story</a>
+    </div>
+    <p class="landing-foot">PieceWork Zambia · A product of Isaac Muzata (Zac), <a href="https://2911itservices.com" target="_blank" rel="noopener">2911 IT Services</a></p>`;
+}
+
 function viewAbout() {
   app.innerHTML = `
     <h1 class="page-title">About PieceWork 🇿🇲</h1>
@@ -911,7 +965,8 @@ function viewHow() {
 
 /* ---------------- router ---------------- */
 const routes = [
-  [/^#\/?$/, viewBrowse],
+  [/^#\/?$/, viewLanding],
+  [/^#\/jobs$/, viewBrowse],
   [/^#\/job\/(\d+)$/, (m) => viewJobDetail(m[1])],
   [/^#\/post$/, viewPost],
   [/^#\/dashboard$/, viewDashboard],
