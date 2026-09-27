@@ -46,7 +46,7 @@ const SCHEMA = [
     area           TEXT DEFAULT '',
     date_needed    TEXT NOT NULL,
     pay_amount     INTEGER NOT NULL,
-    pay_type       TEXT NOT NULL CHECK (pay_type IN ('per_job', 'per_hour', 'per_day')),
+    pay_type       TEXT NOT NULL CHECK (pay_type IN ('per_job', 'per_hour', 'per_day', 'per_month')),
     workers_needed INTEGER NOT NULL DEFAULT 1,
     status         TEXT NOT NULL DEFAULT 'open'
                    CHECK (status IN ('open', 'filled', 'completed', 'cancelled')),
@@ -99,6 +99,52 @@ async function init() {
     const cols = (await client.execute(`PRAGMA table_info(${table})`)).rows.map((c) => c.name);
     if (!cols.includes(column)) {
       await client.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+  }
+  // Migration (2026-09-27): allow pay_type='per_month'. SQLite cannot ALTER a
+  // CHECK constraint, so rebuild the jobs table when the old constraint is
+  // still present. Idempotent: skipped once the new constraint exists.
+  const jobsSql = (await client.execute(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'`
+  )).rows[0]?.sql || '';
+  if (jobsSql.includes("'per_day'") && !jobsSql.includes("'per_month'")) {
+    await client.execute('DROP TABLE IF EXISTS jobs_new');
+    await client.execute('PRAGMA foreign_keys = OFF');
+    try {
+      await client.execute(`CREATE TABLE jobs_new (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        poster_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title          TEXT NOT NULL,
+        category       TEXT NOT NULL,
+        description    TEXT NOT NULL,
+        city           TEXT NOT NULL,
+        area           TEXT DEFAULT '',
+        date_needed    TEXT NOT NULL,
+        pay_amount     INTEGER NOT NULL,
+        pay_type       TEXT NOT NULL CHECK (pay_type IN ('per_job', 'per_hour', 'per_day', 'per_month')),
+        workers_needed INTEGER NOT NULL DEFAULT 1,
+        status         TEXT NOT NULL DEFAULT 'open'
+                       CHECK (status IN ('open', 'filled', 'completed', 'cancelled')),
+        whatsapp       TEXT DEFAULT '',
+        created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        lat            REAL,
+        lng            REAL
+      )`);
+      await client.execute(`INSERT INTO jobs_new
+        (id, poster_id, title, category, description, city, area, date_needed,
+         pay_amount, pay_type, workers_needed, status, whatsapp, created_at, lat, lng)
+        SELECT id, poster_id, title, category, description, city, area, date_needed,
+         pay_amount, pay_type, workers_needed, status, whatsapp, created_at, lat, lng
+        FROM jobs`);
+      await client.execute('DROP TABLE jobs');
+      await client.execute('ALTER TABLE jobs_new RENAME TO jobs');
+      for (const idx of [
+        `CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_jobs_city ON jobs(city)`,
+        `CREATE INDEX IF NOT EXISTS idx_jobs_category ON jobs(category)`,
+      ]) await client.execute(idx);
+    } finally {
+      await client.execute('PRAGMA foreign_keys = ON');
     }
   }
   // Data fix (2026-09-27): the two Virtual Assistant jobs were posted with
