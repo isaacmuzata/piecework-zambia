@@ -101,6 +101,13 @@ async function init() {
       await client.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
   }
+  // Data fix (2026-09-27): the two Virtual Assistant jobs were posted with
+  // pay_type='per_job' but their descriptions say "K6,000 per month".
+  // Idempotent: only touches jobs whose text still says per month.
+  await client.execute(
+    `UPDATE jobs SET pay_type = 'per_month'
+     WHERE pay_type = 'per_job' AND description LIKE '%per month%'`
+  );
 }
 
 module.exports = { client, init };

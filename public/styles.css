@@ -80,6 +80,8 @@ button{font-family:inherit}
   position:fixed;inset:0;background:rgba(6,43,28,.45);z-index:58;
   opacity:0;pointer-events:none;transition:opacity .25s;
 }
+/* class rules below set display, which would otherwise beat the [hidden] attribute */
+.drawer[hidden],.drawer-scrim[hidden]{display:none!important}
 .drawer-scrim.show{opacity:1;pointer-events:auto}
 .drawer{
   position:fixed;top:0;bottom:0;z-index:59;
@@ -94,6 +96,11 @@ button{font-family:inherit}
 @media(max-width:520px){.drawer{left:0;margin-left:0}}
 .drawer.open{transform:none}
 .drawer-head{display:flex;align-items:center;gap:10px;padding:4px 6px 18px}
+.drawer-close{
+  margin-left:auto;width:38px;height:38px;border-radius:12px;border:1px solid rgba(255,255,255,.22);
+  background:rgba(255,255,255,.1);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;
+}
+.drawer-close svg{width:20px;height:20px}
 .drawer-head .brand-word strong{color:#fff}
 .drawer-head .brand-word span{color:#8fd0a8}
 .drawer-nav{display:flex;flex-direction:column;gap:2px;overflow-y:auto}
@@ -400,7 +407,7 @@ img.avatar{display:block}
 .hero{position:relative;min-height:92dvh;display:flex;align-items:flex-end;color:#fff;overflow:hidden}
 .hero img.bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .hero-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(6,43,28,.25) 0%,rgba(6,43,28,.55) 55%,rgba(6,43,28,.92) 100%)}
-.hero-content{position:relative;padding:34px 24px calc(30px + env(safe-area-inset-bottom));width:100%;max-width:480px;margin:0 auto}
+.hero-content{position:relative;padding:34px 24px calc(112px + env(safe-area-inset-bottom));width:100%;max-width:480px;margin:0 auto}
 .hero-content .kicker{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);padding:7px 15px;border-radius:999px;font-size:12.5px;font-weight:700;margin-bottom:14px}
 .hero-content h1{font-size:36px;font-weight:800;letter-spacing:-.03em;line-height:1.12;margin-bottom:12px}
 .hero-content h1 .hl{color:#7fd79f}

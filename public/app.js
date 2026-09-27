@@ -10,7 +10,7 @@ const CITIES = [
   'Lusaka', 'Kitwe', 'Ndola', 'Kabwe', 'Chipata', 'Livingstone',
   'Chingola', 'Luanshya', 'Kasama', 'Solwezi', 'Mongu', 'Choma', 'Other',
 ];
-const PAY_LABEL = { per_job: 'per job', per_hour: 'per hour', per_day: 'per day' };
+const PAY_LABEL = { per_job: 'per job', per_hour: 'per hour', per_day: 'per day', per_month: 'per month' };
 
 /* ---------------- thin-line icon set (Lucide/Feather style) ---------------- */
 const ICONS = {
@@ -340,14 +340,16 @@ function afterAuthRedirect() {
 /* ---------------- shared components ---------------- */
 function jobCard(job) {
   const saved = isSaved(job.id);
+  const area = job.area && job.area.toLowerCase() !== String(job.city || '').toLowerCase() ? job.area : '';
+  const statusBadge = job.status === 'open' ? `<span class="badge badge-status-open">Open</span>` : '';
   return `
   <article class="job-card" data-job="${job.id}" tabindex="0" role="link" aria-label="${esc(job.title)}">
     ${jobThumb(job.category)}
     <div class="job-body">
       <h3>${esc(job.title)}</h3>
-      <div class="pay">${kwacha(job.pay_amount)}<small style="font-weight:600;color:var(--gray)"> ${esc(PAY_LABEL[job.pay_type] || '')}</small></div>
+      <div class="pay">${kwacha(job.pay_amount)}<small style="font-weight:600;color:var(--gray)"> ${esc(PAY_LABEL[job.pay_type] || '')}</small> ${statusBadge}</div>
       <div class="job-meta">
-        <span>${icon('pin')}<b>${esc(job.city)}</b>${job.area ? ' · ' + esc(job.area) : ''}${job.distance_km != null ? ` · <b>${esc(fmtKm(job.distance_km))}</b> away` : ''}</span>
+        <span>${icon('pin')}<b>${esc(job.city)}</b>${area ? ' · ' + esc(area) : ''}${job.distance_km != null ? ` · <b>${esc(fmtKm(job.distance_km))}</b> away` : ''}</span>
       </div>
       <div class="job-meta">
         <span>${icon('tag')}${esc(job.category)}</span>
@@ -673,7 +675,7 @@ async function viewJobDetail(id) {
       <h1>${esc(job.title)}</h1>
       <div class="pay">${kwacha(job.pay_amount)}<small> ${esc(PAY_LABEL[job.pay_type] || '')}</small></div>
       <div class="detail-meta">
-        <span>${icon('pin')}${esc(job.city)}${job.area ? ' · ' + esc(job.area) : ''}${job.distance_km != null ? ` · ${esc(fmtKm(job.distance_km))} away` : ''}</span>
+        <span>${icon('pin')}${esc(job.city)}${job.area && job.area.toLowerCase() !== String(job.city || '').toLowerCase() ? ' · ' + esc(job.area) : ''}${job.distance_km != null ? ` · ${esc(fmtKm(job.distance_km))} away` : ''}</span>
         <span>${icon('calendar')}${esc(fmtDate(job.date_needed))}</span>
         <span>${icon('clock')}Posted ${esc(relTime(job.created_at))}</span>
       </div>
@@ -847,7 +849,8 @@ function jobFormHtml(prefill = {}) {
         <select name="pay_type" id="jf-paytype">
           <option value="per_day" ${prefill.pay_type === 'per_day' ? 'selected' : ''}>Per day</option>
           <option value="per_job" ${prefill.pay_type === 'per_job' ? 'selected' : ''}>Per job (fixed)</option>
-          <option value="per_hour" ${prefill.pay_type === 'per_hour' ? 'per_hour' : ''}>Per hour</option>
+          <option value="per_hour" ${prefill.pay_type === 'per_hour' ? 'selected' : ''}>Per hour</option>
+          <option value="per_month" ${prefill.pay_type === 'per_month' ? 'selected' : ''}>Per month</option>
         </select>
       </div>
       <div class="field" style="flex:1">
@@ -1520,6 +1523,11 @@ document.addEventListener('keydown', (e) => {
 (async function boot() {
   const scrim = document.getElementById('drawer-scrim');
   if (scrim) scrim.addEventListener('click', closeDrawer);
+  const drawerClose = document.getElementById('drawer-close');
+  if (drawerClose) {
+    drawerClose.innerHTML = icon('x');
+    drawerClose.addEventListener('click', closeDrawer);
+  }
   const drawerNav = document.getElementById('drawer-nav');
   if (drawerNav) drawerNav.addEventListener('click', (ev) => {
     if (ev.target.closest('a')) closeDrawer();
