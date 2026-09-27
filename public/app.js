@@ -652,11 +652,11 @@ async function viewDashboard() {
     segP.classList.add('active'); segG.classList.remove('active');
     body.innerHTML = loadingHtml();
     try {
-      // Reuse public browse endpoint per status and filter client-side to my jobs.
+      // My Postings: server filters to my jobs (?mine=1) with no radius applied.
       const lists = await Promise.all(
-        ['open', 'filled', 'completed', 'cancelled'].map(s => api('/api/jobs?status=' + s + '&page=1').catch(() => ({ jobs: [] })))
+        ['open', 'filled', 'completed', 'cancelled'].map(s => api('/api/jobs?mine=1&status=' + s + '&page=1').catch(() => ({ jobs: [] })))
       );
-      const mine = lists.flatMap(l => l.jobs).filter(j => j.poster.id === currentUser.id)
+      const mine = lists.flatMap(l => l.jobs)
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
       body.innerHTML = mine.length ? mine.map(jobCard).join('')
         : emptyHtml('📝', 'No postings yet', 'Post your first job and find helping hands fast.', `<a class="btn btn-sm btn-orange" href="#/post">Post a job</a>`);

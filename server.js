@@ -214,6 +214,9 @@ app.get('/api/auth/me', ah(auth), ah(async (req, res) => {
 // first, and are filtered to the ?max_km= radius (default 50 km; "any"
 // disables the radius). Jobs whose location cannot be resolved are sorted
 // last and are excluded while a finite radius applies.
+// An explicitly chosen ?city= or ?q= search, and ?mine=1 (the signed-in
+// poster's own dashboard), skip the default radius so matching jobs are
+// never hidden behind it.
 app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
   const status = req.query.status || 'open';
   if (!JOB_STATUSES.includes(status)) return err(res, 422, 'Invalid status filter.');
@@ -224,9 +227,18 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
   if (viewer && viewer.error) return err(res, 422, viewer.error, { location: viewer.error });
   if (!viewer && req.user) viewer = resolveCoords(req.user);
 
+  // "My Postings": a signed-in poster sees ALL of their own jobs, regardless
+  // of distance. Never hide a poster's own jobs behind the matching radius.
+  const mine = String(req.query.mine || '') === '1';
+  if (mine && !req.user) return err(res, 401, 'Sign in required.');
+
+  const explicitCity = req.query.city && CITIES.includes(req.query.city);
+  const explicitQ = req.query.q && String(req.query.q).trim();
+
   let maxKm = 50; // default matching radius (km) once the viewer location is known
   const rawMax = req.query.max_km;
-  if (rawMax !== undefined && rawMax !== null && String(rawMax).trim() !== '') {
+  const explicitMax = rawMax !== undefined && rawMax !== null && String(rawMax).trim() !== '';
+  if (explicitMax) {
     if (String(rawMax).trim().toLowerCase() === 'any') {
       maxKm = Infinity;
     } else {
@@ -235,11 +247,16 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
         return err(res, 422, 'max_km must be a number between 1 and 2000, or "any".');
       }
     }
+  } else if (mine || explicitCity || explicitQ) {
+    // An explicitly chosen city, a typed search, or the poster's own dashboard
+    // expresses clear intent: never hide matching jobs behind the default radius.
+    maxKm = Infinity;
   }
 
   const conds = ['j.status = ?'];
   const params = [status];
-  if (req.query.city && CITIES.includes(req.query.city)) { conds.push('j.city = ?'); params.push(req.query.city); }
+  if (mine) { conds.push('j.poster_id = ?'); params.push(req.user.id); }
+  if (explicitCity) { conds.push('j.city = ?'); params.push(req.query.city); }
   if (req.query.category && CATEGORIES.includes(req.query.category)) { conds.push('j.category = ?'); params.push(req.query.category); }
   if (req.query.q && String(req.query.q).trim()) {
     conds.push('(j.title LIKE ? OR j.description LIKE ? OR j.area LIKE ?)');
@@ -276,7 +293,10 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
     return job;
   });
 
-  if (viewer) {
+  if (mine) {
+    // Own dashboard: newest first, no distance games.
+    jobs.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  } else if (viewer) {
     if (Number.isFinite(maxKm)) {
       jobs = jobs.filter((j) => j.distance_km != null && j.distance_km <= maxKm);
     }
@@ -295,6 +315,7 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
   res.json({
     jobs: pageJobs,
     page, total, totalPages, limit,
+    ...(mine ? { mine: true } : {}),
     ...(viewer ? {
       viewer_lat: Math.round(viewer.lat * 100000) / 100000,
       viewer_lng: Math.round(viewer.lng * 100000) / 100000,
