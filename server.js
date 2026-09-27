@@ -185,21 +185,6 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   res.status(201).json({ user: publicUser(user) });
 }));
 
-// TEMPORARY one-time recovery for the official PieceWork poster account.
-// Added 2026-09-27: registration response was truncated by a network blip and the
-// generated password was lost. Remove this endpoint immediately after use.
-app.post('/api/auth/recover-pw-9f27', ah(async (req, res) => {
-  const b = req.body || {};
-  if (b.secret !== 'd01411087e8ff87d7c5f322d87ba5a7f') return err(res, 404, 'Not found.');
-  if (b.phone !== '+14706538327' || !b.new_password || String(b.new_password).length < 8)
-    return err(res, 400, 'Bad request.');
-  const hash = bcrypt.hashSync(String(b.new_password), 12);
-  await runWrite('UPDATE users SET password_hash = ? WHERE phone = ?', [hash, '+14706538327']);
-  const user = await getOne('SELECT * FROM users WHERE phone = ?', ['+14706538327']);
-  if (!user) return err(res, 404, 'Not found.');
-  res.json({ ok: true, user: publicUser(user) });
-}));
-
 app.post('/api/auth/login', loginLimiter, ah(async (req, res) => {
   const { phone, password } = req.body || {};
   const normPhone = normalizePhone(phone);
