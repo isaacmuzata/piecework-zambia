@@ -299,6 +299,7 @@ function renderChrome() {
   if (currentUser) {
     items.push(['#/dashboard', 'clipboard', 'My Gigs']);
     items.push(['#/profile', 'user', 'Profile']);
+    if (currentUser.is_admin) items.push(['#/admin', 'shield', 'Admin']);
   }
   items.push(['#/how', 'help', 'Help & Support']);
   nav.innerHTML = items.map(([href, ic, label]) =>
@@ -1655,6 +1656,52 @@ function viewHow() {
   </div></div>`;
 }
 
+/** Admin — self-serve stats, Zac only. */
+async function viewAdmin() {
+  if (!requireAuth('#/admin')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Admin</h1>
+    <p class="page-sub">PieceWork Zambia at a glance.</p>
+    <div id="admin-body">${loadingHtml('Loading stats…')}</div>
+  </div></div>`;
+  const body = document.getElementById('admin-body');
+  try {
+    const s = await api('/api/admin/stats');
+    const stat = (label, val) => `<div class="card stat-card"><div class="big">${val}</div><div class="small muted">${label}</div></div>`;
+    const openJobs = s.jobs_by_status.open || 0;
+    body.innerHTML = `
+      <div class="stat-grid">
+        ${stat('Total signups', s.users)}
+        ${stat('Applications', s.applications)}
+        ${stat('Open jobs', openJobs)}
+        ${stat('Conversations', s.conversations)}
+        ${stat('Messages sent', s.messages)}
+        ${stat('Looking for Work', s.open_to_work)}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Signups, last 14 days</h3>
+        ${s.signups_by_day.length ? s.signups_by_day.map(r => `
+          <div class="split" style="padding:7px 0;border-bottom:1px solid var(--line)">
+            <span>${esc(r.day)}</span><b>${r.count}</b>
+          </div>`).join('') : '<p class="small muted">No signups in the last 14 days.</p>'}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Applications by status</h3>
+        ${Object.entries(s.applications_by_status).map(([k, v]) => `
+          <div class="split" style="padding:7px 0;border-bottom:1px solid var(--line)">
+            <span style="text-transform:capitalize">${esc(k)}</span><b>${v}</b>
+          </div>`).join('') || '<p class="small muted">None yet.</p>'}
+      </div>`;
+  } catch (e) {
+    body.innerHTML = emptyHtml('info', 'Could not load stats', e.message);
+  }
+}
+
 /* ---------------- router ---------------- */
 const routes = [
   [/^#\/?$/, () => (currentUser ? viewHome() : viewLanding())],
@@ -1671,6 +1718,7 @@ const routes = [
   [/^#\/categories$/, viewCategories],
   [/^#\/messages$/, viewMessages],
   [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],
+  [/^#\/admin$/, viewAdmin],
   [/^#\/saved$/, viewSaved],
   [/^#\/how$/, viewHow],
   [/^#\/about$/, viewAbout],

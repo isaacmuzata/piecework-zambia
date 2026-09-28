@@ -490,3 +490,7 @@ img.avatar{display:block}
 .chat-form input:focus{border-color:var(--green)}
 .chat-form .btn{border-radius:999px;padding:0 18px}
 .chat-form .btn svg{width:18px;height:18px}
+
+/* ---------- admin ---------- */
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.stat-card{margin:0;text-align:center;padding:16px 10px}

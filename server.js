@@ -50,6 +50,12 @@ const CITIES = [
 ];
 const PAY_TYPES = ['per_job', 'per_hour', 'per_day'];
 const JOB_STATUSES = ['open', 'filled', 'completed', 'cancelled'];
+// Admin gate: comma-separated E.164 numbers. Defaults to Zac's official
+// poster number so the admin page works without extra Render config;
+// override with the ADMIN_PHONES env var any time.
+const ADMIN_PHONES = (process.env.ADMIN_PHONES || '+14706538327')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+function isAdmin(user) { return !!user && ADMIN_PHONES.includes(user.phone); }
 
 // ---------------------------------------------------------------- helpers
 const err = (res, code, message, fields) =>
@@ -105,7 +111,7 @@ function publicUser(row) {
   return {
     id: row.id, name: row.name, phone: row.phone, city: row.city,
     bio: row.bio || '', skills: row.skills || '', avatar: row.avatar || '',
-    open_to_work: !!row.open_to_work,
+    open_to_work: !!row.open_to_work, is_admin: isAdmin(row),
     rating_avg: row.rating_avg || 0, rating_count: row.rating_count || 0,
     lat: row.lat != null ? Number(row.lat) : null,
     lng: row.lng != null ? Number(row.lng) : null,
@@ -724,6 +730,37 @@ app.post('/api/reviews', ah(auth), ah(async (req, res) => {
       args: [rid, rid, rid] },
   ], 'write');
   res.status(201).json({ ok: true });
+}));
+
+// ---------------------------------------------------------------- admin stats
+// Simple self-serve dashboard for Zac: signups, applications, jobs, messages.
+// Locked to ADMIN_PHONES.
+app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const [
+    userCount, signupsByDay, appCount, appsByStatus,
+    jobsByStatus, convCount, msgCount, otwCount,
+  ] = await Promise.all([
+    getOne('SELECT COUNT(*) AS c FROM users'),
+    getAll(`SELECT date(created_at) AS d, COUNT(*) AS c FROM users
+            WHERE created_at >= date('now', '-13 days') GROUP BY d ORDER BY d`),
+    getOne(`SELECT COUNT(*) AS c FROM applications WHERE status != 'withdrawn'`),
+    getAll(`SELECT status, COUNT(*) AS c FROM applications GROUP BY status`),
+    getAll(`SELECT status, COUNT(*) AS c FROM jobs GROUP BY status`),
+    getOne('SELECT COUNT(*) AS c FROM conversations'),
+    getOne('SELECT COUNT(*) AS c FROM messages'),
+    getOne('SELECT COUNT(*) AS c FROM users WHERE open_to_work = 1'),
+  ]);
+  res.json({
+    users: Number(userCount.c || 0),
+    signups_by_day: signupsByDay.map((r) => ({ day: r.d, count: Number(r.c) })),
+    applications: Number(appCount.c || 0),
+    applications_by_status: Object.fromEntries(appsByStatus.map((r) => [r.status, Number(r.c)])),
+    jobs_by_status: Object.fromEntries(jobsByStatus.map((r) => [r.status, Number(r.c)])),
+    conversations: Number(convCount.c || 0),
+    messages: Number(msgCount.c || 0),
+    open_to_work: Number(otwCount.c || 0),
+  });
 }));
 
 // ---------------------------------------------------------------- messaging
