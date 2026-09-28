@@ -726,6 +726,132 @@ app.post('/api/reviews', ah(auth), ah(async (req, res) => {
   res.status(201).json({ ok: true });
 }));
 
+// ---------------------------------------------------------------- messaging
+// Client <-> worker chat, scoped to a job application. Only the poster
+// (client) can start a conversation, and only with a worker who applied —
+// workers reply once the poster messages first. This keeps unsolicited
+// contact out.
+const msgLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true });
+
+function convSummary(c, meId) {
+  const otherIsPoster = c.poster_id === meId;
+  return {
+    id: c.id, job_id: c.job_id, job_title: c.job_title,
+    other_id: otherIsPoster ? c.worker_id : c.poster_id,
+    other_name: otherIsPoster ? c.worker_name : c.poster_name,
+    other_avatar: otherIsPoster ? c.worker_avatar : c.poster_avatar,
+    last_body: c.last_body || '', last_at: c.last_at || c.updated_at,
+    last_sender: c.last_sender || null,
+    unread: Number(c.unread || 0),
+    updated_at: c.updated_at,
+  };
+}
+
+// List my conversations, newest first, with last message + unread count.
+app.get('/api/conversations', ah(auth), ah(async (req, res) => {
+  const me = req.user.id;
+  const rows = await getAll(`
+    SELECT c.*, j.title AS job_title,
+      p.name AS poster_name, p.avatar AS poster_avatar,
+      w.name AS worker_name, w.avatar AS worker_avatar,
+      (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body,
+      (SELECT created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_at,
+      (SELECT sender_id FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_sender,
+      (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_id != ? AND m.read_at IS NULL) AS unread
+    FROM conversations c
+    JOIN jobs j ON j.id = c.job_id
+    JOIN users p ON p.id = c.poster_id
+    JOIN users w ON w.id = c.worker_id
+    WHERE c.poster_id = ? OR c.worker_id = ?
+    ORDER BY c.updated_at DESC
+  `, [me, me, me]);
+  res.json({ conversations: rows.map((c) => convSummary(c, me)) });
+}));
+
+// Total unread messages across all my conversations (for the tab badge).
+app.get('/api/messages/unread', ah(auth), ah(async (req, res) => {
+  const me = req.user.id;
+  const row = await getOne(`
+    SELECT COUNT(*) AS c FROM messages m
+    JOIN conversations c ON c.id = m.conversation_id
+    WHERE (c.poster_id = ? OR c.worker_id = ?) AND m.sender_id != ? AND m.read_at IS NULL
+  `, [me, me, me]);
+  res.json({ unread: Number(row.c || 0) });
+}));
+
+// Open (find-or-create) a conversation about a job application.
+// Only the poster (client) can start a conversation, and only with a worker
+// who applied. Once started, both sides can reply.
+app.post('/api/conversations', ah(auth), ah(async (req, res) => {
+  const me = req.user.id;
+  const jid = parseInt(req.body && req.body.job_id, 10);
+  const wid = parseInt(req.body && req.body.worker_id, 10);
+  if (!jid || !wid) return err(res, 422, 'Job and worker are required.');
+  const job = await getOne('SELECT id, poster_id, title FROM jobs WHERE id = ?', [jid]);
+  if (!job) return err(res, 404, 'Job not found.');
+  if (me !== job.poster_id) return err(res, 403, 'Only the poster can start the conversation.');
+  const appRow = await getOne(
+    'SELECT id FROM applications WHERE job_id = ? AND worker_id = ? AND status != ?',
+    [jid, wid, 'withdrawn']
+  );
+  if (!appRow) return err(res, 403, 'You can only message about an active application.');
+  let conv = await getOne('SELECT id FROM conversations WHERE job_id = ? AND worker_id = ?', [jid, wid]);
+  if (!conv) {
+    const info = await runWrite(
+      'INSERT INTO conversations (job_id, poster_id, worker_id) VALUES (?, ?, ?)',
+      [jid, job.poster_id, wid]
+    );
+    conv = { id: insertId(info) };
+  }
+  res.status(201).json({ conversation_id: conv.id });
+}));
+
+// Read one conversation (marks the other party's messages as read).
+app.get('/api/conversations/:id', ah(auth), ah(async (req, res) => {
+  const me = req.user.id;
+  const cid = parseInt(req.params.id, 10);
+  const conv = await getOne(`
+    SELECT c.*, j.title AS job_title,
+      p.name AS poster_name, p.avatar AS poster_avatar,
+      w.name AS worker_name, w.avatar AS worker_avatar
+    FROM conversations c
+    JOIN jobs j ON j.id = c.job_id
+    JOIN users p ON p.id = c.poster_id
+    JOIN users w ON w.id = c.worker_id
+    WHERE c.id = ?
+  `, [cid]);
+  if (!conv) return err(res, 404, 'Conversation not found.');
+  if (conv.poster_id !== me && conv.worker_id !== me) return err(res, 403, 'Not your conversation.');
+  const messages = await getAll(
+    'SELECT id, sender_id, body, created_at FROM messages WHERE conversation_id = ? ORDER BY id ASC LIMIT 300',
+    [cid]
+  );
+  await runWrite(
+    'UPDATE messages SET read_at = CURRENT_TIMESTAMP WHERE conversation_id = ? AND sender_id != ? AND read_at IS NULL',
+    [cid, me]
+  );
+  res.json({ conversation: convSummary(conv, me), messages });
+}));
+
+// Send a message in a conversation.
+app.post('/api/conversations/:id/messages', ah(auth), msgLimiter, ah(async (req, res) => {
+  const me = req.user.id;
+  const cid = parseInt(req.params.id, 10);
+  const body = String((req.body && req.body.body) || '').trim();
+  if (!body) return err(res, 422, 'Message cannot be empty.');
+  if (body.length > 1000) return err(res, 422, 'Keep messages under 1000 characters.');
+  const conv = await getOne('SELECT id, poster_id, worker_id FROM conversations WHERE id = ?', [cid]);
+  if (!conv) return err(res, 404, 'Conversation not found.');
+  if (conv.poster_id !== me && conv.worker_id !== me) return err(res, 403, 'Not your conversation.');
+  const info = await runWrite(
+    'INSERT INTO messages (conversation_id, sender_id, body) VALUES (?, ?, ?)',
+    [cid, me, body]
+  );
+  await runWrite('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [cid]);
+  const msg = await getOne('SELECT id, sender_id, body, created_at FROM messages WHERE id = ?', [insertId(info)]);
+  res.status(201).json({ message: msg });
+}));
+
 // ---------------------------------------------------------------- frontend
 // The service worker script itself must never be HTTP-cached: browsers check
 // for SW updates against the HTTP cache, so a cached sw.js would delay every

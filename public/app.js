@@ -81,6 +81,7 @@ const tabbar = document.getElementById('tabbar');
 const topbarAuth = document.getElementById('topbar-auth');
 let currentUser = null;
 let browseState = { q: '', city: '', category: '', page: 1, maxKm: 50 };
+let chatTimer = null;
 
 /* ---------------- saved jobs (on this device) ---------------- */
 function getSaved() {
@@ -312,7 +313,7 @@ function renderChrome() {
     { href: '#/', label: 'Home', ic: 'home', match: (hh) => hh === '#/' || hh === '' },
     { href: '#/jobs', label: 'Jobs', ic: 'briefcase', match: (hh) => hh === '#/jobs' || hh.startsWith('#/job/') || hh.startsWith('#/categories') || hh.startsWith('#/saved') },
     { href: '#/post', label: 'Post', fab: true, match: (hh) => hh.startsWith('#/post') },
-    { href: '#/messages', label: 'Messages', ic: 'message', match: (hh) => hh.startsWith('#/messages') },
+    { href: '#/messages', label: 'Messages', ic: 'message', match: (hh) => hh.startsWith('#/messages') || hh.startsWith('#/chat/') },
     {
       href: currentUser ? '#/profile' : '#/login', label: currentUser ? 'Profile' : 'Sign in', ic: 'user',
       match: (hh) => hh.startsWith('#/profile') || hh.startsWith('#/user/') || hh.startsWith('#/login') || hh.startsWith('#/register') || hh.startsWith('#/dashboard'),
@@ -320,8 +321,16 @@ function renderChrome() {
   ];
   tabbar.innerHTML = tabs.map(t => t.fab
     ? `<a href="${t.href}" class="tab-post ${t.match(h) ? 'active' : ''}" aria-label="Post a job"><span class="post-fab">${icon('plus')}</span><span>${t.label}</span></a>`
-    : `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}">${icon(t.ic)}<span>${t.label}</span></a>`
+    : `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}">${icon(t.ic)}<span>${t.label}</span>${t.href === '#/messages' ? '<span class="tab-badge" id="msg-badge" hidden></span>' : ''}</a>`
   ).join('');
+  if (currentUser) {
+    api('/api/messages/unread').then(({ unread }) => {
+      const b = document.getElementById('msg-badge');
+      if (!b) return;
+      if (unread > 0) { b.textContent = unread > 9 ? '9+' : unread; b.hidden = false; }
+      else b.hidden = true;
+    }).catch(() => {});
+  }
 }
 
 function requireAuth(next) {
@@ -808,6 +817,7 @@ async function viewJobDetail(id) {
   });
   document.querySelectorAll('[data-accept]').forEach(btn => btn.addEventListener('click', () => decideApplication(btn.dataset.accept, 'accepted')));
   document.querySelectorAll('[data-decline]').forEach(btn => btn.addEventListener('click', () => decideApplication(btn.dataset.decline, 'declined')));
+  document.querySelectorAll('[data-msg]').forEach(btn => btn.addEventListener('click', () => openChat(id, btn.dataset.msg, btn)));
   document.querySelectorAll('[data-review-btn]').forEach(btn => btn.addEventListener('click', async () => {
     const forId = btn.dataset.reviewBtn;
     const sel = document.querySelector(`select[data-review-for="${forId}"]`);
@@ -839,7 +849,12 @@ async function viewJobDetail(id) {
       ${a.status === 'pending' ? `<div class="btn-row">
         <button class="btn btn-sm btn-primary" data-accept="${a.id}">${icon('check')}Accept</button>
         <button class="btn btn-sm btn-danger" data-decline="${a.id}">Decline</button>
-      </div>
+      </div>` : ''}
+      ${(a.status === 'pending' || a.status === 'accepted') ? `
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn btn-sm btn-outline" data-msg="${a.worker_id}">${icon('message')}Message</button>
+      </div>` : ''}
+      ${a.status === 'pending' ? `
       <div style="margin-top:8px"><a class="whatsapp-btn" href="${waLink(a.worker_phone, 'Hello ' + a.worker_name + ', about your application for "' + job.title + '" on PieceWork Zambia…')}" target="_blank" rel="noopener">${icon('message')}WhatsApp ${esc(a.worker_name.split(' ')[0])}</a></div>` : ''}
     </div>`;
   }
@@ -1316,13 +1331,128 @@ async function viewSaved() {
 }
 
 /** Messages — honest placeholder until in-app chat ships. */
-function viewMessages() {
+/** Messages — conversation list. */
+async function viewMessages() {
+  if (!requireAuth('#/messages')) return;
   app.innerHTML = `
   <div class="view"><div class="page">
     <h1 class="page-title">Messages</h1>
-    <p class="page-sub">Your conversations, in one place.</p>
-    ${emptyHtml('message', 'Messages are coming soon', 'In-app chat is on the way. For now, reach posters and workers instantly on WhatsApp from any job or profile.', `<a class="btn btn-sm btn-primary" href="#/jobs">Browse jobs</a>`)}
+    <p class="page-sub">Your conversations with posters and workers, about your jobs.</p>
+    <div id="conv-list">${loadingHtml('Loading conversations…')}</div>
   </div></div>`;
+  const list = document.getElementById('conv-list');
+  try {
+    const { conversations } = await api('/api/conversations');
+    if (!conversations.length) {
+      list.innerHTML = emptyHtml('message', 'No conversations yet',
+        'Posters message their applicants here. Applied for a job? The poster will message you here first.',
+        `<a class="btn btn-sm btn-primary" href="#/jobs">Browse jobs</a>`);
+      return;
+    }
+    list.innerHTML = conversations.map(c => `
+      <a class="conv-card" href="#/chat/${c.id}">
+        ${avatarHtml({ name: c.other_name, avatar: c.other_avatar }, 'md')}
+        <div class="conv-body">
+          <div class="conv-top"><b>${esc(c.other_name)}</b><span class="small muted">${esc(relTime(c.last_at))}</span></div>
+          <div class="small muted">${esc(c.job_title)}</div>
+          <div class="conv-preview">${c.last_body ? esc(c.last_body) : '<span class="small muted">Say hello…</span>'}</div>
+        </div>
+        ${c.unread ? `<span class="conv-unread">${c.unread}</span>` : ''}
+      </a>`).join('');
+  } catch (e) {
+    list.innerHTML = emptyHtml('info', 'Could not load messages', e.message);
+  }
+}
+
+/** Open (find-or-create) a conversation, then jump to it. */
+async function openChat(jobId, workerId, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const { conversation_id } = await api('/api/conversations', {
+      method: 'POST', body: JSON.stringify({ job_id: jobId, worker_id: workerId }),
+    });
+    location.hash = '#/chat/' + conversation_id;
+  } catch (e) { toast(e.message, true); if (btn) btn.disabled = false; }
+}
+
+/** Chat thread. */
+async function viewChat(id) {
+  if (!requireAuth('#/chat/' + id)) return;
+  app.innerHTML = `
+  <div class="view"><div class="page chat-page">
+    <div class="chat-head">
+      <a class="icon-btn" href="#/messages" aria-label="Back to messages">${icon('back')}</a>
+      <div id="chat-peer" style="flex:1;min-width:0">${loadingHtml()}</div>
+    </div>
+    <div id="chat-msgs" class="chat-msgs">${loadingHtml('Loading messages…')}</div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" maxlength="1000" placeholder="Type a message…" autocomplete="off" aria-label="Type a message">
+      <button class="btn btn-primary" type="submit" aria-label="Send">${icon('send')}</button>
+    </form>
+  </div></div>`;
+  const msgsEl = document.getElementById('chat-msgs');
+  const peerEl = document.getElementById('chat-peer');
+  const form = document.getElementById('chat-form');
+  const input = document.getElementById('chat-input');
+  let lastMsgId = 0;
+  let peerId = null;
+
+  function bubble(m) {
+    const mine = m.sender_id === currentUser.id;
+    return `<div class="msg ${mine ? 'mine' : 'theirs'}"><div class="msg-bubble">${esc(m.body)}</div>
+      <div class="msg-time">${esc(relTime(m.created_at))}</div></div>`;
+  }
+  function scrollBottom() { msgsEl.scrollTop = msgsEl.scrollHeight; }
+
+  async function load(initial) {
+    try {
+      const { conversation, messages } = await api('/api/conversations/' + id);
+      peerId = conversation.other_id;
+      peerEl.innerHTML = `
+        <a href="#/user/${conversation.other_id}" style="display:flex;align-items:center;gap:10px;min-width:0">
+          ${avatarHtml({ name: conversation.other_name, avatar: conversation.other_avatar }, 'sm')}
+          <span style="min-width:0"><b style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(conversation.other_name)}</b>
+          <span class="small muted" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(conversation.job_title)}</span></span>
+        </a>`;
+      if (initial) {
+        msgsEl.innerHTML = messages.length ? messages.map(bubble).join('')
+          : `<div class="empty" style="padding:24px"><p>Start the conversation — agree on the details, time, and pay.</p></div>`;
+        lastMsgId = messages.length ? messages[messages.length - 1].id : 0;
+        scrollBottom();
+      } else if (messages.length && messages[messages.length - 1].id !== lastMsgId) {
+        const fresh = messages.filter(m => m.id > lastMsgId);
+        if (fresh.length) {
+          msgsEl.querySelector('.empty')?.remove();
+          msgsEl.insertAdjacentHTML('beforeend', fresh.map(bubble).join(''));
+          lastMsgId = messages[messages.length - 1].id;
+          const nearBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
+          if (nearBottom || fresh.some(m => m.sender_id === currentUser.id)) scrollBottom();
+        }
+      }
+      renderChrome();
+    } catch (e) {
+      if (initial) msgsEl.innerHTML = emptyHtml('info', 'Could not load chat', e.message);
+    }
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    try {
+      const { message } = await api('/api/conversations/' + id + '/messages', {
+        method: 'POST', body: JSON.stringify({ body: text }),
+      });
+      msgsEl.querySelector('.empty')?.remove();
+      msgsEl.insertAdjacentHTML('beforeend', bubble(message));
+      lastMsgId = message.id;
+      scrollBottom();
+    } catch (err2) { toast(err2.message, true); input.value = text; }
+  });
+
+  await load(true);
+  chatTimer = setInterval(() => load(false), 4000);
 }
 
 /** Sign in. */
@@ -1540,12 +1670,14 @@ const routes = [
   [/^#\/register$/, viewRegister],
   [/^#\/categories$/, viewCategories],
   [/^#\/messages$/, viewMessages],
+  [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],
   [/^#\/saved$/, viewSaved],
   [/^#\/how$/, viewHow],
   [/^#\/about$/, viewAbout],
 ];
 
 async function router() {
+  if (chatTimer) { clearInterval(chatTimer); chatTimer = null; }
   renderChrome();
   const hash = location.hash || '#/';
   window.scrollTo(0, 0);

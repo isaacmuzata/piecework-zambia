@@ -79,6 +79,27 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_apps_job ON applications(job_id)`,
   `CREATE INDEX IF NOT EXISTS idx_apps_worker ON applications(worker_id)`,
   `CREATE INDEX IF NOT EXISTS idx_reviews_reviewee ON reviews(reviewee_id)`,
+  // Messaging between posters and workers, scoped to a job application.
+  `CREATE TABLE IF NOT EXISTS conversations (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    poster_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    worker_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (job_id, worker_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    sender_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body            TEXT NOT NULL,
+    read_at         TEXT,
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_conv_poster ON conversations(poster_id, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_conv_worker ON conversations(worker_id, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id, created_at)`,
 ];
 
 // Distance matching: precise coordinates are optional on users and jobs.
