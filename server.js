@@ -105,6 +105,7 @@ function publicUser(row) {
   return {
     id: row.id, name: row.name, phone: row.phone, city: row.city,
     bio: row.bio || '', skills: row.skills || '', avatar: row.avatar || '',
+    open_to_work: !!row.open_to_work,
     rating_avg: row.rating_avg || 0, rating_count: row.rating_count || 0,
     lat: row.lat != null ? Number(row.lat) : null,
     lng: row.lng != null ? Number(row.lng) : null,
@@ -176,9 +177,10 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   if (exists) return err(res, 409, 'This number is already registered. Try signing in.');
 
   const hash = bcrypt.hashSync(String(password), 12);
+  const openToWork = (req.body && req.body.open_to_work) ? 1 : 0;
   const info = await runWrite(
-    'INSERT INTO users (name, phone, password_hash, city) VALUES (?, ?, ?, ?)',
-    [String(name).trim(), normPhone, hash, city]
+    'INSERT INTO users (name, phone, password_hash, city, open_to_work) VALUES (?, ?, ?, ?, ?)',
+    [String(name).trim(), normPhone, hash, city, openToWork]
   );
   const user = await getOne('SELECT * FROM users WHERE id = ?', [insertId(info)]);
   setAuthCookie(res, signToken(user.id));
@@ -608,6 +610,16 @@ app.patch('/api/applications/:id', ah(auth), ah(async (req, res) => {
 }));
 
 // ---------------------------------------------------------------- users
+app.get('/api/workers', ah(async (req, res) => {
+  const city = (req.query.city || '').trim();
+  const where = city ? 'WHERE open_to_work = 1 AND city = ?' : 'WHERE open_to_work = 1';
+  const params = city ? [city] : [];
+  const rows = await getAll(
+    `SELECT * FROM users ${where} ORDER BY created_at DESC LIMIT 100`, params
+  );
+  res.json({ workers: rows.map(publicUser) });
+}));
+
 app.get('/api/users/:id', ah(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const user = await getOne('SELECT * FROM users WHERE id = ?', [id]);
@@ -640,6 +652,7 @@ app.patch('/api/users/me', ah(auth), ah(async (req, res) => {
   }
   if ('bio' in b) { updates.push('bio = ?'); params.push(String(b.bio).slice(0, 500)); }
   if ('skills' in b) { updates.push('skills = ?'); params.push(String(b.skills).slice(0, 300)); }
+  if ('open_to_work' in b) { updates.push('open_to_work = ?'); params.push(b.open_to_work ? 1 : 0); }
   if ('avatar' in b) {
     const av = String(b.avatar || '');
     if (av && !/^data:image\/(jpeg|png|webp);base64,/.test(av)) fields.avatar = 'Avatar must be a JPEG, PNG or WebP image.';

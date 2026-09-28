@@ -89,6 +89,7 @@ const OPTIONAL_COLUMNS = [
   ['jobs', 'lat', 'REAL'],
   ['jobs', 'lng', 'REAL'],
   ['users', 'avatar', 'TEXT'],
+  ['users', 'open_to_work', 'INTEGER DEFAULT 0'],
 ];
 
 async function init() {

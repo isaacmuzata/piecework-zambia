@@ -290,6 +290,7 @@ function renderChrome() {
   const items = [
     ['#/', 'home', 'Home'],
     ['#/jobs', 'briefcase', 'Find Jobs'],
+    ['#/workers', 'users', 'Looking for Work'],
     ['#/post', 'plus', 'Post a Job'],
     ['#/categories', 'grid', 'Categories'],
     ['#/messages', 'message', 'Messages'],
@@ -557,6 +558,59 @@ async function viewBrowse() {
       results.innerHTML = emptyHtml('info', 'Could not load jobs', e.message);
     }
   }
+}
+
+/** Looking for Work — public directory of opted-in worker profiles. */
+function workerCard(w) {
+  const skillList = String(w.skills || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 4);
+  return `
+  <article class="job-card" data-worker="${w.id}" tabindex="0" role="link" aria-label="${esc(w.name)}">
+    ${avatarHtml(w, 'md')}
+    <div class="job-body">
+      <h3>${esc(w.name)}</h3>
+      <div class="job-meta"><span>${icon('pin')}<b>${esc(w.city)}</b></span>${w.rating_count ? `<span>${stars(w.rating_avg)} <b>${Number(w.rating_avg).toFixed(1)}</b></span>` : ''}</div>
+      ${skillList.length ? `<div class="job-meta"><span>${icon('tag')}${skillList.map(esc).join(' · ')}</span></div>` : ''}
+      ${w.bio ? `<p class="worker-bio">${esc(w.bio)}</p>` : ''}
+      <div style="margin-top:8px"><a class="whatsapp-btn" href="${waLink(w.phone, 'Hello ' + w.name + ', I found your profile on the PieceWork Zambia Looking for Work page.')}" target="_blank" rel="noopener">${icon('message')}WhatsApp ${esc(w.name.split(' ')[0])}</a></div>
+    </div>
+  </article>`;
+}
+
+async function viewWorkers() {
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Looking for Work</h1>
+    <p class="page-sub">Workers who opted in to be found by posters. Tap a card to see the full profile.</p>
+    <div class="field" style="max-width:320px">
+      <select id="wk-city" aria-label="Filter by city"><option value="">All cities</option>${CITIES.map(c => `<option>${esc(c)}</option>`).join('')}</select>
+    </div>
+    <div id="wk-results" class="job-list">${loadingHtml('Loading workers…')}</div>
+  </div></div>`;
+  const results = document.getElementById('wk-results');
+  const sel = document.getElementById('wk-city');
+  async function load() {
+    results.innerHTML = loadingHtml('Loading workers…');
+    try {
+      const q = sel.value ? '?city=' + encodeURIComponent(sel.value) : '';
+      const data = await api('/api/workers' + q);
+      if (!data.workers.length) {
+        results.innerHTML = emptyHtml('users', 'No workers listed yet',
+          'Be the first — tick "I\u2019m looking for work" in your profile settings.',
+          currentUser ? `<a class="btn btn-sm btn-primary" href="#/profile/edit">Update my profile</a>` : `<a class="btn btn-sm btn-primary" href="#/register">Join free</a>`);
+        return;
+      }
+      results.innerHTML = data.workers.map(workerCard).join('');
+      results.querySelectorAll('[data-worker]').forEach(el => {
+        const go = (e) => { if (e.target.closest('a')) return; location.hash = '#/user/' + el.dataset.worker; };
+        el.addEventListener('click', go);
+        el.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(e); });
+      });
+    } catch (e) {
+      results.innerHTML = emptyHtml('info', 'Could not load workers', e.message);
+    }
+  }
+  sel.addEventListener('change', load);
+  load();
 }
 
 /** Job detail — dark header, client card, apply flow. */
@@ -1071,6 +1125,10 @@ function viewProfileEdit() {
           <textarea name="bio" id="pf-bio" maxlength="500" placeholder="Tell posters who you are and what you do best…">${esc(currentUser.bio || '')}</textarea></div>
         <div class="field"><label for="pf-skills">Skills <span class="hint-inline">(comma separated)</span></label>
           <input name="skills" id="pf-skills" maxlength="300" value="${esc(currentUser.skills || '')}" placeholder="e.g. Moving, Cleaning, Painting"></div>
+        <label class="check-row" for="pf-open">
+          <input type="checkbox" name="open_to_work" id="pf-open" value="1" ${currentUser.open_to_work ? 'checked' : ''}>
+          <span><b>I'm looking for work</b><br><span class="hint">Show my profile on the Looking for Work page so posters can find me.</span></span>
+        </label>
         <div class="field">
           <label>Your location</label>
           <div class="hint" id="pf-loc-status">${currentUser.lat != null ? '<b>Location saved</b> — jobs are matched by distance to you in kilometres.' : 'No precise location saved — distance matching uses your city centre.'}</div>
@@ -1120,6 +1178,7 @@ function viewProfileEdit() {
       city: form.city.value,
       bio: form.bio.value.trim(),
       skills: form.skills.value.trim(),
+      open_to_work: form.open_to_work.checked,
     };
     if (newAvatar) payload.avatar = newAvatar;
     try {
@@ -1331,6 +1390,10 @@ function viewRegister() {
           <label for="rg-pass">Password</label>
           <input name="password" id="rg-pass" type="password" autocomplete="new-password" placeholder="At least 8 characters">
         </div>
+        <label class="check-row" for="rg-open">
+          <input type="checkbox" name="open_to_work" id="rg-open" value="1">
+          <span><b>I'm looking for work</b><br><span class="hint">Show my profile on the Looking for Work page so posters can find me. Optional.</span></span>
+        </label>
         <button class="btn btn-primary full" type="submit">Create account</button>
       </form>
     </div>
@@ -1467,6 +1530,7 @@ const routes = [
   [/^#\/?$/, () => (currentUser ? viewHome() : viewLanding())],
   [/^#\/jobs$/, viewBrowse],
   [/^#\/job\/(\d+)$/, (m) => viewJobDetail(m[1])],
+  [/^#\/workers$/, viewWorkers],
   [/^#\/post$/, viewPost],
   [/^#\/dashboard$/, viewDashboard],
   [/^#\/profile\/edit$/, viewProfileEdit],
