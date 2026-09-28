@@ -663,7 +663,7 @@ async function viewJobDetail(id) {
     actionHtml = `<div class="card" style="text-align:center">
       <p style="margin-top:0">Want this job? Sign in to apply.</p>
       <a class="btn btn-primary full" href="#/login">Sign in / Register</a></div>`;
-  } else if (job.my_application) {
+  } else if (job.my_application && job.my_application.status !== 'withdrawn') {
     const s = job.my_application.status;
     actionHtml = `<div class="card"><h3 style="margin-top:0">Your application</h3>
       <p>Status: <span class="badge badge-app-${s}">${esc(s)}</span></p>
@@ -678,6 +678,7 @@ async function viewJobDetail(id) {
       </div>
       <div class="card" id="apply-card">
         <h3 style="margin-top:0">Apply for this job</h3>
+        ${job.my_application ? `<p class="small muted" style="margin-top:0">You withdrew your earlier application. You are welcome to apply again below.</p>` : ''}
         <div class="card-row" style="margin-bottom:12px">
           ${jobThumb(job.category)}
           <div><b>${esc(job.title)}</b><div class="pay" style="font-size:15px">${payText(job)}</div></div>
