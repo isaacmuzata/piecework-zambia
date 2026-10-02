@@ -1217,6 +1217,13 @@ app.get(['/', '/index.html'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: IS_PROD ? '1h' : 0 }));
+// Digital Asset Links for the Android app (TWA verification). Must be served
+// at exactly /.well-known/assetlinks.json (express.static ignores dotfiles).
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.type('application/json');
+  res.sendFile(path.join(__dirname, 'public', '.well-known', 'assetlinks.json'));
+});
 // SPA fallback: anything that isn't /api serves index.html.
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
