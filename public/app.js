@@ -1649,7 +1649,7 @@ function viewAbout() {
     </div>
     <div class="card" style="text-align:center">
       <h3 style="margin-top:0">Meet the founder</h3>
-      <p class="small muted">Isaac “Zac” Muzata · CEO, 2911 IT Services<br><a href="https://2911itservices.com" target="_blank" rel="noopener">2911itservices.com</a></p>
+      <p class="small muted">Isaac “Zac” Muzata · CEO, 2911 IT Services<br><a href="https://2911itservices.com" target="_blank" rel="noopener">2911itservices.com</a><br>Contact: <a href="mailto:info@pieceworkzambia.com">info@pieceworkzambia.com</a></p>
       <a class="btn btn-primary" href="#/register">Join free today</a>
     </div>
   </div></div>`;
