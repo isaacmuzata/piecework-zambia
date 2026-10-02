@@ -4,3 +4,8 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 .DS_Store
+# Android signing keys - NEVER commit
+*.keystore
+*.jks
+.keystore-pass
+play-store/.keystore-pass
