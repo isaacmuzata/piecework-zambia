@@ -1763,6 +1763,9 @@ async function viewAdmin() {
   <div class="view"><div class="page">
     <h1 class="page-title">Admin</h1>
     <p class="page-sub">PieceWork Zambia at a glance.</p>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
+    </div>
     <div id="admin-body">${loadingHtml('Loading stats…')}</div>
   </div></div>`;
   const body = document.getElementById('admin-body');
@@ -1856,6 +1859,67 @@ async function loadGiveawayAdmin() {
     } catch (err2) { toast(err2.message, true); }
     btn.disabled = false;
   });
+}
+
+/** Admin referral monitor — signups, leaderboard, recent joins, cheats. */
+async function viewReferralDashboard() {
+  if (!requireAuth('#/admin/referrals')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Referral monitor</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <div id="refmon-body">${loadingHtml('Loading…')}</div>
+  </div></div>`;
+  const body = document.getElementById('refmon-body');
+  const fmtDate = (s) => {
+    try { return new Date(String(s).replace(' ', 'T')).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return s; }
+  };
+  try {
+    const s = await api('/api/admin/referrals/summary');
+    const stat = (label, val) => `<div class="card stat-card"><div class="big">${val}</div><div class="small muted">${label}</div></div>`;
+    body.innerHTML = `
+      <div class="stat-grid">
+        ${stat('Total signups', s.total_signups)}
+        ${stat('Today', s.signups_today)}
+        ${stat('This week', s.signups_this_week)}
+        ${stat('Via invite links', s.referred_signups)}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">🏆 Referral leaderboard</h3>
+        ${s.leaderboard.length ? s.leaderboard.map((r, i) => `
+          <div class="split" style="padding:8px 0;border-bottom:1px solid var(--line)">
+            <span>${i < 3 ? ['🥇', '🥈', '🥉'][i] + ' ' : ''}<b>${esc(r.name)}</b> <span class="small muted">${esc(r.city)}</span></span>
+            <b>${r.referrals} referral${r.referrals === 1 ? '' : 's'}</b>
+          </div>`).join('') : '<p class="small muted">Nobody has referred anyone yet.</p>'}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Latest signups</h3>
+        ${s.recent.length ? s.recent.map((r) => `
+          <div class="split" style="padding:8px 0;border-bottom:1px solid var(--line);align-items:flex-start">
+            <div><b>${esc(r.name)}</b> <span class="small muted">${esc(r.city)}</span><br>
+              <span class="small muted">${fmtDate(r.created_at)}${r.referrer !== '—' ? ` • invited by <b>${esc(r.referrer)}</b>` : ''}</span>
+              ${r.disqualified ? `<br><span class="small" style="color:#b91c1c;font-weight:700">⛔ disqualified (duplicate IP/device)</span>` : ''}
+            </div>
+            <span class="small muted">${esc(r.phone)}</span>
+          </div>`).join('') : '<p class="small muted">No signups yet.</p>'}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">⛔ Disqualified (${s.disqualified.length})</h3>
+        <p class="small muted" style="margin-top:-6px">Same IP or device as another account — out of the draw.</p>
+        ${s.disqualified.length ? s.disqualified.map((r) => `
+          <div class="split" style="padding:8px 0;border-bottom:1px solid var(--line)">
+            <span><b>${esc(r.name)}</b> <span class="small muted">${esc(r.city)} • ${esc(r.signup_ip)}</span></span>
+            <span class="small muted">${fmtDate(r.created_at)}</span>
+          </div>`).join('') : '<p class="small muted">None. Clean so far.</p>'}
+      </div>`;
+  } catch (e) {
+    body.innerHTML = emptyHtml('info', 'Could not load', e.message);
+  }
 }
 
 /** Live draw — admin only, built for screensharing on Facebook Live. */
@@ -1982,6 +2046,7 @@ const routes = [
   [/^#\/register$/, viewRegister],
   [/^#\/invite$/, viewInvite],
   [/^#\/admin\/draw\/(\d+)$/, (m) => viewGiveawayDraw(m[1])],
+  [/^#\/admin\/referrals$/, viewReferralDashboard],
   [/^#\/categories$/, viewCategories],
   [/^#\/messages$/, viewMessages],
   [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],

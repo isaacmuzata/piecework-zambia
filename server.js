@@ -932,6 +932,51 @@ function requireAdmin(req, res) {
   return true;
 }
 
+// Admin referral monitor: signups, leaderboard, recent joins, disqualified.
+app.get('/api/admin/referrals/summary', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const [
+    total, today, week, withRefs,
+    leaderboard, recent, disqualified,
+  ] = await Promise.all([
+    getOne('SELECT COUNT(*) AS c FROM users'),
+    getOne(`SELECT COUNT(*) AS c FROM users WHERE date(created_at) = date('now')`),
+    getOne(`SELECT COUNT(*) AS c FROM users WHERE created_at >= date('now', '-7 days')`),
+    getOne('SELECT COUNT(*) AS c FROM users WHERE referred_by IS NOT NULL'),
+    getAll(
+      `SELECT u.name, u.phone, u.city, COUNT(r.id) AS referrals
+       FROM users u JOIN users r ON r.referred_by = u.id
+       GROUP BY u.id ORDER BY referrals DESC, u.created_at ASC LIMIT 50`
+    ),
+    getAll(
+      `SELECT u.name, u.phone, u.city, u.created_at, u.ip_duplicate, p.name AS referrer_name
+       FROM users u LEFT JOIN users p ON p.id = u.referred_by
+       ORDER BY u.created_at DESC LIMIT 30`
+    ),
+    getAll(
+      `SELECT name, phone, city, created_at, signup_ip FROM users
+       WHERE COALESCE(ip_duplicate, 0) = 1 ORDER BY created_at DESC LIMIT 50`
+    ),
+  ]);
+  res.json({
+    total_signups: Number(total.c || 0),
+    signups_today: Number(today.c || 0),
+    signups_this_week: Number(week.c || 0),
+    referred_signups: Number(withRefs.c || 0),
+    leaderboard: leaderboard.map((r) => ({
+      name: r.name, phone: r.phone, city: r.city, referrals: Number(r.referrals),
+    })),
+    recent: recent.map((r) => ({
+      name: r.name, phone: r.phone, city: r.city, created_at: r.created_at,
+      referrer: r.referrer_name || '—', disqualified: !!r.ip_duplicate,
+    })),
+    disqualified: disqualified.map((r) => ({
+      name: r.name, phone: r.phone, city: r.city,
+      created_at: r.created_at, signup_ip: r.signup_ip || '—',
+    })),
+  });
+}));
+
 app.get('/api/admin/giveaways', ah(auth), ah(async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const rows = await getAll(
