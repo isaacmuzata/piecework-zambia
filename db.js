@@ -8,6 +8,7 @@
  */
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { createClient } = require('@libsql/client');
 
 const dataDir = path.join(__dirname, 'data');
@@ -100,6 +101,27 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_conv_poster ON conversations(poster_id, updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_conv_worker ON conversations(worker_id, updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS giveaways (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    title         TEXT NOT NULL,
+    prize_kwacha  INTEGER NOT NULL,
+    starts_at     TEXT NOT NULL,
+    ends_at       TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'active',
+    winner_user_id INTEGER NULL REFERENCES users(id),
+    drawn_at      TEXT NULL,
+    drawn_by      TEXT NULL,
+    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS giveaway_draws (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    giveaway_id    INTEGER NOT NULL REFERENCES giveaways(id),
+    winner_user_id INTEGER NOT NULL REFERENCES users(id),
+    total_entries  INTEGER NOT NULL,
+    entries_json   TEXT NOT NULL,
+    drawn_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    drawn_by       TEXT NOT NULL
+  )`,
 ];
 
 // Distance matching: precise coordinates are optional on users and jobs.
@@ -111,6 +133,11 @@ const OPTIONAL_COLUMNS = [
   ['jobs', 'lng', 'REAL'],
   ['users', 'avatar', 'TEXT'],
   ['users', 'open_to_work', 'INTEGER DEFAULT 0'],
+  ['users', 'referral_code', 'TEXT'],
+  ['users', 'referred_by', 'INTEGER'],
+  ['users', 'device_id', 'TEXT'],
+  ['users', 'signup_ip', 'TEXT'],
+  ['users', 'ip_duplicate', 'INTEGER DEFAULT 0'],
 ];
 
 async function init() {
@@ -176,6 +203,27 @@ async function init() {
     `UPDATE jobs SET pay_type = 'per_month'
      WHERE pay_type = 'per_job' AND description LIKE '%per month%'`
   );
+  // Migration (2026-10-01): referral codes for the giveaway system.
+  // Backfill a unique 6-char code for every user that lacks one.
+  // Idempotent: skipped once all users have codes.
+  const missing = await client.execute(`SELECT id FROM users WHERE referral_code IS NULL`);
+  if (missing.rows.length) {
+    const used = new Set(
+      (await client.execute(`SELECT referral_code AS c FROM users WHERE referral_code IS NOT NULL`))
+        .rows.map((r) => r.c)
+    );
+    const ALPH = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    const gen = () =>
+      Array.from(crypto.randomBytes(6), (b) => ALPH[b % ALPH.length]).join('');
+    for (const row of missing.rows) {
+      let code = gen();
+      while (used.has(code)) code = gen();
+      used.add(code);
+      await client.execute(`UPDATE users SET referral_code = ? WHERE id = ?`, [code, row.id]);
+    }
+  }
+  await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by)`);
 }
 
 module.exports = { client, init };

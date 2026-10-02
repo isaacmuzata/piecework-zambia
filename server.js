@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const path = require('path');
 
 const { client, init } = require('./db');
@@ -37,6 +38,24 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '400kb' }));
 app.use(cookieParser());
+
+// ---------------------------------------------------------------- device id
+// Anti-fraud: one PieceWork account per browser. A long-lived device cookie
+// identifies the browser; registration is refused when the device already
+// has an account. The cookie alone can be cleared, so the signup IP is also
+// recorded — same-IP signups are allowed but disqualified from giveaways.
+app.use((req, res, next) => {
+  let d = req.cookies && req.cookies.pw_device;
+  if (!d || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(d)) {
+    d = crypto.randomUUID();
+    res.cookie('pw_device', d, {
+      httpOnly: true, sameSite: 'lax', secure: IS_PROD,
+      maxAge: 2 * 365 * 24 * 3600 * 1000, path: '/',
+    });
+  }
+  req.deviceId = d;
+  next();
+});
 
 // ---------------------------------------------------------------- constants
 const CATEGORIES = [
@@ -66,6 +85,81 @@ const err = (res, code, message, fields) =>
  * error middleware instead of becoming unhandled rejections.
  */
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+/** Referral codes: 6 chars, no lookalikes (0/O, 1/I/L). */
+const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function generateReferralCode() {
+  return Array.from(crypto.randomBytes(6), (b) => REF_ALPHABET[b % REF_ALPHABET.length]).join('');
+}
+
+/** Real client IP behind Render's proxy (trust proxy is set). */
+function clientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  const raw = (typeof fwd === 'string' && fwd ? fwd.split(',')[0] : req.ip || '').trim();
+  return raw.replace(/^::ffff:/, '');
+}
+
+/**
+ * Giveaway entries for a round: one entry per referred signup inside the
+ * round window. Admin accounts and IP/device-duplicate accounts are
+ * excluded from winning, and duplicate signups earn no entries.
+ * Returns [{ user_id, name, phone, city, entries }].
+ */
+async function giveawayEntries(giveawayId) {
+  const g = await getOne('SELECT * FROM giveaways WHERE id = ?', [giveawayId]);
+  if (!g) return null;
+  const rows = await getAll(
+    `SELECT u.id AS user_id, u.name, u.phone, u.city, COUNT(r.id) AS entries
+     FROM users u
+     JOIN users r ON r.referred_by = u.id
+     WHERE r.created_at >= ? AND r.created_at < ?
+       AND COALESCE(u.ip_duplicate, 0) = 0
+       AND COALESCE(r.ip_duplicate, 0) = 0
+     GROUP BY u.id
+     ORDER BY entries DESC, u.created_at ASC`,
+    [g.starts_at, g.ends_at]
+  );
+  const adminPhones = new Set(ADMIN_PHONES);
+  return rows
+    .filter((r) => !adminPhones.has(r.phone))
+    .map((r) => ({
+      user_id: Number(r.user_id), name: r.name, phone: r.phone,
+      city: r.city, entries: Number(r.entries),
+    }));
+}
+
+/** Weighted random pick using crypto randomness. Returns { entry, total }. */
+function pickWinner(entries) {
+  const total = entries.reduce((s, e) => s + e.entries, 0);
+  let roll = crypto.randomInt(total);
+  for (const e of entries) {
+    roll -= e.entries;
+    if (roll < 0) return { entry: e, total };
+  }
+  return { entry: entries[entries.length - 1], total };
+}
+
+/** Counts for the admin panel: disqualified referrers / referrals. */
+async function giveawayFraudCounts(giveawayId) {
+  const g = await getOne('SELECT * FROM giveaways WHERE id = ?', [giveawayId]);
+  if (!g) return { disqualified_referrers: 0, disqualified_referrals: 0 };
+  const a = await getOne(
+    `SELECT COUNT(DISTINCT u.id) AS c FROM users u
+     JOIN users r ON r.referred_by = u.id
+     WHERE r.created_at >= ? AND r.created_at < ? AND COALESCE(u.ip_duplicate, 0) = 1`,
+    [g.starts_at, g.ends_at]
+  );
+  const b = await getOne(
+    `SELECT COUNT(*) AS c FROM users r
+     WHERE r.referred_by IS NOT NULL AND r.created_at >= ? AND r.created_at < ?
+       AND COALESCE(r.ip_duplicate, 0) = 1`,
+    [g.starts_at, g.ends_at]
+  );
+  return {
+    disqualified_referrers: Number(a.c || 0),
+    disqualified_referrals: Number(b.c || 0),
+  };
+}
 
 /** Run a single-row SELECT; returns the row or undefined. */
 async function getOne(sql, args) {
@@ -110,6 +204,7 @@ function publicUser(row) {
   if (!row) return null;
   return {
     id: row.id, name: row.name, phone: row.phone, city: row.city,
+    referral_code: row.referral_code || '',
     bio: row.bio || '', skills: row.skills || '', avatar: row.avatar || '',
     open_to_work: !!row.open_to_work, is_admin: isAdmin(row),
     rating_avg: row.rating_avg || 0, rating_count: row.rating_count || 0,
@@ -182,11 +277,44 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   const exists = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
   if (exists) return err(res, 409, 'This number is already registered. Try signing in.');
 
+  // Anti-fraud: one account per browser/device.
+  const deviceId = req.deviceId;
+  const devExists = await getOne('SELECT id FROM users WHERE device_id = ?', [deviceId]);
+  if (devExists) return err(res, 409, 'This device already has a PieceWork account. Please sign in instead.');
+
+  // Referral: ?ref=CODE captured on the signup page.
+  let referredBy = null;
+  const refCode = req.body && typeof req.body.ref === 'string' ? req.body.ref.trim().toUpperCase() : '';
+  if (refCode) {
+    const referrer = await getOne('SELECT id, referral_code FROM users WHERE referral_code = ?', [refCode]);
+    if (referrer) referredBy = Number(referrer.id);
+  }
+
+  // Same IP as an existing account: allowed to register, but flagged and
+  // disqualified from giveaways (mobile networks share IPs, so no hard block).
+  const ip = clientIp(req);
+  let ipDuplicate = 0;
+  if (ip) {
+    const ipExists = await getOne('SELECT id FROM users WHERE signup_ip = ? AND signup_ip != ?', [ip, '']);
+    if (ipExists) ipDuplicate = 1;
+  }
+
+  // Unique referral code for the new account.
+  let myCode = generateReferralCode();
+  for (let i = 0; i < 5; i++) {
+    const clash = await getOne('SELECT id FROM users WHERE referral_code = ?', [myCode]);
+    if (!clash) break;
+    myCode = generateReferralCode();
+  }
+
   const hash = bcrypt.hashSync(String(password), 12);
   const openToWork = (req.body && req.body.open_to_work) ? 1 : 0;
   const info = await runWrite(
-    'INSERT INTO users (name, phone, password_hash, city, open_to_work) VALUES (?, ?, ?, ?, ?)',
-    [String(name).trim(), normPhone, hash, city, openToWork]
+    `INSERT INTO users (name, phone, password_hash, city, open_to_work,
+      referral_code, referred_by, device_id, signup_ip, ip_duplicate)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [String(name).trim(), normPhone, hash, city, openToWork,
+     myCode, referredBy, deviceId, ip || '', ipDuplicate]
   );
   const user = await getOne('SELECT * FROM users WHERE id = ?', [insertId(info)]);
   setAuthCookie(res, signToken(user.id));
@@ -760,6 +888,138 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
     conversations: Number(convCount.c || 0),
     messages: Number(msgCount.c || 0),
     open_to_work: Number(otwCount.c || 0),
+  });
+}));
+
+// ---------------------------------------------------------------- referrals & giveaways
+// Every account gets a ?ref=CODE invite link. Giveaway rounds run the
+// bi-weekly K1,500 raffle; the live draw page is screenshared on Facebook.
+
+// My referral status (auth).
+app.get('/api/referral/me', ah(auth), ah(async (req, res) => {
+  const me = await getOne('SELECT referral_code FROM users WHERE id = ?', [req.user.id]);
+  const code = me && me.referral_code;
+  if (!code) return err(res, 500, 'Referral code missing.');
+  const count = await getOne('SELECT COUNT(*) AS c FROM users WHERE referred_by = ?', [req.user.id]);
+  const g = await getOne(`SELECT id, title, prize_kwacha, ends_at FROM giveaways
+                          WHERE status = 'active' ORDER BY ends_at DESC LIMIT 1`);
+  res.json({
+    code,
+    link: `https://pieceworkzambia.com/?ref=${code}`,
+    referrals: Number(count.c || 0),
+    giveaway: g
+      ? { id: Number(g.id), title: g.title, prize_kwacha: Number(g.prize_kwacha), ends_at: g.ends_at }
+      : null,
+  });
+}));
+
+// Current public giveaway (signed-out friendly, for the invite page).
+app.get('/api/giveaways/current', ah(async (req, res) => {
+  const g = await getOne(`SELECT id, title, prize_kwacha, starts_at, ends_at FROM giveaways
+                          WHERE status = 'active' ORDER BY ends_at DESC LIMIT 1`);
+  if (!g) return res.json({ giveaway: null });
+  const entries = await giveawayEntries(Number(g.id));
+  res.json({
+    giveaway: {
+      id: Number(g.id), title: g.title, prize_kwacha: Number(g.prize_kwacha),
+      starts_at: g.starts_at, ends_at: g.ends_at, entrants: entries.length,
+    },
+  });
+}));
+
+function requireAdmin(req, res) {
+  if (!isAdmin(req.user)) { err(res, 403, 'Not authorized.'); return false; }
+  return true;
+}
+
+app.get('/api/admin/giveaways', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const rows = await getAll(
+    `SELECT g.*, u.name AS winner_name, u.phone AS winner_phone
+     FROM giveaways g LEFT JOIN users u ON u.id = g.winner_user_id
+     ORDER BY g.created_at DESC`
+  );
+  const out = [];
+  for (const g of rows) {
+    const entries = g.status === 'drawn' ? [] : await giveawayEntries(Number(g.id));
+    const fraud = await giveawayFraudCounts(Number(g.id));
+    out.push({
+      id: Number(g.id), title: g.title, prize_kwacha: Number(g.prize_kwacha),
+      starts_at: g.starts_at, ends_at: g.ends_at, status: g.status,
+      winner: g.winner_user_id ? { name: g.winner_name, phone: g.winner_phone } : null,
+      drawn_at: g.drawn_at, entrants: entries.length,
+      total_entries: entries.reduce((s, e) => s + e.entries, 0),
+      disqualified_referrers: fraud.disqualified_referrers,
+      disqualified_referrals: fraud.disqualified_referrals,
+    });
+  }
+  res.json({ giveaways: out });
+}));
+
+app.post('/api/admin/giveaways', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { title, prize_kwacha, starts_at, ends_at } = req.body || {};
+  if (!title || !String(title).trim()) return err(res, 422, 'Give the round a title.');
+  const prize = parseInt(prize_kwacha, 10);
+  if (!prize || prize <= 0) return err(res, 422, 'Prize must be a positive Kwacha amount.');
+  if (!starts_at || !ends_at || starts_at >= ends_at)
+    return err(res, 422, 'Set a valid start and end date.');
+  const active = await getOne(`SELECT id FROM giveaways WHERE status = 'active'`);
+  if (active) return err(res, 409, 'There is already an active round. Draw it first.');
+  const info = await runWrite(
+    `INSERT INTO giveaways (title, prize_kwacha, starts_at, ends_at) VALUES (?, ?, ?, ?)`,
+    [String(title).trim(), prize, starts_at, ends_at]
+  );
+  res.status(201).json({ id: Number(insertId(info)) });
+}));
+
+app.get('/api/admin/giveaways/:id/entries', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const g = await getOne('SELECT * FROM giveaways WHERE id = ?', [req.params.id]);
+  if (!g) return err(res, 404, 'Giveaway not found.');
+  const entries = await giveawayEntries(Number(g.id));
+  const fraud = await giveawayFraudCounts(Number(g.id));
+  res.json({
+    giveaway: {
+      id: Number(g.id), title: g.title, prize_kwacha: Number(g.prize_kwacha),
+      status: g.status, winner_user_id: g.winner_user_id ? Number(g.winner_user_id) : null,
+      drawn_at: g.drawn_at,
+    },
+    entries,
+    disqualified: fraud,
+  });
+}));
+
+// The official draw: weighted random, recorded, idempotent.
+app.post('/api/admin/giveaways/:id/draw', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const g = await getOne('SELECT * FROM giveaways WHERE id = ?', [req.params.id]);
+  if (!g) return err(res, 404, 'Giveaway not found.');
+  if (g.status === 'drawn') {
+    const w = await getOne('SELECT name, phone, city FROM users WHERE id = ?', [g.winner_user_id]);
+    return res.json({
+      already_drawn: true,
+      winner: { name: w.name, phone: w.phone, city: w.city },
+      drawn_at: g.drawn_at,
+    });
+  }
+  const entries = await giveawayEntries(Number(g.id));
+  if (!entries.length) return err(res, 422, 'No eligible entries yet.');
+  const { entry, total } = pickWinner(entries);
+  const snapshot = JSON.stringify(entries.map((e) => ({ user_id: e.user_id, name: e.name, entries: e.entries })));
+  await runWrite(
+    `INSERT INTO giveaway_draws (giveaway_id, winner_user_id, total_entries, entries_json, drawn_by)
+     VALUES (?, ?, ?, ?, ?)`,
+    [g.id, entry.user_id, total, snapshot, req.user.phone]
+  );
+  await runWrite(
+    `UPDATE giveaways SET status = 'drawn', winner_user_id = ?, drawn_at = datetime('now'),
+     drawn_by = ? WHERE id = ?`,
+    [entry.user_id, req.user.phone, g.id]
+  );
+  res.json({
+    winner: { name: entry.name, phone: entry.phone, city: entry.city },
+    entries: entry.entries, total_entries: total,
   });
 }));
 

@@ -409,12 +409,23 @@ async function viewHome() {
         <img src="/img/landing/hero.jpg" alt="Zambians doing piece work" loading="lazy">
         <div class="promo-text"><h3>Skilled People, Stronger Communities</h3><p>Real jobs from real neighbours, matched by distance.</p></div>
       </a>
+      <div id="gw-promo"></div>
       <div class="section-title"><span>Fresh opportunities</span><a href="#/jobs">View all</a></div>
       <div id="home-jobs">${loadingHtml('Finding jobs…')}</div>
     </div>
   </div>`;
 
   const q = document.getElementById('home-q');
+  // Giveaway promo — only when a round is active.
+  api('/api/giveaways/current').then(({ giveaway }) => {
+    const slot = document.getElementById('gw-promo');
+    if (!slot || !giveaway) return;
+    slot.innerHTML = `
+      <a class="promo-card" href="#/invite" style="text-decoration:none;color:#fff;background:linear-gradient(135deg,#062b1c,#0e6b3a);display:flex;align-items:center;gap:14px;padding:18px">
+        <div style="font-size:34px">🎉</div>
+        <div class="promo-text"><h3>Win K${Number(giveaway.prize_kwacha).toLocaleString()}!</h3><p>Invite friends, earn raffle entries. Drawn live on Facebook.</p></div>
+      </a>`;
+  }).catch(() => {});
   q.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       browseState.q = q.value.trim(); browseState.page = 1; browseState.category = ''; browseState.city = '';
@@ -1071,6 +1082,7 @@ async function viewProfile() {
       <div class="menu-list">
         <a href="#/dashboard">${icon('clipboard')}<span>My gigs</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/saved">${icon('bookmark')}<span>Saved jobs</span><span class="chev">${icon('chevR')}</span></a>
+        <a href="#/invite">${icon('sparkles')}<span>Win cash — invite friends</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/how">${icon('help')}<span>Help &amp; support</span><span class="chev">${icon('chevR')}</span></a>
         <button id="pf-logout">${icon('logout')}<span>Sign out</span></button>
       </div>
@@ -1499,10 +1511,15 @@ function viewLogin() {
 /** Register. */
 function viewRegister() {
   if (currentUser) { location.hash = '#/dashboard'; return; }
+  const invRef = getInviteRef();
   app.innerHTML = `
   <div class="view"><div class="page" style="max-width:420px;margin:0 auto">
     <h1 class="page-title">Join PieceWork</h1>
     <p class="page-sub">Free to join. Find work or find workers in minutes.</p>
+    ${invRef ? `<div class="card" style="border:2px solid var(--green);background:#f0faf4">
+      <b>🎉 You were invited by a friend!</b>
+      <p class="small muted" style="margin:6px 0 0">Create your account and they earn entries into the giveaway draw.</p>
+    </div>` : ''}
     <div class="card">
       <form id="reg-form" novalidate>
         <div class="field">
@@ -1537,9 +1554,12 @@ function viewRegister() {
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true;
     try {
+      const payload = Object.fromEntries(new FormData(form).entries());
+      const ref = getInviteRef();
+      if (ref) payload.ref = ref;
       const { user } = await api('/api/auth/register', {
         method: 'POST',
-        body: JSON.stringify(Object.fromEntries(new FormData(form).entries())),
+        body: JSON.stringify(payload),
       });
       currentUser = user; renderChrome();
       toast(`Welcome to PieceWork, ${user.name.split(' ')[0]}!`);
@@ -1657,6 +1677,81 @@ function viewHow() {
   </div></div>`;
 }
 
+/** Invite friends — referral link + giveaway. */
+async function viewInvite() {
+  app.innerHTML = `
+  <div class="view"><div class="page" style="max-width:520px;margin:0 auto">
+    <h1 class="page-title">Win cash prizes 🎉</h1>
+    <p class="page-sub">Invite friends to PieceWork Zambia. Every friend who joins with your link earns you entries into the live giveaway draw.</p>
+    <div id="invite-body">${loadingHtml('Loading…')}</div>
+  </div></div>`;
+  const body = document.getElementById('invite-body');
+  const fmtDate = (s) => {
+    try { return new Date(String(s).replace(' ', 'T')).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); }
+    catch (e) { return s; }
+  };
+  try {
+    const { giveaway } = await api('/api/giveaways/current');
+    const gwCard = giveaway ? `
+      <div class="card" style="background:linear-gradient(135deg,#062b1c,#0e6b3a);color:#fff;border:0;text-align:center;padding:26px 20px">
+        <div class="small" style="color:#bfe6cf;letter-spacing:2px;font-weight:700">${esc(giveaway.title).toUpperCase()}</div>
+        <div style="font-size:52px;font-weight:800;margin:8px 0">K${Number(giveaway.prize_kwacha).toLocaleString()}</div>
+        <div class="small" style="color:#e6f4ec">Drawn live on Facebook • ${giveaway.entrants} ${giveaway.entrants === 1 ? 'person' : 'people'} in the draw so far</div>
+        <div class="small" style="color:#bfe6cf;margin-top:4px">Entries close ${fmtDate(giveaway.ends_at)}</div>
+      </div>` : `
+      <div class="card" style="text-align:center">
+        <b>No active giveaway right now</b>
+        <p class="small muted">A new round starts soon. Grab your invite link below so you are ready.</p>
+      </div>`;
+    const steps = `
+      <div class="card"><h3 style="margin-top:0">How it works</h3>
+        <div class="split"><span><b>1.</b> Share your personal invite link</span></div>
+        <div class="split"><span><b>2.</b> Friends create their free account</span></div>
+        <div class="split"><span><b>3.</b> You get <b>1 raffle entry per friend</b> — more friends, better odds</span></div>
+        <div class="split" style="border:0"><span><b>4.</b> Winner picked <b>live on Facebook</b> and paid by mobile money</span></div>
+      </div>`;
+    if (!currentUser) {
+      body.innerHTML = gwCard + steps + `
+        <a class="btn btn-primary full" href="#/register">Join free to get your invite link</a>
+        <p class="small muted" style="text-align:center;margin-top:10px">Already have an account? <a href="#/login" style="font-weight:700">Sign in</a></p>`;
+      return;
+    }
+    const me = await api('/api/referral/me');
+    const prize = (me.giveaway || giveaway || {}).prize_kwacha || 1500;
+    const text = shareText(me.link, prize);
+    body.innerHTML = gwCard + steps + `
+      <div class="card">
+        <h3 style="margin-top:0">Your invite link</h3>
+        <div style="display:flex;gap:8px">
+          <input id="inv-link" readonly value="${esc(me.link)}" style="flex:1" onclick="this.select()">
+          <button class="btn btn-primary btn-sm" id="inv-copy">Copy</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <a class="btn btn-outline full" style="flex:1" target="_blank" rel="noopener"
+             href="https://wa.me/?text=${encodeURIComponent(text)}">WhatsApp</a>
+          <a class="btn btn-outline full" style="flex:1" target="_blank" rel="noopener"
+             href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(me.link)}">Facebook</a>
+        </div>
+      </div>
+      <div class="stat-grid">
+        <div class="card stat-card"><div class="big">${me.referrals}</div><div class="small muted">Friends joined</div></div>
+        <div class="card stat-card"><div class="big">${me.referrals}</div><div class="small muted">Raffle entries</div></div>
+      </div>
+      <p class="small muted" style="line-height:1.6">Fair play rules: one account per phone, browser and person. Accounts from the same IP or device as another account are disqualified from the draw, and their invites earn no entries. Winners are contacted on their registered number.</p>`;
+    const copyBtn = document.getElementById('inv-copy');
+    copyBtn.addEventListener('click', async () => {
+      const link = document.getElementById('inv-link').value;
+      try { await navigator.clipboard.writeText(link); toast('Invite link copied!'); }
+      catch (e) {
+        const i = document.getElementById('inv-link'); i.select();
+        document.execCommand('copy'); toast('Invite link copied!');
+      }
+    });
+  } catch (e) {
+    body.innerHTML = emptyHtml('info', 'Could not load', e.message);
+  }
+}
+
 /** Admin — self-serve stats, Zac only. */
 async function viewAdmin() {
   if (!requireAuth('#/admin')) return;
@@ -1697,9 +1792,178 @@ async function viewAdmin() {
           <div class="split" style="padding:7px 0;border-bottom:1px solid var(--line)">
             <span style="text-transform:capitalize">${esc(k)}</span><b>${v}</b>
           </div>`).join('') || '<p class="small muted">None yet.</p>'}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Giveaways</h3>
+        <div id="gw-admin-list">${loadingHtml('Loading rounds…')}</div>
+        <h4 style="margin:18px 0 8px">Start a new round</h4>
+        <form id="gw-form">
+          <div class="field"><label for="gw-title">Title</label><input name="title" id="gw-title" value="Bi-weekly Giveaway"></div>
+          <div class="field"><label for="gw-prize">Prize (Kwacha)</label><input name="prize_kwacha" id="gw-prize" type="number" value="1500" min="1"></div>
+          <div class="field"><label for="gw-start">Starts</label><input name="starts_at" id="gw-start" type="datetime-local"></div>
+          <div class="field"><label for="gw-end">Ends</label><input name="ends_at" id="gw-end" type="datetime-local"></div>
+          <button class="btn btn-primary" type="submit">Create round</button>
+        </form>
+        <p class="small muted" style="margin-top:10px">One active round at a time. Open the live draw page when you go live on Facebook and screenshare it.</p>
       </div>`;
+    loadGiveawayAdmin();
   } catch (e) {
     body.innerHTML = emptyHtml('info', 'Could not load stats', e.message);
+  }
+}
+
+async function loadGiveawayAdmin() {
+  const list = document.getElementById('gw-admin-list');
+  if (!list) return;
+  try {
+    const { giveaways } = await api('/api/admin/giveaways');
+    list.innerHTML = giveaways.length ? giveaways.map((g) => `
+      <div class="split" style="padding:10px 0;border-bottom:1px solid var(--line);align-items:flex-start">
+        <div>
+          <b>${esc(g.title)}</b> — K${Number(g.prize_kwacha).toLocaleString()}
+          <span class="small muted">(${esc(g.status)})</span><br>
+          <span class="small muted">${g.entrants} entrants • ${g.total_entries} entries
+          ${g.disqualified_referrers ? ` • <b style="color:#b91c1c">${g.disqualified_referrers} disqualified</b>` : ''}</span>
+          ${g.winner ? `<br><span class="small">🏆 Winner: <b>${esc(g.winner.name)}</b> (${esc(g.winner.phone)})</span>` : ''}
+        </div>
+        ${g.status === 'active' ? `<a class="btn btn-sm btn-primary" href="#/admin/draw/${g.id}">Live draw</a>` : ''}
+      </div>`).join('')
+      : '<p class="small muted">No rounds yet. Create the first one below.</p>';
+  } catch (e) { list.innerHTML = `<p class="small" style="color:#b91c1c">${esc(e.message)}</p>`; }
+
+  // sensible defaults: now → +14 days, formatted for datetime-local
+  const toLocal = (d) => {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const startEl = document.getElementById('gw-start');
+  const endEl = document.getElementById('gw-end');
+  if (startEl && !startEl.value) startEl.value = toLocal(new Date());
+  if (endEl && !endEl.value) endEl.value = toLocal(new Date(Date.now() + 14 * 864e5));
+
+  const form = document.getElementById('gw-form');
+  if (form) form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const payload = Object.fromEntries(new FormData(form).entries());
+      // store as UTC-ish "YYYY-MM-DD HH:MM:SS" for SQLite comparison
+      for (const k of ['starts_at', 'ends_at']) payload[k] = String(payload[k]).replace('T', ' ') + ':00';
+      await api('/api/admin/giveaways', { method: 'POST', body: JSON.stringify(payload) });
+      toast('Giveaway round created!');
+      loadGiveawayAdmin();
+    } catch (err2) { toast(err2.message, true); }
+    btn.disabled = false;
+  });
+}
+
+/** Live draw — admin only, built for screensharing on Facebook Live. */
+async function viewGiveawayDraw(id) {
+  if (!requireAuth('#/admin/draw/' + id)) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div id="draw-overlay" style="position:fixed;inset:0;z-index:200;background:radial-gradient(ellipse at center,#0e6b3a 0%,#062b1c 70%);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:hidden">
+    <div id="draw-confetti" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
+    <div style="position:relative;z-index:2;max-width:640px;width:100%">
+      <div class="small" style="letter-spacing:3px;color:#bfe6cf;font-weight:700">PIECEWORK ZAMBIA • LIVE GIVEAWAY DRAW</div>
+      <h1 id="draw-title" style="font-size:34px;margin:10px 0 4px">Loading…</h1>
+      <div id="draw-prize" style="font-size:84px;font-weight:800;color:#ffd34d;text-shadow:0 4px 24px rgba(0,0,0,.4)"></div>
+      <div id="draw-meta" class="small" style="color:#e6f4ec;margin-top:6px"></div>
+      <div id="draw-name" style="font-size:56px;font-weight:800;margin:34px 0;min-height:80px"></div>
+      <div id="draw-winner-contact" style="margin-bottom:20px"></div>
+      <button id="draw-btn" class="btn" style="background:#ffd34d;color:#062b1c;font-size:22px;font-weight:800;padding:16px 48px;border-radius:999px;border:0;cursor:pointer">🎲 DRAW THE WINNER</button>
+      <div style="margin-top:18px"><a href="#/admin" style="color:#bfe6cf" class="small">← Back to admin</a></div>
+    </div>
+  </div>`;
+  const $ = (sid) => document.getElementById(sid);
+  const btn = $('draw-btn');
+  let data;
+  try {
+    data = await api('/api/admin/giveaways/' + id + '/entries');
+  } catch (e) {
+    $('draw-title').textContent = 'Could not load giveaway';
+    $('draw-name').textContent = e.message;
+    btn.style.display = 'none';
+    return;
+  }
+  const g = data.giveaway;
+  $('draw-title').textContent = g.title;
+  $('draw-prize').textContent = 'K' + Number(g.prize_kwacha).toLocaleString();
+  const totalEntries = data.entries.reduce((s, e) => s + e.entries, 0);
+  $('draw-meta').textContent = `${data.entries.length} ${data.entries.length === 1 ? 'person' : 'people'} in the draw • ${totalEntries} total ${totalEntries === 1 ? 'entry' : 'entries'}`;
+  if (data.disqualified.disqualified_referrers) {
+    $('draw-meta').textContent += ` • ${data.disqualified.disqualified_referrers} disqualified (duplicate device/IP)`;
+  }
+  if (g.status === 'drawn') {
+    btn.style.display = 'none';
+    revealWinner({ name: '(already drawn — see admin panel)', phone: '', city: '' }, true);
+    // fetch the recorded winner for display
+    try {
+      const r = await api('/api/admin/giveaways/' + id + '/draw', { method: 'POST', body: '{}' });
+      if (r.winner) revealWinner(r.winner, true);
+    } catch (e) {}
+    return;
+  }
+  if (!data.entries.length) {
+    $('draw-name').textContent = 'No eligible entries yet.';
+    btn.style.display = 'none';
+    return;
+  }
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Drawing…';
+    let result;
+    try {
+      result = await api('/api/admin/giveaways/' + id + '/draw', { method: 'POST', body: '{}' });
+    } catch (e) {
+      toast(e.message, true);
+      btn.disabled = false;
+      btn.textContent = '🎲 DRAW THE WINNER';
+      return;
+    }
+    // suspense shuffle, then land on the server-picked winner
+    const names = data.entries.map((e) => e.name);
+    const nameEl = $('draw-name');
+    let delay = 60;
+    await new Promise((resolve) => {
+      const tick = () => {
+        nameEl.textContent = names[Math.floor(Math.random() * names.length)];
+        delay *= 1.18;
+        if (delay > 650) return resolve();
+        setTimeout(tick, delay);
+      };
+      tick();
+    });
+    revealWinner(result.winner, false);
+    btn.style.display = 'none';
+  });
+
+  function revealWinner(winner, quiet) {
+    $('draw-name').textContent = '🏆 ' + winner.name + ' 🏆';
+    $('draw-winner-contact').innerHTML = winner.phone
+      ? `<div style="font-size:20px">${esc(winner.phone)}${winner.city ? ' • ' + esc(winner.city) : ''}</div>
+         <div class="small" style="color:#bfe6cf;margin-top:6px">${winner.entries ? winner.entries + ' entries' : ''} — contact to pay the K${Number(g.prize_kwacha).toLocaleString()} via mobile money</div>`
+      : '';
+    if (!quiet) launchConfetti();
+  }
+  function launchConfetti() {
+    const box = $('draw-confetti');
+    const colors = ['#ffd34d', '#ffffff', '#22d3ee', '#f472b6', '#a3e635'];
+    for (let i = 0; i < 120; i++) {
+      const p = document.createElement('div');
+      const s = 6 + Math.random() * 8;
+      p.style.cssText = `position:absolute;top:-20px;left:${Math.random() * 100}%;width:${s}px;height:${s * 0.6}px;background:${colors[i % colors.length]};border-radius:2px;transform:rotate(${Math.random() * 360}deg)`;
+      box.appendChild(p);
+      p.animate(
+        [{ transform: p.style.transform + ' translateY(0)', opacity: 1 },
+         { transform: `rotate(${Math.random() * 720}deg) translateY(${window.innerHeight + 60}px)`, opacity: 0.8 }],
+        { duration: 2500 + Math.random() * 2500, easing: 'cubic-bezier(.2,.6,.6,1)', fill: 'forwards', delay: Math.random() * 800 }
+      );
+    }
   }
 }
 
@@ -1716,6 +1980,8 @@ const routes = [
   [/^#\/user\/(\d+)$/, (m) => viewUser(m[1])],
   [/^#\/login$/, viewLogin],
   [/^#\/register$/, viewRegister],
+  [/^#\/invite$/, viewInvite],
+  [/^#\/admin\/draw\/(\d+)$/, (m) => viewGiveawayDraw(m[1])],
   [/^#\/categories$/, viewCategories],
   [/^#\/messages$/, viewMessages],
   [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],
@@ -1765,6 +2031,23 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ---------------- boot ---------------- */
+/* ---------------- referrals & giveaways ---------------- */
+// Capture ?ref=CODE from invite links; it is attached to the register request
+// so the inviter earns a raffle entry when the friend joins.
+function getInviteRef() {
+  try { return localStorage.getItem('pw_ref') || ''; } catch (e) { return ''; }
+}
+(function captureInviteRef() {
+  try {
+    const m = new URLSearchParams(location.search).get('ref');
+    if (m && /^[A-Za-z0-9]{4,12}$/.test(m)) localStorage.setItem('pw_ref', m.toUpperCase());
+  } catch (e) {}
+})();
+
+function shareText(link, prize) {
+  return `Join me on PieceWork Zambia and find piece work near you! Sign up with my link and I get entries into the K${prize} giveaway draw: ${link}`;
+}
+
 (async function boot() {
   const scrim = document.getElementById('drawer-scrim');
   if (scrim) scrim.addEventListener('click', closeDrawer);
