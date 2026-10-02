@@ -20,10 +20,10 @@
     "path": "./piecework-release.keystore",
     "alias": "piecework"
   },
-  "appVersionName": "1",
-  "appVersionCode": 1,
+  "appVersionName": "1.0.0",
+  "appVersionCode": 2,
   "shortcuts": [],
-  "generatorApp": "unknown",
+  "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://pieceworkzambia.com/manifest.json",
   "fallbackType": "customtabs",
   "features": {},
