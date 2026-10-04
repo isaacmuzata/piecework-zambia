@@ -67,7 +67,7 @@ const CITIES = [
   'Lusaka', 'Kitwe', 'Ndola', 'Kabwe', 'Chipata', 'Livingstone',
   'Chingola', 'Luanshya', 'Kasama', 'Solwezi', 'Mongu', 'Choma', 'Other',
 ];
-const PAY_TYPES = ['per_job', 'per_hour', 'per_day'];
+const PAY_TYPES = ['per_job', 'per_hour', 'per_day', 'per_month'];
 const JOB_STATUSES = ['open', 'filled', 'completed', 'cancelled'];
 // Admin gate: comma-separated E.164 numbers. Defaults to Zac's official
 // poster number so the admin page works without extra Render config;
