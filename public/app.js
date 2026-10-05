@@ -2151,6 +2151,7 @@ async function viewAdmin() {
     <p class="page-sub">PieceWork Zambia at a glance.</p>
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/jobs">📋 All jobs</a>
       <a class="btn btn-sm btn-outline" href="#/admin/verifications">🪪 Selfie review</a>
       <a class="btn btn-sm btn-outline" href="#/admin/resets">🔑 Password resets</a>
     </div>
@@ -2358,6 +2359,83 @@ async function viewAdminResets() {
   load();
 }
 
+/** Admin: every job posted, regardless of city — admin only. */
+async function viewAdminJobs() {
+  if (!requireAuth('#/admin/jobs')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  const statuses = ['all', 'open', 'filled', 'completed', 'cancelled'];
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">All jobs</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select id="aj-status" class="input" style="flex:1;min-width:130px">
+          ${statuses.map(s => `<option value="${s}">${s === 'all' ? 'All statuses' : s[0].toUpperCase() + s.slice(1)}</option>`).join('')}
+        </select>
+        <select id="aj-city" class="input" style="flex:1;min-width:130px">
+          <option value="">All cities</option>
+          ${CITIES.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+        </select>
+        <input id="aj-q" class="input" style="flex:2;min-width:160px" placeholder="Search title or description…">
+        <button class="btn btn-primary" id="aj-go">${icon('search')}Filter</button>
+      </div>
+    </div>
+    <div id="aj-body">${loadingHtml('Loading jobs…')}</div>
+    <div id="aj-pages" style="display:flex;gap:8px;justify-content:center;margin-top:12px"></div>
+  </div></div>`;
+  const body = document.getElementById('aj-body');
+  const pages = document.getElementById('aj-pages');
+  let page = 1;
+  async function load() {
+    body.innerHTML = loadingHtml('Loading jobs…');
+    pages.innerHTML = '';
+    try {
+      const qs = new URLSearchParams({
+        status: document.getElementById('aj-status').value,
+        city: document.getElementById('aj-city').value,
+        q: document.getElementById('aj-q').value.trim(),
+        page: String(page),
+      });
+      const { jobs, total, pages: totalPages } = await api('/api/admin/jobs?' + qs.toString());
+      if (!jobs.length) {
+        body.innerHTML = emptyHtml('clipboard', 'No jobs', 'Nothing matches these filters.');
+        return;
+      }
+      body.innerHTML = jobs.map(j => `
+        <div class="card">
+          <div class="split" style="align-items:center">
+            <div><b>${esc(j.title)}</b><br>
+              <span class="small muted">${esc(j.poster_name)} · ${esc(j.poster_phone)} · ${esc(j.city)}${j.area ? ' · ' + esc(j.area) : ''} · ${fmtDate(j.created_at)}</span><br>
+              <span class="small">${kwacha(j.pay_amount)} ${esc(PAY_LABEL[j.pay_type] || '')} · ${esc(j.category)} · ${j.workers_needed} needed</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="badge badge-status-${j.status}">${esc(j.status)}</span>
+              <a class="btn btn-sm btn-outline" href="#/job/${j.id}">View</a>
+            </div>
+          </div>
+        </div>`).join('');
+      if (totalPages > 1) {
+        pages.innerHTML = `
+          <button class="btn btn-sm btn-outline" id="aj-prev" ${page <= 1 ? 'disabled' : ''}>← Prev</button>
+          <span class="small muted" style="align-self:center">Page ${page} of ${totalPages} · ${total} jobs</span>
+          <button class="btn btn-sm btn-outline" id="aj-next" ${page >= totalPages ? 'disabled' : ''}>Next →</button>`;
+        const prev = document.getElementById('aj-prev'), next = document.getElementById('aj-next');
+        if (prev) prev.onclick = () => { page--; load(); };
+        if (next) next.onclick = () => { page++; load(); };
+      } else if (total) {
+        pages.innerHTML = `<span class="small muted">${total} job${total === 1 ? '' : 's'}</span>`;
+      }
+    } catch (e) { body.innerHTML = emptyHtml('info', 'Could not load', e.message); }
+  }
+  document.getElementById('aj-go').onclick = () => { page = 1; load(); };
+  document.getElementById('aj-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { page = 1; load(); } });
+  load();
+}
+
 /** Admin referral monitor — signups, leaderboard, recent joins, cheats. */async function viewReferralDashboard() {
   if (!requireAuth('#/admin/referrals')) return;
   if (!currentUser.is_admin) {
@@ -2545,6 +2623,7 @@ const routes = [
   [/^#\/register$/, viewRegister],
   [/^#\/invite$/, viewInvite],
   [/^#\/admin\/draw\/(\d+)$/, (m) => viewGiveawayDraw(m[1])],
+  [/^#\/admin\/jobs$/, viewAdminJobs],
   [/^#\/admin\/referrals$/, viewReferralDashboard],
   [/^#\/admin\/verifications$/, viewVerifications],
   [/^#\/admin\/resets$/, viewAdminResets],

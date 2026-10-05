@@ -545,6 +545,32 @@ app.post('/api/admin/resets/:id/issue', ah(auth), ah(async (req, res) => {
   res.json({ code, user_name: row.user_name, user_phone: row.user_phone, expires_minutes: RESET_CODE_TTL_MIN });
 }));
 
+// Admin: every job posted, regardless of city or distance. Admin only
+// (support staff do not get job oversight).
+app.get('/api/admin/jobs', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const status = String(req.query.status || 'all');
+  if (status !== 'all' && !JOB_STATUSES.includes(status)) return err(res, 422, 'Invalid status filter.');
+  const city = req.query.city && CITIES.includes(req.query.city) ? req.query.city : null;
+  const q = req.query.q && String(req.query.q).trim() ? String(req.query.q).trim() : null;
+  const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1);
+  const limit = 25;
+  const conds = [];
+  const params = [];
+  if (status !== 'all') { conds.push('j.status = ?'); params.push(status); }
+  if (city) { conds.push('j.city = ?'); params.push(city); }
+  if (q) { conds.push('(j.title LIKE ? OR j.description LIKE ?)'); params.push('%' + q + '%', '%' + q + '%'); }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  const total = (await getOne(`SELECT COUNT(*) AS n FROM jobs j ${where}`, params)).n;
+  const jobs = await getAll(`
+    SELECT j.id, j.title, j.category, j.city, j.area, j.pay_amount, j.pay_type,
+           j.workers_needed, j.status, j.created_at,
+           u.name AS poster_name, u.phone AS poster_phone
+    FROM jobs j JOIN users u ON u.id = j.poster_id
+    ${where} ORDER BY j.id DESC LIMIT ? OFFSET ?`, [...params, limit, (page - 1) * limit]);
+  res.json({ jobs, total, page, pages: Math.max(1, Math.ceil(total / limit)) });
+}));
+
 app.get('/api/auth/me', ah(auth), ah(async (req, res) => {
   res.json({ user: publicUser(req.user) });
 }));
