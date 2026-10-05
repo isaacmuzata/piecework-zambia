@@ -1056,9 +1056,9 @@ async function viewJobEdit(id) {
     return;
   }
   if (!job.is_poster) {
-    const me = currentUser ? currentUser.name : 'nobody';
+    const me = currentUser ? `${currentUser.name} (${currentUser.phone || 'no number'})` : 'nobody';
     body.innerHTML = emptyHtml('shield', 'Not authorized',
-      `You are signed in as ${me}. Only the account that posted this job can edit it. If you posted it with a different account, sign out and sign in with that one.`);
+      `You are signed in as ${me}. Only the account that posted this job can edit it. If you posted it with a different number, sign out and sign in with that one.`);
     return;
   }
   if (!['open', 'filled'].includes(job.status)) {
