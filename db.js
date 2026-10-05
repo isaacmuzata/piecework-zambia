@@ -152,6 +152,7 @@ const OPTIONAL_COLUMNS = [
   ['users', 'ip_duplicate', 'INTEGER DEFAULT 0'],
   ['users', 'selfie', 'TEXT'],
   ['users', 'selfie_status', "TEXT DEFAULT 'pending'"],
+  ['users', 'terms_accepted_at', 'TEXT'],
 ];
 
 async function init() {

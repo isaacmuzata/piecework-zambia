@@ -978,6 +978,16 @@ function jobFormHtml(prefill = {}) {
       <input name="whatsapp" id="jf-wa" type="tel" inputmode="tel" value="${esc(prefill.whatsapp || (currentUser ? currentUser.phone : ''))}" placeholder="0977 123 456">
       <div class="hint">Workers can message you directly. Leave blank to keep applications in the app only.</div>
     </div>
+    ${currentUser && currentUser.terms_accepted_at ? `
+    <div class="field">
+      <div class="hint">${icon('shield')} You accepted the <a href="#/terms">Terms and Conditions</a> on ${esc(String(currentUser.terms_accepted_at).slice(0, 10))}.</div>
+    </div>` : `
+    <div class="field">
+      <label class="check-row" for="jf-terms">
+        <input type="checkbox" name="terms_accepted" id="jf-terms" value="1">
+        <span class="small">I have read and agree to the <a href="#/terms" target="_blank" rel="noopener">Terms and Conditions</a> — including that PieceWork is not liable for any damage or theft, and that I am responsible for my own safety precautions when hiring.</span>
+      </label>
+    </div>`}
     <button class="btn btn-primary full" type="submit">${icon('send')}Post job</button>
   </form>`;
 }
@@ -1020,6 +1030,7 @@ async function viewPost() {
     const data = Object.fromEntries(new FormData(form).entries());
     try {
       const { id } = await api('/api/jobs', { method: 'POST', body: JSON.stringify(data) });
+      if (currentUser) currentUser.terms_accepted_at = new Date().toISOString().slice(0, 19).replace('T', ' ');
       toast('Job posted!');
       location.hash = '#/job/' + id;
     } catch (err2) {
@@ -1154,6 +1165,7 @@ async function viewProfile() {
         <a href="#/saved">${icon('bookmark')}<span>Saved jobs</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/invite">${icon('sparkles')}<span>Win cash — invite friends</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/how">${icon('help')}<span>Help &amp; support</span><span class="chev">${icon('chevR')}</span></a>
+        <a href="#/terms">${icon('shield')}<span>Terms and conditions</span><span class="chev">${icon('chevR')}</span></a>
         <button id="pf-logout">${icon('logout')}<span>Sign out</span></button>
       </div>
     </div>
@@ -1792,6 +1804,57 @@ function viewAbout() {
   </div></div>`;
 }
 
+/** Terms and Conditions — liability waiver, poster responsibilities. */
+function viewTerms() {
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Terms and Conditions</h1>
+    <p class="page-sub">Last updated: 5 October 2026</p>
+    <div class="card">
+      <h3 style="margin-top:0">1. What PieceWork is</h3>
+      <p>PieceWork Zambia ("PieceWork", "we") is a marketplace that connects people who need piece work done ("posters") with people looking for piece work ("workers"). PieceWork is a product of 2911 IT Services. We provide the platform only. We are <b>not</b> an employer, employment agent, contractor or subcontractor of any worker, and we are <b>not</b> a party to any agreement between a poster and a worker.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">2. Your account</h3>
+      <p style="margin-bottom:0">One person, one account. Give true information about yourself. Keep your password private. False information or multiple accounts can lead to suspension and disqualification from giveaways.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">3. For posters — your responsibilities</h3>
+      <p>When you hire through PieceWork, <b>you</b> are responsible for:</p>
+      <ul>
+        <li>Checking the worker's profile, photo, ratings and reviews before hiring.</li>
+        <li>Asking a hired worker to upload their NRC through the app so you can verify their identity.</li>
+        <li>Agreeing the work, the pay amount and how payment will happen <b>before</b> work starts.</li>
+        <li>Taking sensible safety precautions: meet in safe places, do not share sensitive personal or banking details, and secure your valuables and property when workers are present.</li>
+        <li>Treating workers fairly and paying what was agreed.</li>
+      </ul>
+      <p style="margin-bottom:0">The verification tools in the app (profile photos, selfies, NRC upload, ratings) are there to help you make your own judgement. They are not a guarantee of anyone's identity or behaviour.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">4. Limitation of liability</h3>
+      <p>To the fullest extent allowed by law:</p>
+      <ul>
+        <li>PieceWork and 2911 IT Services are <b>not liable for any loss, damage, theft, injury or dispute</b> arising from work arranged through the app. Every work agreement is strictly between the poster and the worker.</li>
+        <li>We do not guarantee the identity, qualifications, conduct or reliability of any user.</li>
+        <li>The app is provided "as is". We are not liable for downtime, data loss or errors.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">5. For workers — your responsibilities</h3>
+      <p style="margin-bottom:0">Give true information about your skills, do accepted work to a reasonable standard, behave respectfully, and handle your own tax affairs on what you earn.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">6. Giveaways</h3>
+      <p style="margin-bottom:0">Giveaway rounds run at our discretion. One account per person — duplicate accounts are disqualified and forfeit entries. We may cancel or change a round if fraud is detected.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">7. Changes and contact</h3>
+      <p>We may update these terms; continued use of the app means you accept the current version.</p>
+      <p style="margin-bottom:0">Questions: <a href="mailto:info@pieceworkzambia.com">info@pieceworkzambia.com</a></p>
+    </div>
+  </div></div>`;
+}
+
 function viewHow() {
   app.innerHTML = `
   <div class="view"><div class="page">
@@ -2240,6 +2303,7 @@ const routes = [
   [/^#\/messages$/, viewMessages],
   [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],
   [/^#\/admin$/, viewAdmin],
+  [/^#\/terms$/, viewTerms],
   [/^#\/saved$/, viewSaved],
   [/^#\/how$/, viewHow],
   [/^#\/about$/, viewAbout],

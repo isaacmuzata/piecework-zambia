@@ -208,6 +208,7 @@ function publicUser(row) {
     bio: row.bio || '', skills: row.skills || '', avatar: row.avatar || '',
     open_to_work: !!row.open_to_work, is_admin: isAdmin(row),
     selfie_status: row.selfie_status || 'pending',
+    terms_accepted_at: row.terms_accepted_at || null,
     rating_avg: row.rating_avg || 0, rating_count: row.rating_count || 0,
     lat: row.lat != null ? Number(row.lat) : null,
     lng: row.lng != null ? Number(row.lng) : null,
@@ -580,6 +581,17 @@ app.post('/api/jobs', ah(auth), ah(async (req, res) => {
   const fields = validateJobInput(req.body);
   if (Object.keys(fields).length) return err(res, 422, 'Please fix the highlighted fields.', fields);
   const b = req.body;
+  // Terms gate: posters must accept the Terms & Conditions (liability waiver)
+  // before posting. Recorded once per account; enforced server-side so the
+  // form checkbox cannot be bypassed via the API.
+  const termsOk = req.user.terms_accepted_at || b.terms_accepted === '1' || b.terms_accepted === true;
+  if (!termsOk) {
+    return err(res, 422, 'Please read and accept the Terms and Conditions before posting.',
+      { terms_accepted: 'You must accept the Terms and Conditions to post a job.' });
+  }
+  if (!req.user.terms_accepted_at) {
+    await runWrite("UPDATE users SET terms_accepted_at = datetime('now') WHERE id = ?", [req.user.id]);
+  }
   const whatsapp = b.whatsapp ? normalizePhone(b.whatsapp) : '';
   const coords = parseLatLng(b);
   const info = await runWrite(`
