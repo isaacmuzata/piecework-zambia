@@ -1731,7 +1731,7 @@ function viewForgot() {
         <p class="small muted" style="text-align:center">No text arrived? <a href="${waLink(whatsapp, 'Hello PieceWork, I need a password reset code for ' + phone)}" target="_blank" rel="noopener" style="font-weight:700">Message us on WhatsApp</a></p>`
       : `
         <p><b>Request received.</b></p>
-        <p class="small muted">Message us on WhatsApp from <b>${esc(phone)}</b> and we will reply with your 6-digit reset code. It expires in 30 minutes.</p>
+        <p class="small muted">Message us on WhatsApp from <b>${esc(phone)}</b> and we will reply with your 6-digit reset code. It expires in 30 minutes. This WhatsApp line handles password resets only.</p>
         <a class="btn btn-primary full" target="_blank" rel="noopener"
            href="${waLink(whatsapp, 'Hello PieceWork, I need a password reset code for ' + phone)}">${icon('message')}Message us on WhatsApp</a>
         <p style="text-align:center;margin:12px 0 0"><a href="#/reset" style="font-weight:700">I have my code — set a new password</a></p>`;
