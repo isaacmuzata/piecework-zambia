@@ -349,9 +349,19 @@ function afterAuthRedirect() {
 }
 
 /* ---------------- shared components ---------------- */
+/* Drop any duplicate job rows by id — the API should never send them,
+   but a repeated card is worse than a skipped one. */
+function dedupeJobs(jobs) {
+  const seen = new Set();
+  return (jobs || []).filter(j => {
+    if (!j || seen.has(j.id)) return false;
+    seen.add(j.id);
+    return true;
+  });
+}
+
 function jobCard(job) {
-  const saved = isSaved(job.id);
-  const area = job.area && job.area.toLowerCase() !== String(job.city || '').toLowerCase() ? job.area : '';
+  const saved = isSaved(job.id);  const area = job.area && job.area.toLowerCase() !== String(job.city || '').toLowerCase() ? job.area : '';
   const statusBadge = job.status === 'open' ? `<span class="badge badge-status-open">Open</span>` : '';
   return `
   <article class="job-card" data-job="${job.id}" tabindex="0" role="link" aria-label="${esc(job.title)}">
@@ -449,7 +459,7 @@ async function viewHome() {
     const box = document.getElementById('home-jobs');
     if (!box) return;
     box.innerHTML = data.jobs.length
-      ? data.jobs.slice(0, 4).map(jobCard).join('')
+      ? dedupeJobs(data.jobs).slice(0, 4).map(jobCard).join('')
       : emptyHtml('briefcase', 'No open jobs right now', 'Check back soon — or post a job yourself.', `<a class="btn btn-sm btn-primary" href="#/post">Post a job</a>`);
   } catch (e) {
     const box = document.getElementById('home-jobs');
@@ -571,7 +581,7 @@ async function viewBrowse() {
           'Try a different search or city — or post the job yourself.',
           `<a class="btn btn-sm btn-primary" href="#/post">Post a job</a>`);
       } else {
-        results.insertAdjacentHTML('beforeend', data.jobs.map(jobCard).join(''));
+        results.insertAdjacentHTML('beforeend', dedupeJobs(data.jobs).map(jobCard).join(''));
       }
       const moreWrap = document.getElementById('more-wrap');
       if (moreWrap) moreWrap.innerHTML =
@@ -1172,7 +1182,7 @@ async function viewDashboard() {
       );
       const mine = lists.flatMap(l => l.jobs)
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
-      body.innerHTML = mine.length ? mine.map(jobCard).join('')
+      body.innerHTML = mine.length ? dedupeJobs(mine).map(jobCard).join('')
         : emptyHtml('clipboard', 'No postings yet', 'Post your first job and find helping hands fast.', `<a class="btn btn-sm btn-primary" href="#/post">Post a job</a>`);
     } catch (e) { body.innerHTML = emptyHtml('info', 'Could not load', e.message); }
   }
