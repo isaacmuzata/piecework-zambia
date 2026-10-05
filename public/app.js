@@ -1716,7 +1716,7 @@ function viewForgot() {
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true;
     try {
-      const { whatsapp } = await api('/api/auth/forgot', {
+      const { sms_sent, whatsapp } = await api('/api/auth/forgot', {
         method: 'POST',
         body: JSON.stringify({ phone: form.phone.value.trim() }),
       });
@@ -1724,7 +1724,12 @@ function viewForgot() {
       form.style.display = 'none';
       const done = document.getElementById('forgot-done');
       done.style.display = 'block';
-      done.innerHTML = `
+      done.innerHTML = sms_sent ? `
+        <p><b>Code sent by SMS.</b></p>
+        <p class="small muted">Check your texts for the 6-digit code. It expires in 30 minutes.</p>
+        <p style="text-align:center;margin:12px 0 0"><a href="#/reset" class="btn btn-primary full">Enter my code</a></p>
+        <p class="small muted" style="text-align:center">No text arrived? <a href="${waLink(whatsapp, 'Hello PieceWork, I need a password reset code for ' + phone)}" target="_blank" rel="noopener" style="font-weight:700">Message us on WhatsApp</a></p>`
+      : `
         <p><b>Request received.</b></p>
         <p class="small muted">Message us on WhatsApp from <b>${esc(phone)}</b> and we will reply with your 6-digit reset code. It expires in 30 minutes.</p>
         <a class="btn btn-primary full" target="_blank" rel="noopener"

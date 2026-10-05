@@ -4,6 +4,7 @@
  */
 require('dotenv').config();
 const express = require('express');
+const https = require('https');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -370,6 +371,44 @@ const RESET_MAX_ATTEMPTS = 5;
 const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, standardHeaders: true });
 const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true });
 
+// Africa's Talking SMS (optional): set AT_USERNAME + AT_API_KEY (+ AT_SENDER_ID)
+// as env vars and reset codes go out by text automatically. Until then the
+// admin sends them over WhatsApp from the admin panel.
+const AT_USERNAME = process.env.AT_USERNAME || '';
+const AT_API_KEY = process.env.AT_API_KEY || '';
+const AT_SENDER_ID = process.env.AT_SENDER_ID || '';
+const smsEnabled = () => !!(AT_USERNAME && AT_API_KEY);
+
+function sendSms(to, message) {
+  return new Promise((resolve, reject) => {
+    const body = new URLSearchParams({ username: AT_USERNAME, to, message });
+    if (AT_SENDER_ID) body.set('from', AT_SENDER_ID);
+    const payload = body.toString();
+    const req = https.request({
+      hostname: 'api.africastalking.com',
+      path: '/version1/messaging',
+      method: 'POST',
+      headers: {
+        apiKey: AT_API_KEY,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+      timeout: 15000,
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(data);
+        else reject(new Error('SMS provider returned HTTP ' + res.statusCode));
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('SMS provider timed out')));
+    req.write(payload);
+    req.end();
+  });
+}
+
 function newResetCode() {
   return String(crypto.randomInt(100000, 1000000));
 }
@@ -387,18 +426,33 @@ app.post('/api/auth/forgot', forgotLimiter, ah(async (req, res) => {
   const normPhone = normalizePhone(req.body && req.body.phone);
   if (!normPhone) return err(res, 422, 'Enter a valid phone number.');
   const user = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
+  let smsSent = false;
   if (user) {
     // One live code per user: retire older unused ones.
     await runWrite("UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL", [user.id]);
+    const code = newResetCode();
     await runWrite(
       `INSERT INTO password_resets (user_id, code_hash, expires_at)
        VALUES (?, ?, datetime('now', ?))`,
-      [user.id, hashResetCode(newResetCode()), `+${RESET_CODE_TTL_MIN} minutes`]
+      [user.id, hashResetCode(code), `+${RESET_CODE_TTL_MIN} minutes`]
     );
+    if (smsEnabled()) {
+      try {
+        await sendSms(normPhone,
+          `Your PieceWork password reset code is ${code}. It expires in ${RESET_CODE_TTL_MIN} minutes. Do not share it with anyone.`);
+        smsSent = true;
+      } catch (e) {
+        console.error('Password-reset SMS failed:', e.message);
+        // Fall through to the WhatsApp-assisted flow below.
+      }
+    }
   }
   res.json({
     ok: true,
-    message: 'If that number has an account, a reset was requested. Message us on WhatsApp and we will send your reset code.',
+    sms_sent: smsSent,
+    message: smsSent
+      ? 'We sent a 6-digit reset code to your phone by SMS. Enter it on the next screen.'
+      : 'If that number has an account, a reset was requested. Message us on WhatsApp and we will send your reset code.',
     whatsapp: SUPPORT_WHATSAPP,
   });
 }));
