@@ -207,11 +207,24 @@ function publicUser(row) {
     referral_code: row.referral_code || '',
     bio: row.bio || '', skills: row.skills || '', avatar: row.avatar || '',
     open_to_work: !!row.open_to_work, is_admin: isAdmin(row),
+    selfie_status: row.selfie_status || 'pending',
     rating_avg: row.rating_avg || 0, rating_count: row.rating_count || 0,
     lat: row.lat != null ? Number(row.lat) : null,
     lng: row.lng != null ? Number(row.lng) : null,
     created_at: row.created_at,
   };
+}
+
+/**
+ * Validate a client-downscaled JPEG/PNG/WebP data URL.
+ * Returns null when valid, otherwise an error message.
+ */
+function imageDataUrlError(s, maxLen, label) {
+  const v = String(s || '');
+  if (!v) return `${label} is required.`;
+  if (!/^data:image\/(jpeg|png|webp);base64,/.test(v)) return `${label} must be a JPEG, PNG or WebP image.`;
+  if (v.length > maxLen) return `${label} is too large. Try a smaller photo.`;
+  return null;
 }
 
 function signToken(userId) {
@@ -265,13 +278,17 @@ app.use('/api/', apiLimiter);
 
 // ---------------------------------------------------------------- auth routes
 app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
-  const { name, phone, password, city } = req.body || {};
+  const { name, phone, password, city, avatar, selfie } = req.body || {};
   const fields = {};
   if (!name || String(name).trim().length < 2) fields.name = 'Please enter your full name.';
   const normPhone = normalizePhone(phone);
   if (!normPhone) fields.phone = 'Enter a valid phone number, e.g. 0977 123 456.';
   if (!password || String(password).length < 8) fields.password = 'Password must be at least 8 characters.';
   if (!city || !CITIES.includes(city)) fields.city = 'Please choose your city.';
+  const avatarErr = imageDataUrlError(avatar, 300000, 'A profile photo');
+  if (avatarErr) fields.avatar = avatarErr;
+  const selfieErr = imageDataUrlError(selfie, 500000, 'A verification selfie');
+  if (selfieErr) fields.selfie = selfieErr;
   if (Object.keys(fields).length) return err(res, 422, 'Please fix the highlighted fields.', fields);
 
   const exists = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
@@ -311,10 +328,12 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   const openToWork = (req.body && req.body.open_to_work) ? 1 : 0;
   const info = await runWrite(
     `INSERT INTO users (name, phone, password_hash, city, open_to_work,
-      referral_code, referred_by, device_id, signup_ip, ip_duplicate)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      referral_code, referred_by, device_id, signup_ip, ip_duplicate,
+      avatar, selfie, selfie_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
     [String(name).trim(), normPhone, hash, city, openToWork,
-     myCode, referredBy, deviceId, ip || '', ipDuplicate]
+     myCode, referredBy, deviceId, ip || '', ipDuplicate,
+     String(avatar), String(selfie)]
   );
   const user = await getOne('SELECT * FROM users WHERE id = ?', [insertId(info)]);
   setAuthCookie(res, signToken(user.id));
@@ -740,6 +759,99 @@ app.patch('/api/applications/:id', ah(auth), ah(async (req, res) => {
   } else {
     await runWrite('UPDATE applications SET status = ? WHERE id = ?', ['declined', id]);
   }
+  res.json({ ok: true });
+}));
+
+// ---------------------------------------------------------------- NRC identity docs
+// A hired worker uploads their NRC for the job. Only the hiring poster can
+// view it, and it auto-deletes 10 days after upload (see the sweeper below).
+const NRC_TTL_DAYS = 10;
+
+app.post('/api/applications/:id/nrc', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const appRow = await getOne('SELECT * FROM applications WHERE id = ?', [id]);
+  if (!appRow) return err(res, 404, 'Application not found.');
+  if (appRow.worker_id !== req.user.id) return err(res, 403, 'Only the hired worker can upload their NRC.');
+  if (appRow.status !== 'accepted') return err(res, 422, 'NRC upload is only needed once you are hired.');
+  const job = await getOne('SELECT id, poster_id FROM jobs WHERE id = ?', [appRow.job_id]);
+  if (!job) return err(res, 404, 'Job not found.');
+  const imgErr = imageDataUrlError(req.body && req.body.image, 800000, 'The NRC photo');
+  if (imgErr) return err(res, 422, imgErr);
+  const existing = await getOne('SELECT id FROM nrc_docs WHERE application_id = ?', [id]);
+  if (existing) {
+    await runWrite(
+      `UPDATE nrc_docs SET image = ?, uploaded_at = datetime('now'),
+        expires_at = datetime('now', '+${NRC_TTL_DAYS} days') WHERE id = ?`,
+      [String(req.body.image), existing.id]
+    );
+  } else {
+    await runWrite(
+      `INSERT INTO nrc_docs (application_id, worker_id, job_id, poster_id, image, expires_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now', '+${NRC_TTL_DAYS} days'))`,
+      [id, appRow.worker_id, job.id, job.poster_id, String(req.body.image)]
+    );
+  }
+  res.json({ ok: true, expires_in_days: NRC_TTL_DAYS });
+}));
+
+app.get('/api/applications/:id/nrc', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const doc = await getOne('SELECT * FROM nrc_docs WHERE application_id = ?', [id]);
+  if (!doc) return err(res, 404, 'No NRC on file for this hire yet.');
+  if (doc.poster_id !== req.user.id && !isAdmin(req.user)) {
+    return err(res, 403, 'Only the poster who hired this worker can view the NRC.');
+  }
+  if (doc.expires_at <= new Date().toISOString().slice(0, 19).replace('T', ' ')) {
+    await runWrite('DELETE FROM nrc_docs WHERE id = ?', [doc.id]);
+    return err(res, 410, 'This NRC has expired and was deleted.');
+  }
+  res.json({
+    image: doc.image,
+    uploaded_at: doc.uploaded_at,
+    expires_at: doc.expires_at,
+  });
+}));
+
+// Worker-facing: which of my accepted applications still need an NRC upload.
+app.get('/api/nrc/pending', ah(auth), ah(async (req, res) => {
+  const rows = await getAll(`
+    SELECT a.id AS application_id, a.job_id, j.title, j.poster_id
+    FROM applications a JOIN jobs j ON j.id = a.job_id
+    LEFT JOIN nrc_docs n ON n.application_id = a.id
+    WHERE a.worker_id = ? AND a.status = 'accepted' AND n.id IS NULL
+    ORDER BY a.created_at DESC
+  `, [req.user.id]);
+  res.json({ pending: rows });
+}));
+
+// Sweeper: permanently delete NRC docs older than the TTL. Runs on boot and
+// every 24h — Render disks are ephemeral anyway, this is the privacy guarantee.
+async function sweepExpiredNrc() {
+  try {
+    const r = await runWrite(`DELETE FROM nrc_docs WHERE expires_at <= datetime('now')`);
+    if (r && r.changes) console.log(`[nrc-sweeper] deleted ${r.changes} expired NRC doc(s)`);
+  } catch (e) { console.error('[nrc-sweeper]', e.message); }
+}
+
+// ---------------------------------------------------------------- selfie verification (admin)
+app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const rows = await getAll(`
+    SELECT id, name, phone, city, selfie, selfie_status, created_at
+    FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'
+    ORDER BY created_at ASC LIMIT 100
+  `);
+  res.json({ pending: rows });
+}));
+
+app.post('/api/admin/verifications/:userId', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const userId = parseInt(req.params.userId, 10);
+  const { status } = req.body || {};
+  if (!['approved', 'rejected'].includes(status)) return err(res, 422, 'Status must be approved or rejected.');
+  const user = await getOne('SELECT id FROM users WHERE id = ?', [userId]);
+  if (!user) return err(res, 404, 'User not found.');
+  await runWrite('UPDATE users SET selfie_status = ? WHERE id = ?', [status, userId]);
   res.json({ ok: true });
 }));
 
@@ -1249,6 +1361,9 @@ init()
     app.listen(PORT, () => {
       console.log(`PieceWork Zambia running on http://localhost:${PORT}`);
     });
+    // NRC privacy sweeper: purge expired identity docs on boot and daily.
+    sweepExpiredNrc();
+    setInterval(sweepExpiredNrc, 24 * 60 * 60 * 1000);
   })
   .catch((e) => {
     console.error('FATAL: database init failed:', e && e.message ? e.message : e);

@@ -832,6 +832,7 @@ async function viewJobDetail(id) {
   document.querySelectorAll('[data-accept]').forEach(btn => btn.addEventListener('click', () => decideApplication(btn.dataset.accept, 'accepted')));
   document.querySelectorAll('[data-decline]').forEach(btn => btn.addEventListener('click', () => decideApplication(btn.dataset.decline, 'declined')));
   document.querySelectorAll('[data-msg]').forEach(btn => btn.addEventListener('click', () => openChat(id, btn.dataset.msg, btn)));
+  document.querySelectorAll('[data-nrc]').forEach(btn => btn.addEventListener('click', () => viewNrc(btn.dataset.nrc, btn)));
   document.querySelectorAll('[data-review-btn]').forEach(btn => btn.addEventListener('click', async () => {
     const forId = btn.dataset.reviewBtn;
     const sel = document.querySelector(`select[data-review-for="${forId}"]`);
@@ -867,6 +868,7 @@ async function viewJobDetail(id) {
       ${(a.status === 'pending' || a.status === 'accepted') ? `
       <div class="btn-row" style="margin-top:8px">
         <button class="btn btn-sm btn-outline" data-msg="${a.worker_id}">${icon('message')}Message</button>
+        ${a.status === 'accepted' ? `<button class="btn btn-sm btn-outline" data-nrc="${a.id}">${icon('shield')}View NRC</button>` : ''}
       </div>` : ''}
       ${a.status === 'pending' ? `
       <div style="margin-top:8px"><a class="whatsapp-btn" href="${waLink(a.worker_phone, 'Hello ' + a.worker_name + ', about your application for "' + job.title + '" on PieceWork Zambia…')}" target="_blank" rel="noopener">${icon('message')}WhatsApp ${esc(a.worker_name.split(' ')[0])}</a></div>` : ''}
@@ -881,6 +883,29 @@ async function viewJobDetail(id) {
       toast(status === 'accepted' ? 'Worker hired!' : 'Application declined.');
       viewJobDetail(id);
     } catch (e) { toast(e.message, true); }
+  }
+
+  /** Poster views the hired worker's NRC (auto-deletes after 10 days). */
+  async function viewNrc(appId, btn) {
+    btn.disabled = true;
+    try {
+      const doc = await api(`/api/applications/${appId}/nrc`);
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+      overlay.innerHTML = `
+        <div style="background:#fff;border-radius:12px;max-width:560px;width:100%;overflow:hidden">
+          <div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+            <b>Worker NRC</b>
+            <button class="btn btn-sm btn-outline" id="nrc-close">Close</button>
+          </div>
+          <img src="${doc.image}" alt="NRC" style="width:100%;display:block">
+          <div class="small muted" style="padding:12px 16px">Uploaded ${esc(fmtDateTime(doc.uploaded_at))}. Deleted automatically on ${esc(fmtDate(doc.expires_at))}. Only you can see this.</div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#nrc-close').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+    } catch (e) { toast(e.message, true); }
+    btn.disabled = false;
   }
 }
 
@@ -1021,6 +1046,45 @@ async function viewDashboard() {
   const body = document.getElementById('dash-body');
   const segP = document.getElementById('seg-postings');
   const segG = document.getElementById('seg-gigs');
+
+  // NRC banner: hired workers must upload their NRC for the poster to verify.
+  try {
+    const { pending } = await api('/api/nrc/pending').catch(() => ({ pending: [] }));
+    if (pending && pending.length) {
+      const banner = document.createElement('div');
+      banner.className = 'card';
+      banner.style.border = '2px solid var(--amber, #d97706)';
+      banner.innerHTML = `
+        <h3 style="margin-top:0">🪪 NRC needed</h3>
+        <p class="small muted" style="margin-top:0">You were hired for ${pending.length === 1 ? 'this job' : 'these jobs'}. Upload a photo of your NRC so the poster can verify you. It is only visible to the poster and is deleted automatically after 10 days.</p>
+        ${pending.map(p => `
+          <div class="split" style="padding:10px 0;border-top:1px solid var(--line);align-items:center">
+            <div><b>${esc(p.title)}</b></div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="file" id="nrc-file-${p.application_id}" accept="image/*" hidden>
+              <button class="btn btn-sm btn-primary" id="nrc-btn-${p.application_id}">${icon('camera')}Upload NRC</button>
+            </div>
+          </div>`).join('')}`;
+      body.parentElement.insertBefore(banner, body);
+      pending.forEach(p => {
+        const btn = document.getElementById(`nrc-btn-${p.application_id}`);
+        const fileInput = document.getElementById(`nrc-file-${p.application_id}`);
+        btn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async () => {
+          const file = fileInput.files[0];
+          if (!file) return;
+          btn.disabled = true;
+          try {
+            const image = await fileToDoc(file);
+            await api(`/api/applications/${p.application_id}/nrc`, { method: 'POST', body: JSON.stringify({ image }) });
+            toast('NRC uploaded. The poster can now verify you.');
+            viewDashboard(); renderChrome();
+          } catch (e) { toast(e.message, true); btn.disabled = false; }
+          fileInput.value = '';
+        });
+      });
+    }
+  } catch (e) { /* banner is optional */ }
 
   async function showPostings() {
     segP.classList.add('active'); segG.classList.remove('active');
@@ -1231,6 +1295,14 @@ function viewProfileEdit() {
 
 /** Shrink a photo to a 256px square JPEG data URL. */
 function fileToAvatar(file) {
+  return fileToSizedImage(file, 256, true);
+}
+
+/**
+ * Shrink a photo to a JPEG data URL, max dimension maxDim. Square-crop when
+ * square is true (avatars), otherwise keep aspect ratio (selfies, documents).
+ */
+function fileToSizedImage(file, maxDim, square) {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith('image/')) { reject(new Error('Please choose an image file.')); return; }
     const img = new Image();
@@ -1238,18 +1310,31 @@ function fileToAvatar(file) {
     img.onload = () => {
       URL.revokeObjectURL(url);
       try {
-        const size = 256;
+        let sw, sh, dw, dh;
+        if (square) {
+          const s = Math.min(img.width, img.height);
+          sw = sh = s; dw = dh = maxDim;
+          var sx = (img.width - s) / 2, sy = (img.height - s) / 2;
+        } else {
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          sw = img.width; sh = img.height; dw = Math.round(img.width * scale); dh = Math.round(img.height * scale);
+          var sx = 0, sy = 0;
+        }
         const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = size;
+        canvas.width = dw; canvas.height = dh;
         const ctx = canvas.getContext('2d');
-        const s = Math.min(img.width, img.height);
-        ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
         resolve(canvas.toDataURL('image/jpeg', 0.82));
       } catch (e) { reject(new Error('Could not process that image.')); }
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image.')); };
     img.src = url;
   });
+}
+
+/** Shrink a document/ID photo (keeps aspect ratio so text stays readable). */
+function fileToDoc(file) {
+  return fileToSizedImage(file, 1024, false);
 }
 
 /** Public profile. */
@@ -1552,12 +1637,51 @@ function viewRegister() {
           <input type="checkbox" name="open_to_work" id="rg-open" value="1">
           <span><b>I'm looking for work</b><br><span class="hint">Show my profile on the Looking for Work page so posters can find me. Optional.</span></span>
         </label>
+        <div class="field">
+          <label>Profile photo <span class="hint-inline">(required)</span></label>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div id="rg-av-preview" style="width:64px;height:64px;border-radius:50%;background:var(--line);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none"><span style="font-size:24px">📷</span></div>
+            <div>
+              <input type="file" id="rg-av-file" accept="image/*" hidden>
+              <button type="button" class="btn btn-sm btn-outline" id="rg-av-btn">${icon('camera')}Choose photo</button>
+              <div class="hint" style="margin-top:6px">How posters recognise you.</div>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Verification selfie <span class="hint-inline">(required)</span></label>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div id="rg-sf-preview" style="width:64px;height:64px;border-radius:12px;background:var(--line);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none"><span style="font-size:24px">🤳</span></div>
+            <div>
+              <input type="file" id="rg-sf-file" accept="image/*" hidden>
+              <button type="button" class="btn btn-sm btn-outline" id="rg-sf-btn">${icon('camera')}Take selfie</button>
+              <div class="hint" style="margin-top:6px">A clear photo of your face. Our team reviews it to keep the community safe.</div>
+            </div>
+          </div>
+        </div>
         <button class="btn btn-primary full" type="submit">Create account</button>
       </form>
     </div>
     <p style="text-align:center">Already registered? <a href="#/login" style="font-weight:700">Sign in</a></p>
   </div></div>`;
   const form = document.getElementById('reg-form');
+  let regAvatar = null, regSelfie = null;
+  const wirePhotoPicker = (btnId, fileId, previewId, setter, maxDim, square) => {
+    const btn = document.getElementById(btnId), fileInput = document.getElementById(fileId);
+    btn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      try {
+        const dataUrl = await fileToSizedImage(file, maxDim, square);
+        setter(dataUrl);
+        document.getElementById(previewId).innerHTML = `<img src="${dataUrl}" alt="Preview" style="width:100%;height:100%;object-fit:cover">`;
+      } catch (e) { toast(e.message, true); }
+      fileInput.value = '';
+    });
+  };
+  wirePhotoPicker('rg-av-btn', 'rg-av-file', 'rg-av-preview', (v) => { regAvatar = v; }, 256, true);
+  wirePhotoPicker('rg-sf-btn', 'rg-sf-file', 'rg-sf-preview', (v) => { regSelfie = v; }, 512, false);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = form.querySelector('button[type=submit]');
@@ -1566,6 +1690,10 @@ function viewRegister() {
       const payload = Object.fromEntries(new FormData(form).entries());
       const ref = getInviteRef();
       if (ref) payload.ref = ref;
+      if (!regAvatar) throw { message: 'Please add a profile photo.', fields: { avatar: 'A profile photo is required.' } };
+      if (!regSelfie) throw { message: 'Please take a verification selfie.', fields: { selfie: 'A verification selfie is required.' } };
+      payload.avatar = regAvatar;
+      payload.selfie = regSelfie;
       const { user } = await api('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -1774,6 +1902,7 @@ async function viewAdmin() {
     <p class="page-sub">PieceWork Zambia at a glance.</p>
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/verifications">🪪 Selfie review</a>
     </div>
     <div id="admin-body">${loadingHtml('Loading stats…')}</div>
   </div></div>`;
@@ -1868,6 +1997,56 @@ async function loadGiveawayAdmin() {
     } catch (err2) { toast(err2.message, true); }
     btn.disabled = false;
   });
+}
+
+/** Admin selfie review — approve or reject new signups' verification selfies. */
+async function viewVerifications() {
+  if (!requireAuth('#/admin/verifications')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Selfie review</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <div id="verif-body">${loadingHtml('Loading pending selfies…')}</div>
+  </div></div>`;
+  const body = document.getElementById('verif-body');
+  async function load() {
+    body.innerHTML = loadingHtml('Loading pending selfies…');
+    try {
+      const { pending } = await api('/api/admin/verifications');
+      if (!pending.length) {
+        body.innerHTML = emptyHtml('check', 'All caught up', 'No selfies waiting for review.');
+        return;
+      }
+      body.innerHTML = pending.map(u => `
+        <div class="card" data-verif="${u.id}">
+          <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">
+            ${u.selfie ? `<img src="${u.selfie}" alt="Selfie" style="width:96px;height:96px;object-fit:cover;border-radius:12px">` : ''}
+            <div style="flex:1">
+              <b>${esc(u.name)}</b><br>
+              <span class="small muted">${esc(u.phone)} · ${esc(u.city)} · joined ${esc(fmtDate(u.created_at))}</span>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-sm btn-primary" data-verif-approve="${u.id}">${icon('check')}Approve</button>
+            <button class="btn btn-sm btn-danger" data-verif-reject="${u.id}">Reject</button>
+          </div>
+        </div>`).join('');
+      body.querySelectorAll('[data-verif-approve]').forEach(b => b.addEventListener('click', () => decide(b.dataset.verifApprove, 'approved')));
+      body.querySelectorAll('[data-verif-reject]').forEach(b => b.addEventListener('click', () => decide(b.dataset.verifReject, 'rejected')));
+    } catch (e) { body.innerHTML = emptyHtml('info', 'Could not load', e.message); }
+  }
+  async function decide(userId, status) {
+    try {
+      await api(`/api/admin/verifications/${userId}`, { method: 'POST', body: JSON.stringify({ status }) });
+      toast(status === 'approved' ? 'Selfie approved.' : 'Selfie rejected.');
+      load();
+    } catch (e) { toast(e.message, true); }
+  }
+  load();
 }
 
 /** Admin referral monitor — signups, leaderboard, recent joins, cheats. */
@@ -2056,6 +2235,7 @@ const routes = [
   [/^#\/invite$/, viewInvite],
   [/^#\/admin\/draw\/(\d+)$/, (m) => viewGiveawayDraw(m[1])],
   [/^#\/admin\/referrals$/, viewReferralDashboard],
+  [/^#\/admin\/verifications$/, viewVerifications],
   [/^#\/categories$/, viewCategories],
   [/^#\/messages$/, viewMessages],
   [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],

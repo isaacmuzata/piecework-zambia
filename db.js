@@ -122,6 +122,18 @@ const SCHEMA = [
     drawn_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     drawn_by       TEXT NOT NULL
   )`,
+  // NRC identity docs: worker uploads when hired; visible only to the hiring
+  // poster for 10 days, then auto-deleted by the sweeper in server.js.
+  `CREATE TABLE IF NOT EXISTS nrc_docs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL UNIQUE REFERENCES applications(id) ON DELETE CASCADE,
+    worker_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    job_id         INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    poster_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    image          TEXT NOT NULL,
+    uploaded_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at     TEXT NOT NULL
+  )`,
 ];
 
 // Distance matching: precise coordinates are optional on users and jobs.
@@ -138,6 +150,8 @@ const OPTIONAL_COLUMNS = [
   ['users', 'device_id', 'TEXT'],
   ['users', 'signup_ip', 'TEXT'],
   ['users', 'ip_duplicate', 'INTEGER DEFAULT 0'],
+  ['users', 'selfie', 'TEXT'],
+  ['users', 'selfie_status', "TEXT DEFAULT 'pending'"],
 ];
 
 async function init() {
