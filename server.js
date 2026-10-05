@@ -428,39 +428,47 @@ function timingSafeEqual(a, b) {
   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
-// Step 1: user asks for a reset. Always 200 with the same message so the
-// endpoint never reveals whether a number is registered.
+// Step 1: user asks for a reset. Only registered numbers get the WhatsApp
+// prompt, so the admin only hears from real account holders. (This reveals
+// whether a number is registered; accepted trade-off per the founder,
+// Oct 5 2026, to stop unregistered users messaging the admin.)
 app.post('/api/auth/forgot', forgotLimiter, ah(async (req, res) => {
   const normPhone = normalizePhone(req.body && req.body.phone);
   if (!normPhone) return err(res, 422, 'Enter a valid phone number.');
   const user = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
+  if (!user) {
+    return res.json({
+      ok: true, sms_sent: false, account_found: false,
+      message: 'No account found with that number. Check the number and try again, or sign up for a new account.',
+      whatsapp: null,
+    });
+  }
   let smsSent = false;
-  if (user) {
-    // One live code per user: retire older unused ones.
-    await runWrite("UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL", [user.id]);
-    const code = newResetCode();
-    await runWrite(
-      `INSERT INTO password_resets (user_id, code_hash, expires_at)
-       VALUES (?, ?, datetime('now', ?))`,
-      [user.id, hashResetCode(code), `+${RESET_CODE_TTL_MIN} minutes`]
-    );
-    if (smsEnabled()) {
-      try {
-        await sendSms(normPhone,
-          `Your PieceWork password reset code is ${code}. It expires in ${RESET_CODE_TTL_MIN} minutes. Do not share it with anyone.`);
-        smsSent = true;
-      } catch (e) {
-        console.error('Password-reset SMS failed:', e.message);
-        // Fall through to the WhatsApp-assisted flow below.
-      }
+  // One live code per user: retire older unused ones.
+  await runWrite("UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL", [user.id]);
+  const code = newResetCode();
+  await runWrite(
+    `INSERT INTO password_resets (user_id, code_hash, expires_at)
+     VALUES (?, ?, datetime('now', ?))`,
+    [user.id, hashResetCode(code), `+${RESET_CODE_TTL_MIN} minutes`]
+  );
+  if (smsEnabled()) {
+    try {
+      await sendSms(normPhone,
+        `Your PieceWork password reset code is ${code}. It expires in ${RESET_CODE_TTL_MIN} minutes. Do not share it with anyone.`);
+      smsSent = true;
+    } catch (e) {
+      console.error('Password-reset SMS failed:', e.message);
+      // Fall through to the WhatsApp-assisted flow below.
     }
   }
   res.json({
     ok: true,
     sms_sent: smsSent,
+    account_found: true,
     message: smsSent
       ? 'We sent a 6-digit reset code to your phone by SMS. Enter it on the next screen.'
-      : 'If that number has an account, a reset was requested. Message us on WhatsApp and we will send your reset code.',
+      : 'Request received. Message us on WhatsApp and we will send your reset code.',
     whatsapp: SUPPORT_WHATSAPP,
   });
 }));

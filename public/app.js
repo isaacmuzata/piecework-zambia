@@ -1716,7 +1716,7 @@ function viewForgot() {
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true;
     try {
-      const { sms_sent, whatsapp } = await api('/api/auth/forgot', {
+      const { sms_sent, whatsapp, account_found } = await api('/api/auth/forgot', {
         method: 'POST',
         body: JSON.stringify({ phone: form.phone.value.trim() }),
       });
@@ -1724,6 +1724,12 @@ function viewForgot() {
       form.style.display = 'none';
       const done = document.getElementById('forgot-done');
       done.style.display = 'block';
+      if (account_found === false) {
+        done.innerHTML = `
+        <p><b>No account found.</b></p>
+        <p class="small muted">We could not find a PieceWork account with <b>${esc(phone)}</b>. Check the number and try again, or <a href="#/register" style="font-weight:700">sign up for a new account</a>.</p>`;
+        return;
+      }
       done.innerHTML = sms_sent ? `
         <p><b>Code sent by SMS.</b></p>
         <p class="small muted">Check your texts for the 6-digit code. It expires in 30 minutes.</p>
