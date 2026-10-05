@@ -1475,12 +1475,9 @@ app.post('/api/conversations', ah(auth), ah(async (req, res) => {
   if (!jid || !wid) return err(res, 422, 'Job and worker are required.');
   const job = await getOne('SELECT id, poster_id, title FROM jobs WHERE id = ?', [jid]);
   if (!job) return err(res, 404, 'Job not found.');
-  // The poster can message any applicant; the applicant can also open the
-  // chat about their own active application. Either side finds or creates
-  // the same conversation.
-  const isPoster = me === job.poster_id;
-  const isApplicant = me === wid;
-  if (!isPoster && !isApplicant) return err(res, 403, 'Not authorized for this conversation.');
+  // Only the poster can start the conversation (after shortlisting).
+  // The worker sees it under Messages once the poster writes.
+  if (me !== job.poster_id) return err(res, 403, 'Only the poster can start the conversation.');
   const appRow = await getOne(
     'SELECT id FROM applications WHERE job_id = ? AND worker_id = ? AND status != ?',
     [jid, wid, 'withdrawn']

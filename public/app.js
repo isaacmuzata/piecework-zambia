@@ -53,6 +53,8 @@ const ICONS = {
   clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h6"/>',
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  facebook: '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>',
 };
 function icon(name) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -113,12 +115,55 @@ function toggleSave(id) {
 function shareJob(id, title) {
   const url = 'https://pieceworkzambia.com/#/job/' + id;
   const text = '"' + title + '" — see this job on PieceWork Zambia';
-  if (navigator.share) {
-    navigator.share({ title: 'PieceWork Zambia', text, url }).catch(() => {});
-  } else {
-    // Desktop / no native share sheet: share straight to WhatsApp.
+  // Bottom-sheet with explicit options so a link can always be copied,
+  // even where the native share sheet is unavailable.
+  const overlay = document.createElement('div');
+  overlay.className = 'share-overlay';
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const opt = (icn, label, fn) =>
+    `<button class="share-opt" data-act="${icn}">${icon(icn)}${label}</button>`;
+  overlay.innerHTML = `
+    <div class="share-sheet" role="dialog" aria-label="Share this job">
+      <h3>Share this job</h3>
+      <p class="share-sub">${esc(url)}</p>
+      <div class="share-row">
+        ${opt('copy', 'Copy link')}
+        ${opt('message', 'WhatsApp')}
+        ${opt('facebook', 'Facebook')}
+        ${navigator.share ? opt('share', 'More…') : ''}
+      </div>
+      <button class="btn btn-outline full share-close">Close</button>
+    </div>`;
+  overlay.querySelector('.share-close').addEventListener('click', close);
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    toast('Job link copied. Paste it anywhere to share.');
+    close();
+  };
+  overlay.querySelector('[data-act="copy"]').addEventListener('click', copyLink);
+  overlay.querySelector('[data-act="message"]').addEventListener('click', () => {
     window.open('https://wa.me/?text=' + encodeURIComponent(text + '\n' + url), '_blank', 'noopener');
-  }
+    close();
+  });
+  overlay.querySelector('[data-act="facebook"]').addEventListener('click', () => {
+    window.open('https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(url), '_blank', 'noopener');
+    close();
+  });
+  const more = overlay.querySelector('[data-act="share"]');
+  if (more) more.addEventListener('click', () => {
+    navigator.share({ title: 'PieceWork Zambia', text, url }).catch(() => {});
+    close();
+  });
+  document.body.appendChild(overlay);
 }
 
 /* ---------------- location (kilometre matching) ---------------- */
@@ -704,8 +749,7 @@ async function viewJobDetail(id) {
     actionHtml = `<div class="card"><h3 style="margin-top:0">Your application</h3>
       <p>Status: <span class="badge badge-app-${s}">${esc(s)}</span></p>
       ${s === 'pending' ? `<button class="link-btn" id="btn-withdraw">Withdraw application</button>` : ''}
-      ${s === 'accepted' ? `<div style="margin-top:8px"><button class="btn btn-outline" id="btn-chat-poster">${icon('message')}Chat with ${esc(job.poster.name.split(' ')[0])}</button></div>
-      <p class="small muted">Use the in-app chat to agree on details. Only share your phone number if you are comfortable.</p>` : ''}
+      ${s === 'accepted' ? `<p class="small muted" style="margin-bottom:0">You've been hired! The poster will message you in the app to arrange the details. Check your <a href="#/messages" style="font-weight:700">messages</a>.</p>` : ''}
     </div>`;
   } else if (job.status === 'open') {
     actionHtml = `
@@ -836,8 +880,6 @@ async function viewJobDetail(id) {
       viewJobDetail(id);
     } catch (e) { toast(e.message, true); }
   });
-  const chatPoster = document.getElementById('btn-chat-poster');
-  if (chatPoster) chatPoster.addEventListener('click', (e) => openChat(job.id, currentUser.id, e.target.closest('button')));
   const complete = document.getElementById('btn-complete');
   if (complete) complete.addEventListener('click', async () => {
     if (!confirm('Mark this job as completed? Workers can then be rated.')) return;
@@ -2429,6 +2471,7 @@ async function viewAdminJobs() {
             </div>
             <div style="display:flex;gap:8px;align-items:center">
               <span class="badge badge-status-${j.status}">${esc(j.status)}</span>
+              <button class="btn btn-sm btn-outline" data-share="${j.id}" data-title="${esc(j.title)}" aria-label="Share this job">${icon('share')}Share</button>
               <a class="btn btn-sm btn-outline" href="#/job/${j.id}">View</a>
             </div>
           </div>
