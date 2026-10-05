@@ -663,6 +663,7 @@ async function viewJobDetail(id) {
         <p class="small muted" style="margin:0 0 6px">${job.accepted_count}/${job.workers_needed} hired · ${applicants.length} applied</p>
         ${open ? `
         <div class="btn-row">
+          <a class="btn btn-sm btn-outline" href="#/job/${job.id}/edit">${icon('edit')}Edit</a>
           <button class="btn btn-sm btn-primary" id="btn-complete">Mark completed</button>
           <button class="btn btn-sm btn-danger" id="btn-cancel">Cancel job</button>
         </div>` : `<p class="small muted" style="margin:8px 0 0">This job is ${job.status}.</p>`}
@@ -910,8 +911,9 @@ async function viewJobDetail(id) {
 }
 
 /** Post a job. */
-function jobFormHtml(prefill = {}) {
+function jobFormHtml(prefill = {}, mode = 'post') {
   const today = new Date().toISOString().slice(0, 10);
+  const isEdit = mode === 'edit';
   return `
   <form id="job-form" novalidate>
     <div class="field">
@@ -968,9 +970,9 @@ function jobFormHtml(prefill = {}) {
     </div>
     <div class="field">
       <label>Pinpoint location <span class="hint-inline">(optional)</span></label>
-      <input type="hidden" name="lat" id="jf-lat">
-      <input type="hidden" name="lng" id="jf-lng">
-      <div class="hint" id="jf-loc-status">No GPS pinned — distance matching will use your city centre.</div>
+      <input type="hidden" name="lat" id="jf-lat" value="${esc(prefill.lat ?? '')}">
+      <input type="hidden" name="lng" id="jf-lng" value="${esc(prefill.lng ?? '')}">
+      <div class="hint" id="jf-loc-status">${prefill.lat != null ? '<b>Location pinned</b> — workers will see how many km away the job is.' : 'No GPS pinned — distance matching will use your city centre.'}</div>
       <button type="button" class="btn btn-sm btn-outline" id="btn-pin-loc" style="margin-top:8px">${icon('pin')}Pin my current location</button>
     </div>
     <div class="field">
@@ -978,7 +980,7 @@ function jobFormHtml(prefill = {}) {
       <input name="whatsapp" id="jf-wa" type="tel" inputmode="tel" value="${esc(prefill.whatsapp || (currentUser ? currentUser.phone : ''))}" placeholder="0977 123 456">
       <div class="hint">Workers can message you directly. Leave blank to keep applications in the app only.</div>
     </div>
-    ${currentUser && currentUser.terms_accepted_at ? `
+    ${isEdit ? '' : (currentUser && currentUser.terms_accepted_at ? `
     <div class="field">
       <div class="hint">${icon('shield')} You accepted the <a href="#/terms">Terms and Conditions</a> on ${esc(String(currentUser.terms_accepted_at).slice(0, 10))}.</div>
     </div>` : `
@@ -987,8 +989,8 @@ function jobFormHtml(prefill = {}) {
         <input type="checkbox" name="terms_accepted" id="jf-terms" value="1">
         <span class="small">I have read and agree to the <a href="#/terms" target="_blank" rel="noopener">Terms and Conditions</a> — including that PieceWork is not liable for any damage or theft, and that I am responsible for my own safety precautions when hiring.</span>
       </label>
-    </div>`}
-    <button class="btn btn-primary full" type="submit">${icon('send')}Post job</button>
+    </div>`)}
+    <button class="btn btn-primary full" type="submit">${icon(isEdit ? 'check' : 'send')}${isEdit ? 'Save changes' : 'Post job'}</button>
   </form>`;
 }
 
@@ -1032,6 +1034,68 @@ async function viewPost() {
       const { id } = await api('/api/jobs', { method: 'POST', body: JSON.stringify(data) });
       if (currentUser) currentUser.terms_accepted_at = new Date().toISOString().slice(0, 19).replace('T', ' ');
       toast('Job posted!');
+      location.hash = '#/job/' + id;
+    } catch (err2) {
+      showFieldErrors(form, err2.fields);
+      toast(err2.message, true);
+      btn.disabled = false;
+    }
+  });
+}
+
+/** Edit a job the current user posted (open or filled only). */
+async function viewJobEdit(id) {
+  if (!requireAuth('#/job/' + id + '/edit')) return;
+  app.innerHTML = `<div class="view"><div class="page"><div id="edit-body">${loadingHtml('Loading job…')}</div></div></div>`;
+  const body = document.getElementById('edit-body');
+  let job;
+  try {
+    job = await api('/api/jobs/' + id);
+  } catch (e) {
+    body.innerHTML = emptyHtml('info', 'Could not load job', e.message);
+    return;
+  }
+  if (!job.is_poster) {
+    body.innerHTML = emptyHtml('shield', 'Not authorized', 'Only the poster can edit this job.');
+    return;
+  }
+  if (!['open', 'filled'].includes(job.status)) {
+    body.innerHTML = emptyHtml('info', 'Cannot edit', `This job is ${job.status} and can no longer be edited.`);
+    return;
+  }
+  body.innerHTML = `
+    <h1 class="page-title">Edit job</h1>
+    <p class="page-sub">Fix a mistake or add details. Workers see the update immediately.</p>
+    <div class="card">${jobFormHtml(job, 'edit')}</div>`;
+  const form = document.getElementById('job-form');
+  document.getElementById('btn-pin-loc').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const latEl = document.getElementById('jf-lat');
+    const lngEl = document.getElementById('jf-lng');
+    const locStatus = document.getElementById('jf-loc-status');
+    btn.disabled = true;
+    btn.innerHTML = `${icon('pin')}Locating…`;
+    try {
+      const { lat, lng } = await getGps();
+      latEl.value = lat;
+      lngEl.value = lng;
+      locStatus.innerHTML = '<b>Location pinned</b> — workers will see how many km away the job is.';
+      toast('Location pinned.');
+    } catch (err2) {
+      toast(err2.message, true);
+    }
+    btn.disabled = false;
+    btn.innerHTML = `${icon('pin')}Pin my current location`;
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    const data = Object.fromEntries(new FormData(form).entries());
+    delete data.terms_accepted;
+    try {
+      await api('/api/jobs/' + id, { method: 'PATCH', body: JSON.stringify(data) });
+      toast('Job updated!');
       location.hash = '#/job/' + id;
     } catch (err2) {
       showFieldErrors(form, err2.fields);
@@ -2286,6 +2350,7 @@ async function viewGiveawayDraw(id) {
 const routes = [
   [/^#\/?$/, () => (currentUser ? viewHome() : viewLanding())],
   [/^#\/jobs$/, viewBrowse],
+  [/^#\/job\/(\d+)\/edit$/, (m) => viewJobEdit(m[1])],
   [/^#\/job\/(\d+)$/, (m) => viewJobDetail(m[1])],
   [/^#\/workers$/, viewWorkers],
   [/^#\/post$/, viewPost],

@@ -631,7 +631,7 @@ app.patch('/api/jobs/:id', ah(auth), ah(async (req, res) => {
   if (['completed', 'cancelled'].includes(job.status)) {
     return err(res, 422, 'This job is closed and can no longer be edited.');
   }
-  const editable = ['title', 'description', 'city', 'area', 'date_needed', 'pay_amount', 'pay_type', 'workers_needed', 'whatsapp'];
+  const editable = ['title', 'description', 'category', 'city', 'area', 'date_needed', 'pay_amount', 'pay_type', 'workers_needed', 'whatsapp'];
   const merged = { ...job, ...b };
   const fields = validateJobInput(merged);
   // Only surface errors for fields the poster actually tried to change.

@@ -9,3 +9,9 @@ data/*.db-shm
 *.jks
 .keystore-pass
 play-store/.keystore-pass
+# Android build outputs - NEVER commit
+play-store/android-app/.gradle/
+play-store/android-app/build/
+play-store/android-app/app/build/
+*.apk
+*.aab
