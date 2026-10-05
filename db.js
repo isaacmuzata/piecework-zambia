@@ -80,6 +80,7 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_apps_job ON applications(job_id)`,
   `CREATE INDEX IF NOT EXISTS idx_apps_worker ON applications(worker_id)`,
   `CREATE INDEX IF NOT EXISTS idx_reviews_reviewee ON reviews(reviewee_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_resets_user ON password_resets(user_id)`,
   // Messaging between posters and workers, scoped to a job application.
   `CREATE TABLE IF NOT EXISTS conversations (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,6 +134,18 @@ const SCHEMA = [
     image          TEXT NOT NULL,
     uploaded_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at     TEXT NOT NULL
+  )`,
+  // Password reset codes (2026-10-05): one active code per user, hashed at
+  // rest, single use, short expiry. Delivered by the admin over WhatsApp
+  // until an SMS gateway is wired up.
+  `CREATE TABLE IF NOT EXISTS password_resets (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash      TEXT NOT NULL,
+    expires_at     TEXT NOT NULL,
+    used_at        TEXT,
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 ];
 

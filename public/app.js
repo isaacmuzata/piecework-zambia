@@ -1671,6 +1671,7 @@ function viewLogin() {
         <button class="btn btn-primary full" type="submit">Sign in</button>
       </form>
     </div>
+    <p style="text-align:center;margin-bottom:0"><a href="#/forgot" style="font-weight:600">Forgot password?</a></p>
     <p style="text-align:center">New here? <a href="#/register" style="font-weight:700">Create an account</a></p>
   </div></div>`;
   const form = document.getElementById('login-form');
@@ -1686,6 +1687,96 @@ function viewLogin() {
       currentUser = user; renderChrome();
       toast(`Welcome back, ${user.name.split(' ')[0]}!`);
       afterAuthRedirect();
+    } catch (err2) { toast(err2.message, true); btn.disabled = false; }
+  });
+}
+
+/** Forgot password — step 1: request a reset code (delivered over WhatsApp). */
+function viewForgot() {
+  if (currentUser) { location.hash = '#/dashboard'; return; }
+  app.innerHTML = `
+  <div class="view"><div class="page" style="max-width:420px;margin:0 auto">
+    <h1 class="page-title">Reset password</h1>
+    <p class="page-sub">Enter your phone number. We will send a 6-digit reset code to you on WhatsApp.</p>
+    <div class="card">
+      <form id="forgot-form" novalidate>
+        <div class="field">
+          <label for="fp-phone">Phone number</label>
+          <input name="phone" id="fp-phone" type="tel" inputmode="tel" placeholder="0977 123 456" autocomplete="tel">
+        </div>
+        <button class="btn btn-primary full" type="submit">Send reset code</button>
+      </form>
+      <div id="forgot-done" style="display:none"></div>
+    </div>
+    <p style="text-align:center"><a href="#/login" style="font-weight:600">Back to sign in</a></p>
+  </div></div>`;
+  const form = document.getElementById('forgot-form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const { whatsapp } = await api('/api/auth/forgot', {
+        method: 'POST',
+        body: JSON.stringify({ phone: form.phone.value.trim() }),
+      });
+      const phone = form.phone.value.trim();
+      form.style.display = 'none';
+      const done = document.getElementById('forgot-done');
+      done.style.display = 'block';
+      done.innerHTML = `
+        <p><b>Request received.</b></p>
+        <p class="small muted">Message us on WhatsApp from <b>${esc(phone)}</b> and we will reply with your 6-digit reset code. It expires in 30 minutes.</p>
+        <a class="btn btn-primary full" target="_blank" rel="noopener"
+           href="${waLink(whatsapp, 'Hello PieceWork, I need a password reset code for ' + phone)}">${icon('message')}Message us on WhatsApp</a>
+        <p style="text-align:center;margin:12px 0 0"><a href="#/reset" style="font-weight:700">I have my code — set a new password</a></p>`;
+    } catch (err2) { toast(err2.message, true); btn.disabled = false; }
+  });
+}
+
+/** Forgot password — step 2: redeem the code with a new password. */
+function viewReset() {
+  if (currentUser) { location.hash = '#/dashboard'; return; }
+  app.innerHTML = `
+  <div class="view"><div class="page" style="max-width:420px;margin:0 auto">
+    <h1 class="page-title">New password</h1>
+    <p class="page-sub">Enter the 6-digit code we sent you on WhatsApp, then choose a new password.</p>
+    <div class="card">
+      <form id="reset-form" novalidate>
+        <div class="field">
+          <label for="rp-phone">Phone number</label>
+          <input name="phone" id="rp-phone" type="tel" inputmode="tel" placeholder="0977 123 456" autocomplete="tel">
+        </div>
+        <div class="field">
+          <label for="rp-code">6-digit code</label>
+          <input name="code" id="rp-code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code">
+        </div>
+        <div class="field">
+          <label for="rp-pass">New password</label>
+          <input name="new_password" id="rp-pass" type="password" autocomplete="new-password" placeholder="At least 8 characters">
+        </div>
+        <button class="btn btn-primary full" type="submit">Set new password</button>
+      </form>
+    </div>
+    <p style="text-align:center"><a href="#/login" style="font-weight:600">Back to sign in</a></p>
+  </div></div>`;
+  const form = document.getElementById('reset-form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const { user } = await api('/api/auth/reset', {
+        method: 'POST',
+        body: JSON.stringify({
+          phone: form.phone.value.trim(),
+          code: form.code.value.trim(),
+          new_password: form.new_password.value,
+        }),
+      });
+      currentUser = user; renderChrome();
+      toast('Password updated. You are signed in.');
+      location.hash = '#/dashboard';
     } catch (err2) { toast(err2.message, true); btn.disabled = false; }
   });
 }
@@ -2042,6 +2133,7 @@ async function viewAdmin() {
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
       <a class="btn btn-sm btn-outline" href="#/admin/verifications">🪪 Selfie review</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/resets">🔑 Password resets</a>
     </div>
     <div id="admin-body">${loadingHtml('Loading stats…')}</div>
   </div></div>`;
@@ -2188,8 +2280,66 @@ async function viewVerifications() {
   load();
 }
 
-/** Admin referral monitor — signups, leaderboard, recent joins, cheats. */
-async function viewReferralDashboard() {
+/** Admin password resets — issue codes and send them over WhatsApp. */
+async function viewAdminResets() {
+  if (!requireAuth('#/admin/resets')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Password resets</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <p class="small muted">When someone asks for a reset on WhatsApp, tap <b>Send code</b> — a fresh 6-digit code is generated and WhatsApp opens with it prefilled to their number. The code expires in 30 minutes and works once.</p>
+    <div id="resets-body">${loadingHtml('Loading requests…')}</div>
+  </div></div>`;
+  const body = document.getElementById('resets-body');
+  const fmtDate = (s) => {
+    try { return new Date(String(s).replace(' ', 'T')).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return s; }
+  };
+  const statusBadge = (r) => r.status === 'pending'
+    ? '<span class="badge badge-status-open">Pending</span>'
+    : r.status === 'expired'
+      ? '<span class="badge badge-status-cancelled">Expired</span>'
+      : '<span class="badge badge-status-completed">Closed</span>';
+  async function load() {
+    body.innerHTML = loadingHtml('Loading requests…');
+    try {
+      const { resets } = await api('/api/admin/resets');
+      if (!resets.length) {
+        body.innerHTML = emptyHtml('check', 'No requests', 'Nobody has asked for a password reset yet.');
+        return;
+      }
+      body.innerHTML = resets.map(r => `
+        <div class="card">
+          <div class="split" style="align-items:center">
+            <div><b>${esc(r.user_name)}</b><br>
+              <span class="small muted">${esc(r.user_phone)} · ${fmtDate(r.created_at)}${r.attempts ? ` · ${r.attempts} wrong ${r.attempts === 1 ? 'try' : 'tries'}` : ''}</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              ${statusBadge(r)}
+              ${r.status === 'pending' ? `<button class="btn btn-sm btn-primary" data-issue="${r.id}" data-phone="${esc(r.user_phone)}" data-name="${esc(r.user_name)}">${icon('message')}Send code</button>` : ''}
+            </div>
+          </div>
+        </div>`).join('');
+      body.querySelectorAll('[data-issue]').forEach(b => b.addEventListener('click', () => issue(b)));
+    } catch (e) { body.innerHTML = emptyHtml('info', 'Could not load', e.message); }
+  }
+  async function issue(btn) {
+    btn.disabled = true;
+    try {
+      const { code, user_name, user_phone } = await api(`/api/admin/resets/${btn.dataset.issue}/issue`, { method: 'POST' });
+      toast(`Code issued for ${user_name}.`);
+      window.open(waLink(user_phone, `Hello ${user_name}, your PieceWork password reset code is ${code}. Enter it in the app within 30 minutes. Do not share it with anyone.`), '_blank', 'noopener');
+      load();
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  }
+  load();
+}
+
+/** Admin referral monitor — signups, leaderboard, recent joins, cheats. */async function viewReferralDashboard() {
   if (!requireAuth('#/admin/referrals')) return;
   if (!currentUser.is_admin) {
     app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
@@ -2371,11 +2521,14 @@ const routes = [
   [/^#\/profile$/, viewProfile],
   [/^#\/user\/(\d+)$/, (m) => viewUser(m[1])],
   [/^#\/login$/, viewLogin],
+  [/^#\/forgot$/, viewForgot],
+  [/^#\/reset$/, viewReset],
   [/^#\/register$/, viewRegister],
   [/^#\/invite$/, viewInvite],
   [/^#\/admin\/draw\/(\d+)$/, (m) => viewGiveawayDraw(m[1])],
   [/^#\/admin\/referrals$/, viewReferralDashboard],
   [/^#\/admin\/verifications$/, viewVerifications],
+  [/^#\/admin\/resets$/, viewAdminResets],
   [/^#\/categories$/, viewCategories],
   [/^#\/messages$/, viewMessages],
   [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],

@@ -358,6 +358,131 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------------------------------------------------------------- password reset
+// Phone-only accounts + no SMS gateway yet, so reset codes are delivered by
+// the admin over WhatsApp (same pattern as payment proof). Codes are
+// crypto-random, sha256-hashed at rest, single use, 30-minute expiry, and
+// locked after 5 wrong attempts. Swap deliverResetCode() for an SMS API
+// later without touching the verify path.
+const SUPPORT_WHATSAPP = process.env.SUPPORT_WHATSAPP || '+14437417068';
+const RESET_CODE_TTL_MIN = 30;
+const RESET_MAX_ATTEMPTS = 5;
+const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, standardHeaders: true });
+const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true });
+
+function newResetCode() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+function hashResetCode(code) {
+  return crypto.createHash('sha256').update(String(code)).digest('hex');
+}
+function timingSafeEqual(a, b) {
+  const ba = Buffer.from(String(a)), bb = Buffer.from(String(b));
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
+
+// Step 1: user asks for a reset. Always 200 with the same message so the
+// endpoint never reveals whether a number is registered.
+app.post('/api/auth/forgot', forgotLimiter, ah(async (req, res) => {
+  const normPhone = normalizePhone(req.body && req.body.phone);
+  if (!normPhone) return err(res, 422, 'Enter a valid phone number.');
+  const user = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
+  if (user) {
+    // One live code per user: retire older unused ones.
+    await runWrite("UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL", [user.id]);
+    await runWrite(
+      `INSERT INTO password_resets (user_id, code_hash, expires_at)
+       VALUES (?, ?, datetime('now', ?))`,
+      [user.id, hashResetCode(newResetCode()), `+${RESET_CODE_TTL_MIN} minutes`]
+    );
+  }
+  res.json({
+    ok: true,
+    message: 'If that number has an account, a reset was requested. Message us on WhatsApp and we will send your reset code.',
+    whatsapp: SUPPORT_WHATSAPP,
+  });
+}));
+
+// Step 2: user redeems the code the admin sent over WhatsApp.
+app.post('/api/auth/reset', resetLimiter, ah(async (req, res) => {
+  const { phone, code, new_password } = req.body || {};
+  const normPhone = normalizePhone(phone);
+  if (!normPhone) return err(res, 422, 'Enter a valid phone number.');
+  if (!/^\d{6}$/.test(String(code || '').trim())) return err(res, 422, 'Enter the 6-digit code we sent you.');
+  if (!new_password || String(new_password).length < 8) {
+    return err(res, 422, 'New password must be at least 8 characters.');
+  }
+  const user = await getOne('SELECT * FROM users WHERE phone = ?', [normPhone]);
+  const row = user && await getOne(
+    `SELECT * FROM password_resets WHERE user_id = ? AND used_at IS NULL
+     ORDER BY id DESC LIMIT 1`,
+    [user.id]
+  );
+  const fail = async (msg, status) => {
+    if (row) {
+      const attempts = (row.attempts || 0) + 1;
+      await runWrite('UPDATE password_resets SET attempts = ? WHERE id = ?', [attempts, row.id]);
+      if (attempts >= RESET_MAX_ATTEMPTS) {
+        await runWrite("UPDATE password_resets SET used_at = datetime('now') WHERE id = ?", [row.id]);
+      }
+    }
+    return err(res, status || 401, msg);
+  };
+  if (!row) return fail('That code is not valid. Request a new one.', 401);
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    await runWrite("UPDATE password_resets SET used_at = datetime('now') WHERE id = ?", [row.id]);
+    return fail('That code has expired. Request a new one.', 401);
+  }
+  if (!timingSafeEqual(row.code_hash, hashResetCode(String(code).trim()))) {
+    return fail('Wrong code. Check the message and try again.', 401);
+  }
+  await runWrite('UPDATE users SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(String(new_password), 12), user.id]);
+  await runWrite("UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL", [user.id]);
+  setAuthCookie(res, signToken(user.id));
+  res.json({ user: publicUser(user) });
+}));
+
+// Admin: list reset requests (newest first) with live status.
+app.get('/api/admin/resets', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Admin only.');
+  const rows = await getAll(
+    `SELECT r.id, r.created_at, r.expires_at, r.used_at, r.attempts,
+            u.id AS user_id, u.name AS user_name, u.phone AS user_phone
+     FROM password_resets r JOIN users u ON u.id = r.user_id
+     ORDER BY r.id DESC LIMIT 50`
+  );
+  res.json({
+    resets: rows.map((r) => ({
+      id: r.id, user_id: r.user_id, user_name: r.user_name, user_phone: r.user_phone,
+      created_at: r.created_at, expires_at: r.expires_at, attempts: r.attempts,
+      status: r.used_at ? 'closed'
+        : (new Date(r.expires_at).getTime() < Date.now() ? 'expired' : 'pending'),
+    })),
+  });
+}));
+
+// Admin: (re)issue the code for a request and return it ONCE as plaintext so
+// it can be pasted into WhatsApp. The stored hash is replaced, so only the
+// freshly issued code works.
+app.post('/api/admin/resets/:id/issue', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Admin only.');
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne(
+    `SELECT r.*, u.name AS user_name, u.phone AS user_phone
+     FROM password_resets r JOIN users u ON u.id = r.user_id WHERE r.id = ?`,
+    [id]
+  );
+  if (!row) return err(res, 404, 'Request not found.');
+  const code = newResetCode();
+  await runWrite(
+    `UPDATE password_resets
+     SET code_hash = ?, expires_at = datetime('now', ?), used_at = NULL, attempts = 0
+     WHERE id = ?`,
+    [hashResetCode(code), `+${RESET_CODE_TTL_MIN} minutes`, id]
+  );
+  res.json({ code, user_name: row.user_name, user_phone: row.user_phone, expires_minutes: RESET_CODE_TTL_MIN });
+}));
+
 app.get('/api/auth/me', ah(auth), ah(async (req, res) => {
   res.json({ user: publicUser(req.user) });
 }));
