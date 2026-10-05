@@ -573,7 +573,8 @@ async function viewBrowse() {
       } else {
         results.insertAdjacentHTML('beforeend', data.jobs.map(jobCard).join(''));
       }
-      document.getElementById('more-wrap').innerHTML =
+      const moreWrap = document.getElementById('more-wrap');
+      if (moreWrap) moreWrap.innerHTML =
         data.page < data.totalPages ? `<button id="load-more" class="btn btn-ghost btn-sm">Load more (${data.total - data.page * data.limit} remaining)</button>` : '';
     } catch (e) {
       results.innerHTML = emptyHtml('info', 'Could not load jobs', e.message);
@@ -968,13 +969,18 @@ async function viewPost() {
   const form = document.getElementById('job-form');
   document.getElementById('btn-pin-loc').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
+    // Capture before the GPS await: navigating away mid-lookup detaches these
+    // (harmless) instead of leaving null lookups (which would throw).
+    const latEl = document.getElementById('jf-lat');
+    const lngEl = document.getElementById('jf-lng');
+    const locStatus = document.getElementById('jf-loc-status');
     btn.disabled = true;
     btn.innerHTML = `${icon('pin')}Locating…`;
     try {
       const { lat, lng } = await getGps();
-      document.getElementById('jf-lat').value = lat;
-      document.getElementById('jf-lng').value = lng;
-      document.getElementById('jf-loc-status').innerHTML = '<b>Location pinned</b> — workers will see how many km away the job is.';
+      latEl.value = lat;
+      lngEl.value = lng;
+      locStatus.innerHTML = '<b>Location pinned</b> — workers will see how many km away the job is.';
       toast('Location pinned.');
     } catch (err2) {
       toast(err2.message, true);
@@ -1095,6 +1101,9 @@ async function viewProfile() {
   const tabR = document.getElementById('tab-reviews');
   const paneO = document.getElementById('pf-overview');
   const paneR = document.getElementById('pf-reviews');
+  // Capture before any await: if the user navigates away mid-request these
+  // become detached (harmless) instead of null (which would throw).
+  const statsEl = document.getElementById('pf-stats');
   tabO.addEventListener('click', () => { tabO.classList.add('active'); tabR.classList.remove('active'); paneO.hidden = false; paneR.hidden = true; });
   tabR.addEventListener('click', () => { tabR.classList.add('active'); tabO.classList.remove('active'); paneR.hidden = false; paneO.hidden = true; });
 
@@ -1105,7 +1114,7 @@ async function viewProfile() {
     ]);
     const avg = reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0;
     const positive = reviews.length ? Math.round(avg / 5 * 100) + '%' : '–';
-    document.getElementById('pf-stats').innerHTML = `
+    statsEl.innerHTML = `
       <div><strong>${completed_jobs}</strong><span>Jobs completed</span></div>
       <div><strong>${positive}</strong><span>Positive reviews</span></div>
       <div><strong>${mine.total || 0}</strong><span>Active listings</span></div>`;
@@ -1127,7 +1136,7 @@ async function viewProfile() {
         </div>`).join('')
       : emptyHtml('message', 'No reviews yet', 'Complete jobs to earn your first reviews.');
   } catch (e) {
-    document.getElementById('pf-stats').innerHTML = `<div><strong>–</strong><span>Unavailable</span></div>`;
+    statsEl.innerHTML = `<div><strong>–</strong><span>Unavailable</span></div>`;
     paneO.innerHTML = emptyHtml('info', 'Could not load profile', e.message);
   }
 }

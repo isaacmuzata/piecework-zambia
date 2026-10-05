@@ -1,11 +1,11 @@
 // PieceWork Zambia service worker: offline shell for static assets only.
 // API responses are NEVER cached — job listings are always fresh from the server.
-const CACHE = 'pwz-v12';
+const CACHE = 'pwz-v13';
 // Deploy rule: bump BOTH CACHE and ASSET_V on every frontend deploy.
 // The worker only reinstalls when sw.js bytes change, and versioned URLs are
 // fresh cache keys — together they guarantee returning visitors (and any
 // stale worker / HTTP cache) can never be stuck on a previous deploy's bundle.
-const ASSET_V = 'v=12';
+const ASSET_V = 'v=13';
 const CORE = [
   '/', '/index.html', `/styles.css?${ASSET_V}`, `/app.js?${ASSET_V}`,
   '/manifest.json', '/icon-192.png', '/icon-512.png',
