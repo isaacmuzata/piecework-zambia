@@ -1668,10 +1668,10 @@ function viewLogin() {
           <label for="li-pass">Password</label>
           <input name="password" id="li-pass" type="password" autocomplete="current-password" placeholder="Your password">
         </div>
+        <p style="text-align:right;margin:-4px 0 12px"><a href="#/forgot" class="small" style="font-weight:600">Forgot password?</a></p>
         <button class="btn btn-primary full" type="submit">Sign in</button>
       </form>
     </div>
-    <p style="text-align:center;margin-bottom:0"><a href="#/forgot" style="font-weight:600">Forgot password?</a></p>
     <p style="text-align:center">New here? <a href="#/register" style="font-weight:700">Create an account</a></p>
   </div></div>`;
   const form = document.getElementById('login-form');
