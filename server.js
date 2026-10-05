@@ -708,7 +708,7 @@ function serializeJob(j) {
     city: j.city, area: j.area || '', date_needed: j.date_needed,
     pay_amount: j.pay_amount, pay_type: j.pay_type,
     workers_needed: j.workers_needed, status: j.status,
-    whatsapp: j.whatsapp || '', created_at: j.created_at,
+    created_at: j.created_at,
     poster: {
       id: j.poster_id, name: j.poster_name, city: j.poster_city,
       rating_avg: j.poster_rating || 0, rating_count: j.poster_rating_count || 0,
@@ -758,7 +758,7 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
       SELECT a.id, a.message, a.status, a.created_at,
              u.id AS worker_id, u.name AS worker_name, u.city AS worker_city,
              u.rating_avg AS worker_rating, u.rating_count AS worker_rating_count,
-             u.phone AS worker_phone, u.avatar AS worker_avatar
+             u.avatar AS worker_avatar
       FROM applications a JOIN users u ON u.id = a.worker_id
       WHERE a.job_id = ? AND a.status != 'withdrawn'
       ORDER BY a.created_at ASC
@@ -934,8 +934,7 @@ app.get('/api/jobs/:id/applications', ah(auth), ah(async (req, res) => {
     SELECT a.id, a.message, a.status, a.created_at,
            u.id AS worker_id, u.name AS worker_name, u.city AS worker_city,
            u.bio AS worker_bio, u.skills AS worker_skills,
-           u.rating_avg AS worker_rating, u.rating_count AS worker_rating_count,
-           u.phone AS worker_phone
+           u.rating_avg AS worker_rating, u.rating_count AS worker_rating_count
     FROM applications a JOIN users u ON u.id = a.worker_id
     WHERE a.job_id = ? AND a.status != 'withdrawn'
     ORDER BY a.created_at ASC
@@ -1476,7 +1475,12 @@ app.post('/api/conversations', ah(auth), ah(async (req, res) => {
   if (!jid || !wid) return err(res, 422, 'Job and worker are required.');
   const job = await getOne('SELECT id, poster_id, title FROM jobs WHERE id = ?', [jid]);
   if (!job) return err(res, 404, 'Job not found.');
-  if (me !== job.poster_id) return err(res, 403, 'Only the poster can start the conversation.');
+  // The poster can message any applicant; the applicant can also open the
+  // chat about their own active application. Either side finds or creates
+  // the same conversation.
+  const isPoster = me === job.poster_id;
+  const isApplicant = me === wid;
+  if (!isPoster && !isApplicant) return err(res, 403, 'Not authorized for this conversation.');
   const appRow = await getOne(
     'SELECT id FROM applications WHERE job_id = ? AND worker_id = ? AND status != ?',
     [jid, wid, 'withdrawn']

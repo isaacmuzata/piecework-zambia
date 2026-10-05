@@ -672,7 +672,6 @@ async function viewJobDetail(id) {
     return;
   }
   const isPoster = job.is_poster;
-  const waText = `Hello ${job.poster.name}, I saw your job "${job.title}" on PieceWork Zambia and I'm interested.`;
   const applicants = (job.applications || []).filter(a => a.status !== 'withdrawn');
   const pending = applicants.filter(a => a.status === 'pending');
   const saved = isSaved(job.id);
@@ -705,13 +704,13 @@ async function viewJobDetail(id) {
     actionHtml = `<div class="card"><h3 style="margin-top:0">Your application</h3>
       <p>Status: <span class="badge badge-app-${s}">${esc(s)}</span></p>
       ${s === 'pending' ? `<button class="link-btn" id="btn-withdraw">Withdraw application</button>` : ''}
-      ${s === 'accepted' && job.whatsapp ? `<div style="margin-top:8px"><a class="whatsapp-btn" href="${waLink(job.whatsapp, waText)}" target="_blank" rel="noopener">${icon('message')}Chat on WhatsApp</a></div>` : ''}
+      ${s === 'accepted' ? `<div style="margin-top:8px"><button class="btn btn-outline" id="btn-chat-poster">${icon('message')}Chat with ${esc(job.poster.name.split(' ')[0])}</button></div>
+      <p class="small muted">Use the in-app chat to agree on details. Only share your phone number if you are comfortable.</p>` : ''}
     </div>`;
   } else if (job.status === 'open') {
     actionHtml = `
       <div class="btn-row" style="margin-bottom:14px">
         <button class="btn btn-primary" id="btn-to-apply">${icon('send')}Apply for this job</button>
-        ${job.whatsapp ? `<a class="btn btn-outline" href="${waLink(job.whatsapp, waText)}" target="_blank" rel="noopener">${icon('message')}Message</a>` : ''}
       </div>
       <div class="card" id="apply-card">
         <h3 style="margin-top:0">Apply for this job</h3>
@@ -837,6 +836,8 @@ async function viewJobDetail(id) {
       viewJobDetail(id);
     } catch (e) { toast(e.message, true); }
   });
+  const chatPoster = document.getElementById('btn-chat-poster');
+  if (chatPoster) chatPoster.addEventListener('click', (e) => openChat(job.id, currentUser.id, e.target.closest('button')));
   const complete = document.getElementById('btn-complete');
   if (complete) complete.addEventListener('click', async () => {
     if (!confirm('Mark this job as completed? Workers can then be rated.')) return;
@@ -896,8 +897,6 @@ async function viewJobDetail(id) {
         <button class="btn btn-sm btn-outline" data-msg="${a.worker_id}">${icon('message')}Message</button>
         ${a.status === 'accepted' ? `<button class="btn btn-sm btn-outline" data-nrc="${a.id}">${icon('shield')}View NRC</button>` : ''}
       </div>` : ''}
-      ${a.status === 'pending' ? `
-      <div style="margin-top:8px"><a class="whatsapp-btn" href="${waLink(a.worker_phone, 'Hello ' + a.worker_name + ', about your application for "' + job.title + '" on PieceWork Zambia…')}" target="_blank" rel="noopener">${icon('message')}WhatsApp ${esc(a.worker_name.split(' ')[0])}</a></div>` : ''}
     </div>`;
   }
 
@@ -999,11 +998,6 @@ function jobFormHtml(prefill = {}, mode = 'post') {
       <input type="hidden" name="lng" id="jf-lng" value="${esc(prefill.lng ?? '')}">
       <div class="hint" id="jf-loc-status">${prefill.lat != null ? '<b>Location pinned</b> — workers will see how many km away the job is.' : 'No GPS pinned — distance matching will use your city centre.'}</div>
       <button type="button" class="btn btn-sm btn-outline" id="btn-pin-loc" style="margin-top:8px">${icon('pin')}Pin my current location</button>
-    </div>
-    <div class="field">
-      <label for="jf-wa">WhatsApp number <span class="hint-inline">(optional)</span></label>
-      <input name="whatsapp" id="jf-wa" type="tel" inputmode="tel" value="${esc(prefill.whatsapp || (currentUser ? currentUser.phone : ''))}" placeholder="0977 123 456">
-      <div class="hint">Workers can message you directly. Leave blank to keep applications in the app only.</div>
     </div>
     ${isEdit ? '' : (currentUser && currentUser.terms_accepted_at ? `
     <div class="field">
