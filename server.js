@@ -76,6 +76,13 @@ const JOB_STATUSES = ['open', 'filled', 'completed', 'cancelled'];
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || '+14706538327')
   .split(',').map((s) => s.trim()).filter(Boolean);
 function isAdmin(user) { return !!user && ADMIN_PHONES.includes(user.phone); }
+// Support staff: can review verification selfies and issue password reset
+// codes, but cannot see referrals, giveaways, stats, or NRC documents.
+// Add their signup phone numbers via the SUPPORT_PHONES env var.
+const SUPPORT_PHONES = (process.env.SUPPORT_PHONES || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+function isSupport(user) { return !!user && SUPPORT_PHONES.includes(user.phone); }
+function canModerate(user) { return isAdmin(user) || isSupport(user); }
 
 // ---------------------------------------------------------------- helpers
 const err = (res, code, message, fields) =>
@@ -208,6 +215,7 @@ function publicUser(row) {
     referral_code: row.referral_code || '',
     bio: row.bio || '', skills: row.skills || '', avatar: row.avatar || '',
     open_to_work: !!row.open_to_work, is_admin: isAdmin(row),
+    is_support: isSupport(row),
     selfie_status: row.selfie_status || 'pending',
     terms_accepted_at: row.terms_accepted_at || null,
     rating_avg: row.rating_avg || 0, rating_count: row.rating_count || 0,
@@ -498,7 +506,7 @@ app.post('/api/auth/reset', resetLimiter, ah(async (req, res) => {
 
 // Admin: list reset requests (newest first) with live status.
 app.get('/api/admin/resets', ah(auth), ah(async (req, res) => {
-  if (!isAdmin(req.user)) return err(res, 403, 'Admin only.');
+  if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
   const rows = await getAll(
     `SELECT r.id, r.created_at, r.expires_at, r.used_at, r.attempts,
             u.id AS user_id, u.name AS user_name, u.phone AS user_phone
@@ -519,7 +527,7 @@ app.get('/api/admin/resets', ah(auth), ah(async (req, res) => {
 // it can be pasted into WhatsApp. The stored hash is replaced, so only the
 // freshly issued code works.
 app.post('/api/admin/resets/:id/issue', ah(auth), ah(async (req, res) => {
-  if (!isAdmin(req.user)) return err(res, 403, 'Admin only.');
+  if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
   const id = parseInt(req.params.id, 10);
   const row = await getOne(
     `SELECT r.*, u.name AS user_name, u.phone AS user_phone
@@ -1026,7 +1034,7 @@ async function sweepExpiredNrc() {
 
 // ---------------------------------------------------------------- selfie verification (admin)
 app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
-  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
   const rows = await getAll(`
     SELECT id, name, phone, city, selfie, selfie_status, created_at
     FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'
@@ -1036,7 +1044,7 @@ app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
 }));
 
 app.post('/api/admin/verifications/:userId', ah(auth), ah(async (req, res) => {
-  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
   const userId = parseInt(req.params.userId, 10);
   const { status } = req.body || {};
   if (!['approved', 'rejected'].includes(status)) return err(res, 422, 'Status must be approved or rejected.');

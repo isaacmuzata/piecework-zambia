@@ -299,7 +299,7 @@ function renderChrome() {
   if (currentUser) {
     items.push(['#/dashboard', 'clipboard', 'My Gigs']);
     items.push(['#/profile', 'user', 'Profile']);
-    if (currentUser.is_admin) items.push(['#/admin', 'shield', 'Admin']);
+    if (currentUser.is_admin || currentUser.is_support) items.push(['#/admin', 'shield', 'Admin']);
   }
   items.push(['#/how', 'help', 'Help & Support']);
   nav.innerHTML = items.map(([href, ic, label]) =>
@@ -2127,8 +2127,22 @@ async function viewInvite() {
 /** Admin — self-serve stats, Zac only. */
 async function viewAdmin() {
   if (!requireAuth('#/admin')) return;
+  const mod = currentUser.is_admin || currentUser.is_support;
+  if (!mod) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork team only.')}</div></div>`;
+    return;
+  }
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    // Support staff: verifications + password resets only, no stats.
+    app.innerHTML = `
+    <div class="view"><div class="page">
+      <h1 class="page-title">Support</h1>
+      <p class="page-sub">Selfie reviews and password resets.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a class="btn btn-outline" href="#/admin/verifications">🪪 Selfie review</a>
+        <a class="btn btn-outline" href="#/admin/resets">🔑 Password resets</a>
+      </div>
+    </div></div>`;
     return;
   }
   app.innerHTML = `
@@ -2238,7 +2252,7 @@ async function loadGiveawayAdmin() {
 /** Admin selfie review — approve or reject new signups' verification selfies. */
 async function viewVerifications() {
   if (!requireAuth('#/admin/verifications')) return;
-  if (!currentUser.is_admin) {
+  if (!(currentUser.is_admin || currentUser.is_support)) {
     app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
     return;
   }
@@ -2288,7 +2302,7 @@ async function viewVerifications() {
 /** Admin password resets — issue codes and send them over WhatsApp. */
 async function viewAdminResets() {
   if (!requireAuth('#/admin/resets')) return;
-  if (!currentUser.is_admin) {
+  if (!(currentUser.is_admin || currentUser.is_support)) {
     app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
     return;
   }
