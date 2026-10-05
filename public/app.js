@@ -52,6 +52,7 @@ const ICONS = {
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h6"/>',
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
 };
 function icon(name) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -106,6 +107,18 @@ function toggleSave(id) {
     b.classList.toggle('saved', s.includes(id));
     b.setAttribute('aria-pressed', s.includes(id) ? 'true' : 'false');
   });
+}
+
+/* ---------------- share a job ---------------- */
+function shareJob(id, title) {
+  const url = 'https://pieceworkzambia.com/#/job/' + id;
+  const text = '"' + title + '" — see this job on PieceWork Zambia';
+  if (navigator.share) {
+    navigator.share({ title: 'PieceWork Zambia', text, url }).catch(() => {});
+  } else {
+    // Desktop / no native share sheet: share straight to WhatsApp.
+    window.open('https://wa.me/?text=' + encodeURIComponent(text + '\n' + url), '_blank', 'noopener');
+  }
 }
 
 /* ---------------- location (kilometre matching) ---------------- */
@@ -377,6 +390,7 @@ function jobCard(job) {
         <span>${icon('calendar')}${esc(fmtDate(job.date_needed))}</span>
       </div>
     </div>
+    <button class="job-share" data-share="${job.id}" data-title="${esc(job.title)}" aria-label="Share this job">${icon('share')}</button>
     <button class="job-save ${saved ? 'saved' : ''}" data-save="${job.id}" aria-label="Save this job" aria-pressed="${saved ? 'true' : 'false'}">${icon('bookmark')}</button>
   </article>`;
 }
@@ -756,6 +770,7 @@ async function viewJobDetail(id) {
       <div class="detail-top">
         <button class="icon-btn" id="d-back" aria-label="Back to jobs">${icon('back')}</button>
         <div class="detail-actions">
+          <button class="icon-btn" data-share="${job.id}" data-title="${esc(job.title)}" aria-label="Share this job">${icon('share')}</button>
           <button class="icon-btn ${saved ? 'saved' : ''}" data-save="${job.id}" aria-label="Save this job" aria-pressed="${saved ? 'true' : 'false'}">${icon('bookmark')}</button>
         </div>
       </div>
@@ -2663,6 +2678,13 @@ window.addEventListener('hashchange', router);
 
 /* ---------------- global click delegation ---------------- */
 document.addEventListener('click', (e) => {
+  const shareBtn = e.target.closest('[data-share]');
+  if (shareBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    shareJob(shareBtn.dataset.share, shareBtn.dataset.title || 'Job on PieceWork Zambia');
+    return;
+  }
   const saveBtn = e.target.closest('[data-save]');
   if (saveBtn) {
     e.preventDefault();

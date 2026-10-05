@@ -283,6 +283,12 @@ button{font-family:inherit}
 }
 .job-save svg{width:16px;height:16px}
 .job-save.saved{background:var(--green-tint);color:var(--green)}
+.job-share{
+  position:absolute;top:10px;right:52px;width:34px;height:34px;border-radius:50%;
+  border:none;background:var(--cream);color:var(--gray);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+.job-share svg{width:16px;height:16px}
 
 /* ---------- badges ---------- */
 .badge{
