@@ -2347,6 +2347,14 @@ async function badgeSelfieCount() {
   } catch { /* leave the button unbadged */ }
 }
 
+/** Quick WhatsApp reason templates for messaging users waiting on selfie review. */
+const SELFIE_REASONS = [
+  { label: 'Two people in selfie', text: (n) => `Hi ${n}, your PieceWork Zambia verification selfie was not approved because it shows two people. Please take a new selfie with only yourself, face clearly visible, and upload it again under Profile in the app.` },
+  { label: 'Face not clear', text: (n) => `Hi ${n}, your PieceWork Zambia verification selfie was not approved because your face is not clearly visible. Please retake it in good light, without sunglasses or a hat, and upload it again under Profile in the app.` },
+  { label: '24-hour wait', text: (n) => `Hi ${n}, thanks for joining PieceWork Zambia. Selfie verifications can take up to 24 hours. Yours is in the queue and we will review it soon. You can still browse jobs while you wait.` },
+  { label: 'Custom message', text: (n) => `Hi ${n}, this is the PieceWork Zambia team about your verification selfie: ` },
+];
+
 /** Admin selfie review — approve or reject new signups' verification selfies. */
 async function viewVerifications() {
   if (!requireAuth('#/admin/verifications')) return;
@@ -2383,10 +2391,25 @@ async function viewVerifications() {
           <div class="btn-row">
             <button class="btn btn-sm btn-primary" data-verif-approve="${u.id}">${icon('check')}Approve</button>
             <button class="btn btn-sm btn-danger" data-verif-reject="${u.id}">Reject</button>
+            <button class="btn btn-sm btn-outline" data-verif-msg="${u.id}" data-phone="${esc(u.phone || '')}" data-name="${esc(u.name || '')}">${icon('message')}Message</button>
           </div>
+          <div class="chips" data-reasons-for="${u.id}" hidden style="margin-top:10px"></div>
         </div>`).join('');
       body.querySelectorAll('[data-verif-approve]').forEach(b => b.addEventListener('click', () => decide(b.dataset.verifApprove, 'approved')));
       body.querySelectorAll('[data-verif-reject]').forEach(b => b.addEventListener('click', () => decide(b.dataset.verifReject, 'rejected')));
+      body.querySelectorAll('[data-verif-msg]').forEach(b => b.addEventListener('click', () => {
+        const box = body.querySelector(`[data-reasons-for="${b.dataset.verifMsg}"]`);
+        if (!box) return;
+        if (!box.dataset.built) {
+          box.dataset.built = '1';
+          box.innerHTML = SELFIE_REASONS.map((r, i) => `<button class="chip" data-reason="${i}">${esc(r.label)}</button>`).join('');
+          box.querySelectorAll('[data-reason]').forEach(c => c.addEventListener('click', () => {
+            const first = (b.dataset.name || 'there').split(' ')[0];
+            window.open(waLink(b.dataset.phone, SELFIE_REASONS[+c.dataset.reason].text(first)), '_blank', 'noopener');
+          }));
+        }
+        box.hidden = !box.hidden;
+      }));
     } catch (e) { body.innerHTML = emptyHtml('info', 'Could not load', e.message); }
   }
   async function decide(userId, status) {
