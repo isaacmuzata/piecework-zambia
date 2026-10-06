@@ -145,6 +145,19 @@ const SCHEMA = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_vouches_vouchee ON vouches(vouchee_id)`,
   `CREATE INDEX IF NOT EXISTS idx_vouches_voucher ON vouches(voucher_id)`,
+  // Delivery tracking: when a delivery worker collects the parcel they start
+  // sharing live GPS; the poster watches it until marked delivered. Coords are
+  // cleared on completion — no location history is kept.
+  `CREATE TABLE IF NOT EXISTS delivery_tracking (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      INTEGER NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+    worker_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    poster_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status      TEXT NOT NULL DEFAULT 'active',
+    lat         REAL,
+    lng         REAL,
+    updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
   // Password reset codes (2026-10-05): one active code per user, hashed at
   // rest, single use, short expiry. Delivered by the admin over WhatsApp
   // until an SMS gateway is wired up.

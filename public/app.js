@@ -94,6 +94,48 @@ const topbarAuth = document.getElementById('topbar-auth');
 let currentUser = null;
 let browseState = { q: '', city: '', category: '', page: 1, maxKm: 50 };
 let chatTimer = null;
+let deliveryWatchId = null;
+
+/** Stop any active delivery location sharing (called on navigation). */
+function stopDeliverySharing() {
+  if (deliveryWatchId !== null && 'geolocation' in navigator) {
+    navigator.geolocation.clearWatch(deliveryWatchId);
+  }
+  deliveryWatchId = null;
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', stopDeliverySharing);
+}
+
+/**
+ * Prompt for location permission and stream the worker's GPS to the server
+ * while a delivery is active. Throttled to one update per 20 seconds.
+ */
+function startDeliverySharing(jobId, onUpdate) {
+  stopDeliverySharing();
+  if (!('geolocation' in navigator)) {
+    toast('This device does not support location sharing.', true);
+    return false;
+  }
+  let lastSent = 0;
+  const sendPos = (pos) => {
+    const now = Date.now();
+    if (now - lastSent < 20000) return;
+    lastSent = now;
+    api(`/api/jobs/${jobId}/location`, {
+      method: 'POST',
+      body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+    }).then(() => { if (onUpdate) onUpdate(new Date()); }).catch(() => {});
+  };
+  deliveryWatchId = navigator.geolocation.watchPosition(
+    sendPos,
+    () => toast('Location permission is needed to share your delivery. Please allow it in your browser settings.', true),
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+  );
+  // Send one reading immediately so the poster isn't staring at a blank map.
+  navigator.geolocation.getCurrentPosition(sendPos, () => {}, { enableHighAccuracy: true, timeout: 15000 });
+  return true;
+}
 
 /* ---------------- saved jobs (on this device) ---------------- */
 function getSaved() {
@@ -769,6 +811,7 @@ async function viewJobDetail(id) {
         <div class="split" style="margin-bottom:8px"><h3 style="margin:0">Manage this job</h3>
           <span class="badge badge-status-${job.status}">${esc(job.status)}</span></div>
         <p class="small muted" style="margin:0 0 6px">${job.accepted_count}/${job.workers_needed} hired · ${applicants.length} applied</p>
+        ${job.delivery_status === 'active' ? `<a class="btn btn-sm btn-primary" href="#/job/${job.id}/track" style="margin-bottom:8px">${icon('pin')}Track delivery — live</a>` : ''}
         ${open ? `
         <div class="btn-row">
           <a class="btn btn-sm btn-outline" href="#/job/${job.id}/edit">${icon('edit')}Edit</a>
@@ -786,11 +829,30 @@ async function viewJobDetail(id) {
       <a class="btn btn-primary full" href="#/login">Sign in / Register</a></div>`;
   } else if (job.my_application && job.my_application.status !== 'withdrawn') {
     const s = job.my_application.status;
+    const isDelivery = job.category === 'Delivery & Errands';
+    const tracking = job.delivery_status || 'none';
     actionHtml = `<div class="card"><h3 style="margin-top:0">Your application</h3>
       <p>Status: <span class="badge badge-app-${s}">${esc(s)}</span></p>
       ${s === 'pending' ? `<button class="link-btn" id="btn-withdraw">Withdraw application</button>` : ''}
       ${s === 'accepted' ? `<p class="small muted" style="margin-bottom:0">You've been hired! The poster will message you in the app to arrange the details. Check your <a href="#/messages" style="font-weight:700">messages</a>.</p>` : ''}
     </div>`;
+    if (s === 'accepted' && isDelivery) {
+      if (tracking === 'active') {
+        actionHtml += `
+        <div class="card" style="border:2px solid var(--green,#16a34a);text-align:center" id="delivery-card">
+          <h3 style="margin-top:0">${icon('pin')}Sharing live location</h3>
+          <p class="small muted" id="delivery-status">The poster can see where you are. Keep this page open while you deliver.</p>
+          <button class="btn btn-primary full" id="btn-delivered">${icon('check')}Mark as delivered</button>
+        </div>`;
+      } else if (tracking !== 'delivered') {
+        actionHtml += `
+        <div class="card" style="text-align:center" id="delivery-card">
+          <h3 style="margin-top:0">${icon('truck')}Delivering this parcel?</h3>
+          <p class="small muted">Once you collect the parcel, share your live location so the poster can follow the delivery.</p>
+          <button class="btn btn-primary full" id="btn-collect">${icon('pin')}Parcel collected — share live location</button>
+        </div>`;
+      }
+    }
   } else if (job.status === 'open') {
     const oriented = !!(currentUser && currentUser.orientation_accepted_at);
     const licenseOk = !job.requires_food_license || !!(currentUser && currentUser.food_license_valid);
@@ -944,6 +1006,32 @@ async function viewJobDetail(id) {
       viewJobDetail(id);
     } catch (e) { toast(e.message, true); }
   });
+  // Delivery tracking: worker shares live GPS after collecting the parcel.
+  const collectBtn = document.getElementById('btn-collect');
+  if (collectBtn) collectBtn.addEventListener('click', async () => {
+    collectBtn.disabled = true;
+    try {
+      await api(`/api/jobs/${id}/collect`, { method: 'POST' });
+      toast('Parcel collected. Sharing your live location with the poster.');
+      viewJobDetail(id); renderChrome();
+    } catch (e) { toast(e.message, true); collectBtn.disabled = false; }
+  });
+  const deliveredBtn = document.getElementById('btn-delivered');
+  if (deliveredBtn) {
+    const statusEl = document.getElementById('delivery-status');
+    startDeliverySharing(id, (when) => {
+      if (statusEl) statusEl.textContent = `Sharing live location — last update ${when.toLocaleTimeString()}. Keep this page open while you deliver.`;
+    });
+    deliveredBtn.addEventListener('click', async () => {
+      if (!confirm('Mark this delivery as delivered? Location sharing will stop.')) return;
+      try {
+        await api(`/api/jobs/${id}/delivered`, { method: 'POST' });
+        stopDeliverySharing();
+        toast('Delivered. Location sharing stopped.');
+        viewJobDetail(id); renderChrome();
+      } catch (e) { toast(e.message, true); }
+    });
+  }
   const complete = document.getElementById('btn-complete');
   if (complete) complete.addEventListener('click', async () => {
     if (!confirm('Mark this job as completed? Workers can then be rated.')) return;
@@ -1043,6 +1131,75 @@ async function viewJobDetail(id) {
     } catch (e) { toast(e.message, true); }
     btn.disabled = false;
   }
+}
+
+/** Poster (or worker) watches the live delivery on a map. */
+async function viewTrackDelivery(id) {
+  if (!requireAuth('#/job/' + id + '/track')) return;
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Live delivery</h1>
+    <p class="page-sub"><a href="#/job/${id}">← Back to job</a><span id="track-status"></span></p>
+    <div class="card" style="padding:8px">
+      <div id="track-map" style="height:420px;border-radius:12px;z-index:0"></div>
+    </div>
+    <p class="small muted" id="track-note"></p>
+  </div></div>`;
+  const statusEl = document.getElementById('track-status');
+  const noteEl = document.getElementById('track-note');
+  async function leaflet() {
+    if (window.L) return window.L;
+    await new Promise((resolve, reject) => {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.onload = resolve; s.onerror = reject;
+      document.head.appendChild(s);
+    });
+    return window.L;
+  }
+  let map = null, marker = null, timer = null, L = null;
+  async function refresh() {
+    try {
+      const t = await api(`/api/jobs/${id}/track`);
+      if (t.status === 'none') {
+        statusEl.innerHTML = ' · <b>No tracking yet</b>';
+        noteEl.textContent = 'Tracking starts when the worker collects the parcel.';
+        return;
+      }
+      if (t.status === 'delivered') {
+        statusEl.innerHTML = ' · <b>Delivered</b>';
+        noteEl.textContent = 'This delivery is complete. Location sharing has stopped.';
+        if (timer) clearInterval(timer);
+        return;
+      }
+      statusEl.innerHTML = ` · <b>Live</b>${t.updated_at ? ` — updated ${esc(fmtDateTime(t.updated_at))}` : ''}`;
+      if (t.lat != null && t.lng != null && map) {
+        const p = [t.lat, t.lng];
+        if (!marker) { marker = L.marker(p).addTo(map); map.setView(p, 14); }
+        else marker.setLatLng(p);
+        noteEl.textContent = '';
+      } else {
+        noteEl.textContent = 'Waiting for the first location update from the worker…';
+      }
+    } catch (e) { noteEl.textContent = 'Could not load tracking: ' + e.message; }
+  }
+  try {
+    L = await leaflet();
+    map = L.map('track-map').setView([-15.3875, 28.3228], 12); // Lusaka default
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+  } catch (e) {
+    noteEl.textContent = 'Could not load the map. Check your connection and try again.';
+    return;
+  }
+  refresh();
+  timer = setInterval(refresh, 15000);
+  window.addEventListener('hashchange', () => clearInterval(timer), { once: true });
 }
 
 /** Post a job. */
@@ -3105,6 +3262,7 @@ const routes = [
   [/^#\/?$/, () => (currentUser ? viewHome() : viewLanding())],
   [/^#\/jobs$/, viewBrowse],
   [/^#\/job\/(\d+)\/edit$/, (m) => viewJobEdit(m[1])],
+  [/^#\/job\/(\d+)\/track$/, (m) => viewTrackDelivery(m[1])],
   [/^#\/job\/(\d+)$/, (m) => viewJobDetail(m[1])],
   [/^#\/workers$/, viewWorkers],
   [/^#\/post$/, viewPost],

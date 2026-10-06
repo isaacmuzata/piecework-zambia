@@ -788,6 +788,8 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
         [id, req.user.id]
       )) || null
     : null;
+  const dt = await getOne("SELECT status FROM delivery_tracking WHERE job_id = ?", [id]);
+  job.delivery_status = dt ? dt.status : 'none';
   if (isPoster) {
     job.applications = await getAll(`
       SELECT a.id, a.message, a.status, a.created_at,
@@ -1102,6 +1104,67 @@ app.get('/api/applications/:id/nrc', ah(auth), ah(async (req, res) => {
     uploaded_at: doc.uploaded_at,
     expires_at: doc.expires_at,
   });
+}));
+
+// ---------------------------------------------------------------- delivery tracking
+/** Hired worker: parcel collected — start sharing live location with the poster. */
+app.post('/api/jobs/:id/collect', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const job = await getOne('SELECT id, poster_id FROM jobs WHERE id = ?', [id]);
+  if (!job) return err(res, 404, 'Job not found.');
+  const appRow = await getOne(
+    "SELECT id FROM applications WHERE job_id = ? AND worker_id = ? AND status = 'accepted'",
+    [id, req.user.id]
+  );
+  if (!appRow) return err(res, 403, 'Only the hired worker can start delivery tracking.');
+  const existing = await getOne('SELECT id FROM delivery_tracking WHERE job_id = ?', [id]);
+  if (existing) {
+    await runWrite("UPDATE delivery_tracking SET status = 'active', updated_at = datetime('now') WHERE id = ?", [existing.id]);
+  } else {
+    await runWrite(
+      "INSERT INTO delivery_tracking (job_id, worker_id, poster_id, status) VALUES (?, ?, ?, 'active')",
+      [id, req.user.id, job.poster_id]
+    );
+  }
+  res.json({ ok: true });
+}));
+
+/** Hired worker: share current GPS while the delivery is active. */
+app.post('/api/jobs/:id/location', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const c = parseLatLng(req.body || {});
+  if (!c || c.error) return err(res, 422, 'Valid coordinates required.');
+  const t = await getOne(
+    "SELECT id FROM delivery_tracking WHERE job_id = ? AND worker_id = ? AND status = 'active'",
+    [id, req.user.id]
+  );
+  if (!t) return err(res, 422, 'No active delivery for this job.');
+  await runWrite("UPDATE delivery_tracking SET lat = ?, lng = ?, updated_at = datetime('now') WHERE id = ?", [c.lat, c.lng, t.id]);
+  res.json({ ok: true });
+}));
+
+/** Hired worker: mark delivered — stops tracking and clears the coordinates. */
+app.post('/api/jobs/:id/delivered', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const t = await getOne(
+    "SELECT id FROM delivery_tracking WHERE job_id = ? AND worker_id = ? AND status = 'active'",
+    [id, req.user.id]
+  );
+  if (!t) return err(res, 422, 'No active delivery for this job.');
+  await runWrite("UPDATE delivery_tracking SET status = 'delivered', lat = NULL, lng = NULL, updated_at = datetime('now') WHERE id = ?", [t.id]);
+  res.json({ ok: true });
+}));
+
+/** Poster or hired worker: current delivery tracking state. */
+app.get('/api/jobs/:id/track', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const job = await getOne('SELECT id, poster_id FROM jobs WHERE id = ?', [id]);
+  if (!job) return err(res, 404, 'Job not found.');
+  const t = await getOne('SELECT status, lat, lng, updated_at FROM delivery_tracking WHERE job_id = ?', [id]);
+  if (!t) return res.json({ status: 'none' });
+  const mine = await getOne('SELECT id FROM applications WHERE job_id = ? AND worker_id = ?', [id, req.user.id]);
+  if (job.poster_id !== req.user.id && !mine && !isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  res.json(t);
 }));
 
 // Worker-facing: which of my accepted applications still need an NRC upload.
