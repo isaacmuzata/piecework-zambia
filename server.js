@@ -228,6 +228,20 @@ function publicUser(row, includePhone = true) {
 }
 
 /**
+ * Trust badges for a user row. verified = selfie approved by the team;
+ * id = national ID on file; vouched = vouched for by verified members;
+ * proven = 3+ completed ratings averaging 4 stars or more.
+ */
+function trustBadges(row, vouchCount) {
+  const badges = [];
+  if ((row.selfie_status || 'pending') === 'approved') badges.push('verified');
+  if (row.nrc_verified) badges.push('id');
+  if (Number(vouchCount || 0) >= 1) badges.push('vouched');
+  if (Number(row.rating_count || 0) >= 3 && Number(row.rating_avg || 0) >= 4) badges.push('proven');
+  return badges;
+}
+
+/**
  * Validate a client-downscaled JPEG/PNG/WebP data URL.
  * Returns null when valid, otherwise an error message.
  */
@@ -1025,6 +1039,9 @@ app.post('/api/applications/:id/nrc', ah(auth), ah(async (req, res) => {
       [id, appRow.worker_id, job.id, job.poster_id, String(req.body.image)]
     );
   }
+  // Permanent trust signal: this worker has put a national ID on file,
+  // even after the doc itself expires and is deleted.
+  await runWrite('UPDATE users SET nrc_verified = 1 WHERE id = ?', [appRow.worker_id]);
   res.json({ ok: true, expires_in_days: NRC_TTL_DAYS });
 }));
 
@@ -1091,6 +1108,31 @@ app.post('/api/admin/verifications/:userId', ah(auth), ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------------------------------------------------------------- vouches
+// A verified member publicly stands behind someone they personally know.
+// Only selfie-approved members can vouch; one vouch per pair; no self-vouch.
+app.post('/api/vouches', ah(auth), ah(async (req, res) => {
+  const targetId = parseInt((req.body || {}).user_id, 10);
+  if (!targetId) return err(res, 422, 'Choose who to vouch for.');
+  if (targetId === req.user.id) return err(res, 422, 'You cannot vouch for yourself.');
+  const me = await getOne('SELECT selfie_status FROM users WHERE id = ?', [req.user.id]);
+  if (!me || me.selfie_status !== 'approved') {
+    return err(res, 403, 'Only verified members can vouch for others.');
+  }
+  const target = await getOne('SELECT id FROM users WHERE id = ?', [targetId]);
+  if (!target) return err(res, 404, 'User not found.');
+  await runWrite('INSERT OR IGNORE INTO vouches (voucher_id, vouchee_id) VALUES (?, ?)',
+    [req.user.id, targetId]);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/vouches/:userId', ah(auth), ah(async (req, res) => {
+  const targetId = parseInt(req.params.userId, 10);
+  await runWrite('DELETE FROM vouches WHERE voucher_id = ? AND vouchee_id = ?',
+    [req.user.id, targetId]);
+  res.json({ ok: true });
+}));
+
 // ---------------------------------------------------------------- users
 app.get('/api/workers', ah(async (req, res) => {
   const city = (req.query.city || '').trim();
@@ -1099,7 +1141,12 @@ app.get('/api/workers', ah(async (req, res) => {
   const rows = await getAll(
     `SELECT * FROM users ${where} ORDER BY created_at DESC LIMIT 100`, params
   );
-  res.json({ workers: rows.map(r => publicUser(r, false)) });
+  const vcRows = await getAll('SELECT vouchee_id, COUNT(*) AS c FROM vouches GROUP BY vouchee_id');
+  const vcMap = Object.fromEntries(vcRows.map(r => [r.vouchee_id, Number(r.c)]));
+  res.json({ workers: rows.map(r => {
+    const v = vcMap[r.id] || 0;
+    return { ...publicUser(r, false), badges: trustBadges(r, v), vouch_count: v };
+  })});
 }));
 
 app.get('/api/users/:id', maybeAuth, ah(async (req, res) => {
@@ -1117,7 +1164,24 @@ app.get('/api/users/:id', maybeAuth, ah(async (req, res) => {
     FROM reviews r JOIN users u ON u.id = r.reviewer_id JOIN jobs j ON j.id = r.job_id
     WHERE r.reviewee_id = ? ORDER BY r.created_at DESC LIMIT 10
   `, [id]);
-  res.json({ user: publicUser(user, isSelf), completed_jobs: completed, reviews });
+  const vouchCount = Number((await getOne(
+    'SELECT COUNT(*) AS c FROM vouches WHERE vouchee_id = ?', [id])).c || 0);
+  const vouchedBy = await getAll(`
+    SELECT u.name FROM vouches v JOIN users u ON u.id = v.voucher_id
+    WHERE v.vouchee_id = ? ORDER BY v.created_at DESC LIMIT 10
+  `, [id]);
+  let viewerVouched = false;
+  if (req.user) {
+    viewerVouched = !!(await getOne(
+      'SELECT id FROM vouches WHERE voucher_id = ? AND vouchee_id = ?', [req.user.id, id]));
+  }
+  const u = publicUser(user, isSelf);
+  u.badges = trustBadges(user, vouchCount);
+  u.vouch_count = vouchCount;
+  res.json({
+    user: u, completed_jobs: completed, reviews,
+    vouched_by: vouchedBy.map(r => r.name), viewer_vouched: viewerVouched,
+  });
 }));
 
 app.patch('/api/users/me', ah(auth), ah(async (req, res) => {

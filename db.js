@@ -134,6 +134,17 @@ const SCHEMA = [
     uploaded_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at     TEXT NOT NULL
   )`,
+  // Vouches: a verified member publicly stands behind someone they
+  // personally know. One vouch per pair; powers the "Vouched" trust badge.
+  `CREATE TABLE IF NOT EXISTS vouches (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    voucher_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    vouchee_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (voucher_id, vouchee_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_vouches_vouchee ON vouches(vouchee_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_vouches_voucher ON vouches(voucher_id)`,
   // Password reset codes (2026-10-05): one active code per user, hashed at
   // rest, single use, short expiry. Delivered by the admin over WhatsApp
   // until an SMS gateway is wired up.
@@ -166,6 +177,7 @@ const OPTIONAL_COLUMNS = [
   ['users', 'selfie', 'TEXT'],
   ['users', 'selfie_status', "TEXT DEFAULT 'pending'"],
   ['users', 'terms_accepted_at', 'TEXT'],
+  ['users', 'nrc_verified', 'INTEGER DEFAULT 0'],
 ];
 
 async function init() {

@@ -690,6 +690,7 @@ function workerCard(w) {
     <div class="job-body">
       <h3>${esc(w.name)}</h3>
       <div class="job-meta"><span>${icon('pin')}<b>${esc(w.city)}</b></span>${w.rating_count ? `<span>${stars(w.rating_avg)} <b>${Number(w.rating_avg).toFixed(1)}</b></span>` : ''}</div>
+      ${trustBadgesHtml(w.badges, w.vouch_count)}
       ${skillList.length ? `<div class="job-meta"><span>${icon('tag')}${skillList.map(esc).join(' · ')}</span></div>` : ''}
       ${w.bio ? `<p class="worker-bio">${esc(w.bio)}</p>` : ''}
     </div>
@@ -1352,7 +1353,8 @@ async function viewProfile() {
       <div><strong>${mine.total || 0}</strong><span>Active listings</span></div>`;
     const skills = (user.skills || '').split(',').map(s => s.trim()).filter(Boolean);
     paneO.innerHTML = `
-      ${user.bio ? `<p style="margin-top:0">${esc(user.bio)}</p>` : `<p class="small muted" style="margin-top:0">No bio yet — <a href="#/profile/edit"><b>tell people who you are</b></a>.</p>`}
+      ${trustBadgesHtml(user.badges, user.vouch_count)}
+      ${user.bio ? `<p style="margin-top:12px">${esc(user.bio)}</p>` : `<p class="small muted" style="margin-top:12px">No bio yet — <a href="#/profile/edit"><b>tell people who you are</b></a>.</p>`}
       ${skills.length ? `<div class="tagrow" style="margin:0 0 12px">${skills.map(s => `<span class="tag">${esc(s)}</span>`).join('')}</div>` : ''}
       <ul class="detail-list" style="margin:0">
         <li>${icon('phone')}<div><b>${esc(user.phone)}</b><br><span class="small muted">Phone</span></div></li>
@@ -1509,15 +1511,18 @@ function fileToDoc(file) {
 async function viewUser(id) {
   app.innerHTML = loadingHtml('Loading profile…');
   try {
-    const { user, completed_jobs, reviews } = await api('/api/users/' + id);
+    const { user, completed_jobs, reviews, vouched_by, viewer_vouched } = await api('/api/users/' + id);
     const skills = (user.skills || '').split(',').map(s => s.trim()).filter(Boolean);
     const isSelf = currentUser && currentUser.id === user.id;
+    const canVouch = currentUser && !isSelf && currentUser.selfie_status === 'approved';
+    const firstName = esc(String(user.name || '').split(' ')[0]);
     app.innerHTML = `
     <div class="view">
       <div class="profile-hero">
         ${avatarHtml(user, 'lg')}
         <h2>${esc(user.name)}</h2>
         <div class="sub">${esc(user.city)} · ${stars(user.rating_avg)} (${user.rating_count} reviews)</div>
+        ${trustBadgesHtml(user.badges, user.vouch_count)}
       </div>
       <div class="profile-stats">
         <div><strong>${completed_jobs}</strong><span>Jobs completed</span></div>
@@ -1534,6 +1539,21 @@ async function viewUser(id) {
           </ul>
           ${isSelf ? `<div style="margin-top:12px"><a class="btn btn-sm btn-outline" href="#/profile/edit">${icon('edit')}Edit my profile</a></div>` : ''}
         </div>
+        ${!isSelf && currentUser ? `
+        <div class="card">
+          <h3 style="margin-top:0">${icon('users')} Vouch for ${firstName}</h3>
+          <p class="small muted" style="margin-top:0">Know ${firstName} in real life? Your vouch tells posters this person can be trusted. Only vouch for people you personally know.</p>
+          ${viewer_vouched
+            ? `<button class="btn btn-sm btn-outline" id="unvouch-btn">${icon('check')}You vouched — tap to remove</button>`
+            : canVouch
+              ? `<button class="btn btn-sm btn-primary" id="vouch-btn">${icon('users')}Vouch for ${firstName}</button>`
+              : `<p class="small muted" style="margin-bottom:0">Get your own selfie verified to vouch for others.</p>`}
+        </div>` : ''}
+        ${user.vouch_count ? `
+        <div class="card">
+          <h3 style="margin-top:0">Vouched by ${user.vouch_count}</h3>
+          <p class="small" style="margin-bottom:0">${vouched_by.map(n => `<b>${esc(n)}</b>`).join(' · ')}</p>
+        </div>` : ''}
         <div class="card">
           <h3 style="margin-top:0">Reviews (${reviews.length})</h3>
           ${reviews.length ? reviews.map(r => `
@@ -1546,6 +1566,24 @@ async function viewUser(id) {
         </div>
       </div>
     </div>`;
+    const vouchBtn = document.getElementById('vouch-btn');
+    if (vouchBtn) vouchBtn.addEventListener('click', async () => {
+      vouchBtn.disabled = true;
+      try {
+        await api('/api/vouches', { method: 'POST', body: JSON.stringify({ user_id: user.id }) });
+        toast('You vouched for ' + user.name + '.');
+        viewUser(id);
+      } catch (e) { toast(e.message, true); vouchBtn.disabled = false; }
+    });
+    const unvouchBtn = document.getElementById('unvouch-btn');
+    if (unvouchBtn) unvouchBtn.addEventListener('click', async () => {
+      unvouchBtn.disabled = true;
+      try {
+        await api('/api/vouches/' + user.id, { method: 'DELETE' });
+        toast('Vouch removed.');
+        viewUser(id);
+      } catch (e) { toast(e.message, true); unvouchBtn.disabled = false; }
+    });
   } catch (e) {
     app.innerHTML = `<div class="page">${emptyHtml('search', 'Profile not found', e.message)}</div>`;
   }
@@ -2345,6 +2383,24 @@ async function badgeSelfieCount() {
     const btn = document.getElementById('btn-selfie-review');
     if (btn && pending_count > 0) btn.innerHTML = `🪪 Selfie review <b class="count-badge">${pending_count}</b>`;
   } catch { /* leave the button unbadged */ }
+}
+
+/** Trust badges: vetting tiers shown on profiles and worker cards. */
+const TRUST_BADGE_DEFS = {
+  verified: { label: 'Verified', icon: 'check', cls: 'tb-verified', hint: 'Identity selfie verified by the PieceWork team' },
+  id: { label: 'ID verified', icon: 'shield', cls: 'tb-id', hint: 'National ID on file' },
+  vouched: { label: 'Vouched', icon: 'users', cls: 'tb-vouched', hint: 'Vouched for by people who know them' },
+  proven: { label: 'Proven', icon: null, cls: 'tb-proven', hint: 'Completed jobs with top ratings' },
+};
+function trustBadgesHtml(badges, vouchCount) {
+  if (!badges || !badges.length) return '';
+  return '<div class="tbadge-row">' + badges.map(b => {
+    const d = TRUST_BADGE_DEFS[b];
+    if (!d) return '';
+    const extra = b === 'vouched' && vouchCount ? ' · ' + vouchCount : '';
+    const ic = d.icon ? icon(d.icon) : '★';
+    return `<span class="tbadge ${d.cls}" title="${esc(d.hint)}">${ic}${esc(d.label)}${extra}</span>`;
+  }).join('') + '</div>';
 }
 
 /** Quick WhatsApp reason templates for messaging users waiting on selfie review. */
