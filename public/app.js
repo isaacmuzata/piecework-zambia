@@ -662,7 +662,6 @@ function workerCard(w) {
       <div class="job-meta"><span>${icon('pin')}<b>${esc(w.city)}</b></span>${w.rating_count ? `<span>${stars(w.rating_avg)} <b>${Number(w.rating_avg).toFixed(1)}</b></span>` : ''}</div>
       ${skillList.length ? `<div class="job-meta"><span>${icon('tag')}${skillList.map(esc).join(' · ')}</span></div>` : ''}
       ${w.bio ? `<p class="worker-bio">${esc(w.bio)}</p>` : ''}
-      <div style="margin-top:8px"><a class="whatsapp-btn" href="${waLink(w.phone, 'Hello ' + w.name + ', I found your profile on the PieceWork Zambia Looking for Work page.')}" target="_blank" rel="noopener">${icon('message')}WhatsApp ${esc(w.name.split(' ')[0])}</a></div>
     </div>
   </article>`;
 }
@@ -1500,10 +1499,9 @@ async function viewUser(id) {
           ${user.bio ? `<p style="margin-top:0">${esc(user.bio)}</p>` : `<p class="small muted" style="margin-top:0">No bio yet.</p>`}
           ${skills.length ? `<div class="tagrow" style="margin:0 0 4px">${skills.map(s => `<span class="tag">${esc(s)}</span>`).join('')}</div>` : ''}
           <ul class="detail-list" style="margin-bottom:0">
-            <li>${icon('phone')}<div><b>${esc(user.phone)}</b><br><span class="small muted">Phone</span></div></li>
+            ${isSelf && user.phone ? `<li>${icon('phone')}<div><b>${esc(user.phone)}</b><br><span class="small muted">Phone</span></div></li>` : ''}
             <li>${icon('pin')}<div><b>${esc(user.city)}</b><br><span class="small muted">City</span></div></li>
           </ul>
-          ${!isSelf ? `<div style="margin-top:12px"><a class="whatsapp-btn" href="${waLink(user.phone, 'Hello ' + user.name + ', I found you on PieceWork Zambia.')}" target="_blank" rel="noopener">${icon('message')}Chat on WhatsApp</a></div>` : ''}
           ${isSelf ? `<div style="margin-top:12px"><a class="btn btn-sm btn-outline" href="#/profile/edit">${icon('edit')}Edit my profile</a></div>` : ''}
         </div>
         <div class="card">

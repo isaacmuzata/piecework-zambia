@@ -208,10 +208,10 @@ function normalizePhone(raw) {
   return null;
 }
 
-function publicUser(row) {
+function publicUser(row, includePhone = true) {
   if (!row) return null;
-  return {
-    id: row.id, name: row.name, phone: row.phone, city: row.city,
+  const u = {
+    id: row.id, name: row.name, city: row.city,
     referral_code: row.referral_code || '',
     bio: row.bio || '', skills: row.skills || '', avatar: row.avatar || '',
     open_to_work: !!row.open_to_work, is_admin: isAdmin(row),
@@ -223,6 +223,8 @@ function publicUser(row) {
     lng: row.lng != null ? Number(row.lng) : null,
     created_at: row.created_at,
   };
+  if (includePhone) u.phone = row.phone;
+  return u;
 }
 
 /**
@@ -1095,13 +1097,14 @@ app.get('/api/workers', ah(async (req, res) => {
   const rows = await getAll(
     `SELECT * FROM users ${where} ORDER BY created_at DESC LIMIT 100`, params
   );
-  res.json({ workers: rows.map(publicUser) });
+  res.json({ workers: rows.map(r => publicUser(r, false)) });
 }));
 
-app.get('/api/users/:id', ah(async (req, res) => {
+app.get('/api/users/:id', maybeAuth, ah(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const user = await getOne('SELECT * FROM users WHERE id = ?', [id]);
   if (!user) return err(res, 404, 'User not found.');
+  const isSelf = !!(req.user && req.user.id === id);
   const completed = (await getOne(`
     SELECT COUNT(DISTINCT j.id) AS c FROM jobs j
     LEFT JOIN applications a ON a.job_id = j.id AND a.status = 'accepted'
@@ -1112,7 +1115,7 @@ app.get('/api/users/:id', ah(async (req, res) => {
     FROM reviews r JOIN users u ON u.id = r.reviewer_id JOIN jobs j ON j.id = r.job_id
     WHERE r.reviewee_id = ? ORDER BY r.created_at DESC LIMIT 10
   `, [id]);
-  res.json({ user: publicUser(user), completed_jobs: completed, reviews });
+  res.json({ user: publicUser(user, isSelf), completed_jobs: completed, reviews });
 }));
 
 app.patch('/api/users/me', ah(auth), ah(async (req, res) => {
