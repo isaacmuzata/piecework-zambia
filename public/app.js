@@ -350,7 +350,7 @@ function renderChrome() {
     ['#/', 'home', 'Home'],
     ['#/jobs', 'briefcase', 'Find Jobs'],
     ['#/workers', 'users', 'Looking for Work'],
-    ['#/post', 'plus', 'Post a Job'],
+    ['#/post', 'plus', 'Hire Workers'],
     ['#/categories', 'grid', 'Categories'],
     ['#/messages', 'message', 'Messages'],
   ];
@@ -371,7 +371,7 @@ function renderChrome() {
   const tabs = [
     { href: '#/', label: 'Home', ic: 'home', match: (hh) => hh === '#/' || hh === '' },
     { href: '#/jobs', label: 'Jobs', ic: 'briefcase', match: (hh) => hh === '#/jobs' || hh.startsWith('#/job/') || hh.startsWith('#/categories') || hh.startsWith('#/saved') },
-    { href: '#/post', label: 'Post', fab: true, match: (hh) => hh.startsWith('#/post') },
+    { href: '#/post', label: 'Hire', fab: true, match: (hh) => hh.startsWith('#/post') },
     { href: '#/messages', label: 'Messages', ic: 'message', match: (hh) => hh.startsWith('#/messages') || hh.startsWith('#/chat/') },
     {
       href: currentUser ? '#/profile' : '#/login', label: currentUser ? 'Profile' : 'Sign in', ic: 'user',
@@ -379,7 +379,7 @@ function renderChrome() {
     },
   ];
   tabbar.innerHTML = tabs.map(t => t.fab
-    ? `<a href="${t.href}" class="tab-post ${t.match(h) ? 'active' : ''}" aria-label="Post a job"><span class="post-fab">${icon('plus')}</span><span>${t.label}</span></a>`
+    ? `<a href="${t.href}" class="tab-post ${t.match(h) ? 'active' : ''}" aria-label="Hire workers"><span class="post-fab">${icon('plus')}</span><span>${t.label}</span></a>`
     : `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}">${icon(t.ic)}<span>${t.label}</span>${t.href === '#/messages' ? '<span class="tab-badge" id="msg-badge" hidden></span>' : ''}</a>`
   ).join('');
   if (currentUser) {
@@ -519,7 +519,7 @@ async function viewHome() {
     if (!box) return;
     box.innerHTML = data.jobs.length
       ? dedupeJobs(data.jobs).slice(0, 4).map(jobCard).join('')
-      : emptyHtml('briefcase', 'No open jobs right now', 'Check back soon — or post a job yourself.', `<a class="btn btn-sm btn-primary" href="#/post">Post a job</a>`);
+      : emptyHtml('briefcase', 'No open jobs right now', 'Check back soon — or hire workers yourself.', `<a class="btn btn-sm btn-primary" href="#/post">Hire workers</a>`);
   } catch (e) {
     const box = document.getElementById('home-jobs');
     if (box) box.innerHTML = emptyHtml('briefcase', 'Could not load jobs', e.message);
@@ -637,8 +637,8 @@ async function viewBrowse() {
       if (order) order.textContent = loc ? 'Nearest first' : 'Newest first';
       if (!data.jobs.length && reset) {
         results.innerHTML = emptyHtml('search', 'No jobs found',
-          'Try a different search or city — or post the job yourself.',
-          `<a class="btn btn-sm btn-primary" href="#/post">Post a job</a>`);
+          'Try a different search or city — or hire workers for it.',
+          `<a class="btn btn-sm btn-primary" href="#/post">Hire workers</a>`);
       } else {
         results.insertAdjacentHTML('beforeend', dedupeJobs(data.jobs).map(jobCard).join(''));
       }
@@ -1059,8 +1059,8 @@ async function viewPost() {
   if (!requireAuth('#/post')) return;
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Post a job</h1>
-    <p class="page-sub">Describe the piece work — workers nearby will see it instantly.</p>
+    <h1 class="page-title">Hire workers</h1>
+    <p class="page-sub">Have work that needs doing? Describe it here and nearby workers will apply. <b>Looking for work yourself?</b> Do not post here — <a href="#/profile">tick &ldquo;I&rsquo;m looking for work&rdquo; in your profile</a> instead.</p>
     <div class="card">${jobFormHtml()}</div>
     ${momoNoteHtml()}
   </div></div>`;
@@ -1234,7 +1234,7 @@ async function viewDashboard() {
       const mine = lists.flatMap(l => l.jobs)
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
       body.innerHTML = mine.length ? dedupeJobs(mine).map(jobCard).join('')
-        : emptyHtml('clipboard', 'No postings yet', 'Post your first job and find helping hands fast.', `<a class="btn btn-sm btn-primary" href="#/post">Post a job</a>`);
+        : emptyHtml('clipboard', 'No postings yet', 'Hire your first workers and find helping hands fast.', `<a class="btn btn-sm btn-primary" href="#/post">Hire workers</a>`);
     } catch (e) { body.innerHTML = emptyHtml('info', 'Could not load', e.message); }
   }
   async function showGigs() {
@@ -1964,7 +1964,7 @@ function viewLanding() {
         <p>Need a quick gig done today? Post it in minutes and hire helping hands near you. Looking for work? Find piece work and get paid by mobile money — as soon as the job is done.</p>
         <div class="hero-ctas">
           <a class="btn btn-primary" href="#/jobs">${icon('search')}Find work</a>
-          <a class="btn btn-outline" href="#/post">${icon('plus')}Post a job</a>
+          <a class="btn btn-outline" href="#/post">${icon('plus')}Hire workers</a>
         </div>
       </div>
     </section>
@@ -1992,7 +1992,7 @@ function viewLanding() {
         <div class="card" style="flex:1">
           <h3 style="margin-top:0">For posters</h3>
           <p class="small muted">Need hands? Post the job with the pay in Kwacha and hire today.</p>
-          <a class="btn btn-sm btn-outline" href="#/post">Post a job</a>
+          <a class="btn btn-sm btn-outline" href="#/post">Hire workers</a>
         </div>
       </div>
       <div class="card" style="margin-top:14px;text-align:center">
@@ -2090,7 +2090,7 @@ function viewHow() {
     <h1 class="page-title">How PieceWork works</h1>
     <p class="page-sub">Help &amp; support — the short version.</p>
     <div class="steps">
-      <div class="card"><div class="step-n">1</div><div><h4>Post a job (or find one)</h4><p>Need hands for an event, a move, cleaning or building? Post the job with the pay in Kwacha. Looking for work? Browse jobs near you.</p></div></div>
+      <div class="card"><div class="step-n">1</div><div><h4>Hire workers (or find work)</h4><p>Need hands for an event, a move, cleaning or building? Post the job with the pay in Kwacha. Looking for work? Browse jobs near you.</p></div></div>
       <div class="card"><div class="step-n">2</div><div><h4>Apply or hire in the app</h4><p>Workers apply with one tap. Posters review applicants, check their ratings, and accept the right people — or chat first on WhatsApp.</p></div></div>
       <div class="card"><div class="step-n">3</div><div><h4>Get the work done</h4><p>Show up, do great work. The poster marks the job completed when it's finished.</p></div></div>
       <div class="card"><div class="step-n">4</div><div><h4>Get paid by mobile money</h4><p>Payment happens directly between you — most people use <b>MTN Mobile Money</b> or <b>Airtel Money</b>. Agree the amount before you start.</p></div></div>
