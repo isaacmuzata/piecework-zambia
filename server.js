@@ -37,7 +37,14 @@ app.use(cors({
   origin: allowedOrigins.length ? allowedOrigins : true,
   credentials: true,
 }));
-app.use(express.json({ limit: '400kb' }));
+const json400kb = express.json({ limit: '400kb' });
+const json10mb = express.json({ limit: '10mb' });
+// Profile updates may carry an intro video (up to ~6MB); everything else
+// stays on the small default limit.
+app.use((req, res, next) => {
+  if (req.method === 'PATCH' && req.path === '/api/users/me') return json10mb(req, res, next);
+  json400kb(req, res, next);
+});
 app.use(cookieParser());
 
 // ---------------------------------------------------------------- device id
@@ -1145,7 +1152,7 @@ app.get('/api/workers', ah(async (req, res) => {
   const vcMap = Object.fromEntries(vcRows.map(r => [r.vouchee_id, Number(r.c)]));
   res.json({ workers: rows.map(r => {
     const v = vcMap[r.id] || 0;
-    return { ...publicUser(r, false), badges: trustBadges(r, v), vouch_count: v };
+    return { ...publicUser(r, false), badges: trustBadges(r, v), vouch_count: v, has_intro_video: !!r.intro_video };
   })});
 }));
 
@@ -1178,6 +1185,7 @@ app.get('/api/users/:id', maybeAuth, ah(async (req, res) => {
   const u = publicUser(user, isSelf);
   u.badges = trustBadges(user, vouchCount);
   u.vouch_count = vouchCount;
+  u.intro_video = user.intro_video || null;
   res.json({
     user: u, completed_jobs: completed, reviews,
     vouched_by: vouchedBy.map(r => r.name), viewer_vouched: viewerVouched,
@@ -1205,6 +1213,14 @@ app.patch('/api/users/me', ah(auth), ah(async (req, res) => {
     if (av && !/^data:image\/(jpeg|png|webp);base64,/.test(av)) fields.avatar = 'Avatar must be a JPEG, PNG or WebP image.';
     else if (av.length > 300000) fields.avatar = 'That photo is too large. Try a smaller one.';
     else { updates.push('avatar = ?'); params.push(av); }
+  }
+  if ('intro_video' in b) {
+    const v = String(b.intro_video || '');
+    if (v && !/^data:video\/(mp4|webm|quicktime|3gpp);base64,/.test(v)) {
+      fields.intro_video = 'Intro video must be an MP4, WebM or MOV clip.';
+    } else if (v.length > 8000000) {
+      fields.intro_video = 'That video is too large. Record a 10-second clip instead.';
+    } else { updates.push('intro_video = ?'); params.push(v || null); }
   }
   if ('lat' in b || 'lng' in b) {
     const c = parseLatLng(b);

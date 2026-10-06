@@ -691,6 +691,7 @@ function workerCard(w) {
       <h3>${esc(w.name)}</h3>
       <div class="job-meta"><span>${icon('pin')}<b>${esc(w.city)}</b></span>${w.rating_count ? `<span>${stars(w.rating_avg)} <b>${Number(w.rating_avg).toFixed(1)}</b></span>` : ''}</div>
       ${trustBadgesHtml(w.badges, w.vouch_count)}
+      ${w.has_intro_video ? `<div class="job-meta"><span class="tbadge tb-vouched">▶ Intro video</span></div>` : ''}
       ${skillList.length ? `<div class="job-meta"><span>${icon('tag')}${skillList.map(esc).join(' · ')}</span></div>` : ''}
       ${w.bio ? `<p class="worker-bio">${esc(w.bio)}</p>` : ''}
     </div>
@@ -1388,6 +1389,15 @@ function viewProfileEdit() {
       <button class="btn btn-sm btn-outline" id="av-btn" style="margin-top:12px">${icon('camera')}Change photo</button>
       <div class="hint" style="margin-top:8px">Square photos work best. Kept small automatically.</div>
     </div>
+    <div class="card" style="text-align:center">
+      <div id="iv-preview"></div>
+      <input type="file" id="iv-file" accept="video/*" hidden>
+      <div>
+        <button type="button" class="btn btn-sm btn-outline" id="iv-btn" style="margin-top:12px">${icon('camera')}Add intro video</button>
+        <button type="button" class="btn btn-sm btn-outline" id="iv-remove" style="margin-top:12px;margin-left:8px" hidden>Remove</button>
+      </div>
+      <div class="hint" style="margin-top:8px">10 seconds max. Say your name, what you do, and why someone should hire you. Posters trust a face they have seen.</div>
+    </div>
     <div class="card">
       <form id="profile-form" novalidate>
         <div class="field"><label for="pf-name">Full name</label><input name="name" id="pf-name" value="${esc(currentUser.name)}"></div>
@@ -1425,6 +1435,45 @@ function viewProfileEdit() {
     fileInput.value = '';
   });
 
+  // Intro video: load existing, add/replace, or remove.
+  let ivState = 'unchanged'; // unchanged | changed | removed
+  let newIntroVideo = null;
+  const ivPreview = document.getElementById('iv-preview');
+  const ivFile = document.getElementById('iv-file');
+  const ivBtn = document.getElementById('iv-btn');
+  const ivRemove = document.getElementById('iv-remove');
+  const renderIvPreview = (src) => {
+    if (src) {
+      ivPreview.innerHTML = `<video src="${src}" controls playsinline preload="metadata" style="width:100%;max-height:300px;border-radius:12px;background:#000"></video>`;
+      ivBtn.innerHTML = `${icon('camera')}Replace video`;
+      ivRemove.hidden = false;
+    } else {
+      ivPreview.innerHTML = '';
+      ivBtn.innerHTML = `${icon('camera')}Add intro video`;
+      ivRemove.hidden = true;
+    }
+  };
+  api('/api/users/' + currentUser.id).then(({ user }) => {
+    if (user && user.intro_video) renderIvPreview(user.intro_video);
+  }).catch(() => {});
+  ivBtn.addEventListener('click', () => ivFile.click());
+  ivFile.addEventListener('change', async () => {
+    const file = ivFile.files[0];
+    if (!file) return;
+    try {
+      newIntroVideo = await fileToIntroVideo(file);
+      ivState = 'changed';
+      renderIvPreview(newIntroVideo);
+      toast('Video ready — tap Save changes to keep it.');
+    } catch (e) { toast(e.message, true); }
+    ivFile.value = '';
+  });
+  ivRemove.addEventListener('click', () => {
+    ivState = 'removed';
+    newIntroVideo = null;
+    renderIvPreview(null);
+  });
+
   document.getElementById('btn-save-loc').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
@@ -1453,6 +1502,7 @@ function viewProfileEdit() {
       open_to_work: form.open_to_work.checked,
     };
     if (newAvatar) payload.avatar = newAvatar;
+    if (ivState !== 'unchanged') payload.intro_video = ivState === 'removed' ? '' : newIntroVideo;
     try {
       const { user } = await api('/api/users/me', { method: 'PATCH', body: JSON.stringify(payload) });
       currentUser = user; renderChrome();
@@ -1466,6 +1516,29 @@ function viewProfileEdit() {
 /** Shrink a photo to a 256px square JPEG data URL. */
 function fileToAvatar(file) {
   return fileToSizedImage(file, 256, true);
+}
+
+/** Read a short intro video as a data URL. Rejects clips over ~12 seconds or 6MB. */
+function fileToIntroVideo(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('video/')) return reject(new Error('Please choose a video file.'));
+    if (file.size > 6 * 1024 * 1024) return reject(new Error('That video is too large. Record a 10-second clip.'));
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      if (v.duration && v.duration > 12) {
+        return reject(new Error('Keep it to 10 seconds — that clip is ' + Math.round(v.duration) + 's.'));
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Could not read that video.'));
+      reader.readAsDataURL(file);
+    };
+    v.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that video.')); };
+    v.src = url;
+  });
 }
 
 /**
@@ -1524,6 +1597,12 @@ async function viewUser(id) {
         <div class="sub">${esc(user.city)} · ${stars(user.rating_avg)} (${user.rating_count} reviews)</div>
         ${trustBadgesHtml(user.badges, user.vouch_count)}
       </div>
+      ${user.intro_video ? `
+      <div class="page" style="padding-top:0">
+        <div class="card" style="padding:8px">
+          <video src="${user.intro_video}" controls playsinline preload="metadata" style="width:100%;border-radius:12px;max-height:440px;background:#000"></video>
+        </div>
+      </div>` : ''}
       <div class="profile-stats">
         <div><strong>${completed_jobs}</strong><span>Jobs completed</span></div>
         <div><strong>${user.rating_avg ? Number(user.rating_avg).toFixed(1) : '–'}</strong><span>Avg rating</span></div>

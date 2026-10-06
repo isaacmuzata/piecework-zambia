@@ -178,6 +178,7 @@ const OPTIONAL_COLUMNS = [
   ['users', 'selfie_status', "TEXT DEFAULT 'pending'"],
   ['users', 'terms_accepted_at', 'TEXT'],
   ['users', 'nrc_verified', 'INTEGER DEFAULT 0'],
+  ['users', 'intro_video', 'TEXT'],
 ];
 
 async function init() {
