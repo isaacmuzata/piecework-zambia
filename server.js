@@ -1059,18 +1059,24 @@ app.post('/api/applications/:id/nrc', ah(auth), ah(async (req, res) => {
   if (!job) return err(res, 404, 'Job not found.');
   const imgErr = imageDataUrlError(req.body && req.body.image, 800000, 'The NRC photo');
   if (imgErr) return err(res, 422, imgErr);
+  // Zambian NRC numbers follow a documented format: 6 digits, district code,
+  // nationality digit — e.g. 123456/11/1. Reject anything else at the door.
+  const nrcNumber = String((req.body && req.body.nrc_number) || '').trim();
+  if (!/^\d{6}\/\d{2}\/\d$/.test(nrcNumber)) {
+    return err(res, 422, 'Enter your NRC number in the format 123456/11/1.', { nrc_number: 'Use the format 123456/11/1.' });
+  }
   const existing = await getOne('SELECT id FROM nrc_docs WHERE application_id = ?', [id]);
   if (existing) {
     await runWrite(
-      `UPDATE nrc_docs SET image = ?, uploaded_at = datetime('now'),
+      `UPDATE nrc_docs SET image = ?, nrc_number = ?, uploaded_at = datetime('now'),
         expires_at = datetime('now', '+${NRC_TTL_DAYS} days') WHERE id = ?`,
-      [String(req.body.image), existing.id]
+      [String(req.body.image), nrcNumber, existing.id]
     );
   } else {
     await runWrite(
-      `INSERT INTO nrc_docs (application_id, worker_id, job_id, poster_id, image, expires_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now', '+${NRC_TTL_DAYS} days'))`,
-      [id, appRow.worker_id, job.id, job.poster_id, String(req.body.image)]
+      `INSERT INTO nrc_docs (application_id, worker_id, job_id, poster_id, image, nrc_number, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+${NRC_TTL_DAYS} days'))`,
+      [id, appRow.worker_id, job.id, job.poster_id, String(req.body.image), nrcNumber]
     );
   }
   // Permanent trust signal: this worker has put a national ID on file,
@@ -1092,6 +1098,7 @@ app.get('/api/applications/:id/nrc', ah(auth), ah(async (req, res) => {
   }
   res.json({
     image: doc.image,
+    nrc_number: doc.nrc_number || null,
     uploaded_at: doc.uploaded_at,
     expires_at: doc.expires_at,
   });

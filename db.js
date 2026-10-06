@@ -185,6 +185,7 @@ const OPTIONAL_COLUMNS = [
   ['users', 'food_license_number', 'TEXT'],
   ['users', 'food_license_expires_at', 'TEXT'],
   ['jobs', 'requires_food_license', 'INTEGER DEFAULT 0'],
+  ['nrc_docs', 'nrc_number', 'TEXT'],
 ];
 
 async function init() {

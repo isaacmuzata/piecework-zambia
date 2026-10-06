@@ -1024,7 +1024,12 @@ async function viewJobDetail(id) {
             <button class="btn btn-sm btn-outline" id="nrc-close">Close</button>
           </div>
           <img src="${doc.image}" alt="NRC" style="width:100%;display:block">
-          <div class="small muted" style="padding:12px 16px">Uploaded ${esc(fmtDateTime(doc.uploaded_at))}. Deleted automatically on ${esc(fmtDate(doc.expires_at))}. Only you can see this.</div>
+          <div class="small" style="padding:12px 16px">
+            ${doc.nrc_number ? `<div style="margin-bottom:8px"><b>NRC number:</b> ${esc(doc.nrc_number)}</div>` : ''}
+            <a class="btn btn-sm btn-outline" href="https://www.zra.org.zm" target="_blank" rel="noopener">${icon('shield')}Verify on ZRA</a>
+            <p class="small muted" style="margin:8px 0 0">On the ZRA site, open <b>Taxpayer Search</b> and enter the NRC number. If the name matches the card, the ID is genuine. No result only means they are not tax-registered, not that the ID is fake.</p>
+            <p class="small muted" style="margin:8px 0 0">Uploaded ${esc(fmtDateTime(doc.uploaded_at))}. Deleted automatically on ${esc(fmtDate(doc.expires_at))}. Only you can see this.</p>
+          </div>
         </div>`;
       document.body.appendChild(overlay);
       overlay.querySelector('#nrc-close').addEventListener('click', () => overlay.remove());
@@ -1261,25 +1266,41 @@ async function viewDashboard() {
         <h3 style="margin-top:0">🪪 NRC needed</h3>
         <p class="small muted" style="margin-top:0">You were hired for ${pending.length === 1 ? 'this job' : 'these jobs'}. Upload a photo of your NRC so the poster can verify you. It is only visible to the poster and is deleted automatically after 10 days.</p>
         ${pending.map(p => `
-          <div class="split" style="padding:10px 0;border-top:1px solid var(--line);align-items:center">
-            <div><b>${esc(p.title)}</b></div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input type="file" id="nrc-file-${p.application_id}" accept="image/*" hidden>
-              <button class="btn btn-sm btn-primary" id="nrc-btn-${p.application_id}">${icon('camera')}Upload NRC</button>
+          <div style="padding:10px 0;border-top:1px solid var(--line)">
+            <div class="split" style="align-items:center;margin-bottom:8px">
+              <div><b>${esc(p.title)}</b></div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="file" id="nrc-file-${p.application_id}" accept="image/*" hidden>
+                <button class="btn btn-sm btn-primary" id="nrc-btn-${p.application_id}">${icon('camera')}Upload NRC</button>
+              </div>
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <label for="nrc-num-${p.application_id}">Your NRC number</label>
+              <input id="nrc-num-${p.application_id}" inputmode="numeric" maxlength="12" placeholder="e.g. 123456/11/1">
+              <div class="hint">Type it exactly as on your card: 6 digits, slash, 2 digits, slash, 1 digit.</div>
             </div>
           </div>`).join('')}`;
       body.parentElement.insertBefore(banner, body);
       pending.forEach(p => {
         const btn = document.getElementById(`nrc-btn-${p.application_id}`);
         const fileInput = document.getElementById(`nrc-file-${p.application_id}`);
-        btn.addEventListener('click', () => fileInput.click());
+        const numInput = document.getElementById(`nrc-num-${p.application_id}`);
+        btn.addEventListener('click', () => {
+          if (!/^\d{6}\/\d{2}\/\d$/.test(numInput.value.trim())) {
+            toast('Enter your NRC number first, in the format 123456/11/1.', true);
+            numInput.focus();
+            return;
+          }
+          fileInput.click();
+        });
         fileInput.addEventListener('change', async () => {
           const file = fileInput.files[0];
           if (!file) return;
+          const nrcNumber = numInput.value.trim();
           btn.disabled = true;
           try {
             const image = await fileToDoc(file);
-            await api(`/api/applications/${p.application_id}/nrc`, { method: 'POST', body: JSON.stringify({ image }) });
+            await api(`/api/applications/${p.application_id}/nrc`, { method: 'POST', body: JSON.stringify({ image, nrc_number: nrcNumber }) });
             toast('NRC uploaded. The poster can now verify you.');
             viewDashboard(); renderChrome();
           } catch (e) { toast(e.message, true); btn.disabled = false; }
