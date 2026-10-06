@@ -3,6 +3,7 @@
 
 const CATEGORIES = [
   'Events Setup', 'Moving Help', 'Cleaning', 'Construction & Labor',
+  'Carpentry', 'Plumbing', 'Electrical', 'Bricklaying', 'Welding',
   'Delivery & Errands', 'Cooking & Catering', 'Gardening', 'Painting',
   'Security & Ushering', 'Waiter', 'Bartender', 'Mixologist', 'Other',
 ];
@@ -66,6 +67,11 @@ const CATEGORY_STYLE = {
   'Moving Help': ['truck', 'linear-gradient(135deg,#0d9488,#0f766e)'],
   'Cleaning': ['sparkles', 'linear-gradient(135deg,#0891b2,#155e75)'],
   'Construction & Labor': ['wrench', 'linear-gradient(135deg,#b45309,#7c2d12)'],
+  'Carpentry': ['wrench', 'linear-gradient(135deg,#92400e,#451a03)'],
+  'Plumbing': ['gear', 'linear-gradient(135deg,#0284c7,#0c4a6e)'],
+  'Electrical': ['sparkles', 'linear-gradient(135deg,#eab308,#713f12)'],
+  'Bricklaying': ['grid', 'linear-gradient(135deg,#78716c,#292524)'],
+  'Welding': ['wrench', 'linear-gradient(135deg,#dc2626,#7f1d1d)'],
   'Delivery & Errands': ['truck', 'linear-gradient(135deg,#4d7c0f,#365314)'],
   'Cooking & Catering': ['utensils', 'linear-gradient(135deg,#ea580c,#9a3412)'],
   'Gardening': ['leaf', 'linear-gradient(135deg,#16a34a,#14532d)'],
