@@ -512,3 +512,45 @@ img.avatar{display:block}
 /* ---------- admin ---------- */
 .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
 .stat-card{margin:0;text-align:center;padding:16px 10px}
+
+/* ---------- desktop (proper PC view) ---------- */
+.desktop-nav{display:none}
+@media(min-width:900px){
+  .app{max-width:1160px;padding:0 28px 80px}
+  .topbar{max-width:1160px;padding:12px 28px;gap:18px}
+  #menu-btn{display:none}
+  .desktop-nav{display:flex;align-items:center;gap:2px;margin:0 auto}
+  .desktop-nav a{padding:9px 14px;border-radius:999px;font-weight:700;font-size:14px;color:var(--ink);white-space:nowrap}
+  .desktop-nav a:hover{background:var(--green-tint)}
+  .desktop-nav a.active{background:var(--green);color:#fff}
+  .dnav-logout{margin-left:8px;border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:8px 18px;font-weight:700;font-size:13.5px;cursor:pointer;color:var(--ink);white-space:nowrap}
+  .dnav-logout:hover{border-color:var(--green);color:var(--green)}
+  .topbar-auth{margin-left:0}
+  .tabbar{display:none!important}
+  .drawer,.drawer-scrim{display:none!important}
+  .page{padding:28px 0 12px}
+  .page-title{font-size:30px}
+  .page-sub{font-size:15px}
+  /* card grids */
+  #home-jobs,#results,#wk-results{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:start}
+  #home-jobs .job-card,#results .job-card,#wk-results .job-card{margin-bottom:0;height:100%}
+  #home-jobs .empty,#results .empty,#wk-results .empty{grid-column:1/-1}
+  /* readable content width */
+  .page>.card{max-width:880px;margin:0 auto 14px}
+  /* landing */
+  .hero{min-height:540px;border-radius:28px;margin:26px 0 10px;align-items:center}
+  .hero-content{max-width:none;margin:0;padding:56px 60px;text-align:left}
+  .hero-content h1{font-size:58px}
+  .hero-content p{font-size:18px;max-width:560px}
+  .hero-ctas{flex-direction:row;max-width:560px}
+  .hero-ctas .btn{flex:1}
+  .landing{padding:36px 0 8px}
+  .cat-grid{grid-template-columns:repeat(6,1fr);gap:14px}
+  .stat-grid{grid-template-columns:repeat(4,1fr);gap:14px}
+  /* share sheet becomes a centered modal */
+  .share-overlay{align-items:center}
+  .share-sheet{border-radius:22px;max-width:520px;padding:20px 24px 28px}
+  /* chat + toasts */
+  .chat-page{max-width:880px;margin:0 auto}
+  .toast-root{bottom:32px}
+}

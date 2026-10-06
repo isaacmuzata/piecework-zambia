@@ -368,6 +368,36 @@ function renderChrome() {
   const lo = document.getElementById('drawer-logout');
   if (lo) lo.addEventListener('click', logout);
 
+  // Desktop top nav (visible at >=900px via CSS).
+  const dnav = document.getElementById('desktop-nav');
+  if (dnav) {
+    const dMatch = (href) => {
+      if (href === '#/') return h === '#/' || h === '';
+      if (href === '#/jobs') return h === '#/jobs' || h.startsWith('#/job/') || h.startsWith('#/categories') || h.startsWith('#/saved');
+      if (href === '#/messages') return h.startsWith('#/messages') || h.startsWith('#/chat/');
+      if (href === '#/profile') return h.startsWith('#/profile') || h.startsWith('#/user/') || h.startsWith('#/dashboard') || h.startsWith('#/login') || h.startsWith('#/register');
+      return h.startsWith(href);
+    };
+    const ditems = [
+      ['#/', 'Home'],
+      ['#/jobs', 'Find Jobs'],
+      ['#/workers', 'Looking for Work'],
+      ['#/post', 'Hire Workers'],
+      ['#/messages', 'Messages'],
+    ];
+    if (currentUser) {
+      ditems.push(['#/dashboard', 'My Gigs']);
+      ditems.push(['#/profile', 'Profile']);
+      if (currentUser.is_admin || currentUser.is_support) ditems.push(['#/admin', 'Admin']);
+    }
+    ditems.push(['#/how', 'Help']);
+    dnav.innerHTML = ditems.map(([href, label]) =>
+      `<a href="${href}" class="${dMatch(href) ? 'active' : ''}">${label}</a>`
+    ).join('') + (currentUser ? `<button class="dnav-logout" id="dnav-logout">Log out</button>` : '');
+    const dlo = document.getElementById('dnav-logout');
+    if (dlo) dlo.addEventListener('click', logout);
+  }
+
   const tabs = [
     { href: '#/', label: 'Home', ic: 'home', match: (hh) => hh === '#/' || hh === '' },
     { href: '#/jobs', label: 'Jobs', ic: 'briefcase', match: (hh) => hh === '#/jobs' || hh.startsWith('#/job/') || hh.startsWith('#/categories') || hh.startsWith('#/saved') },
