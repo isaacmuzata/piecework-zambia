@@ -2224,10 +2224,11 @@ async function viewAdmin() {
       <h1 class="page-title">Support</h1>
       <p class="page-sub">Selfie reviews and password resets.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <a class="btn btn-outline" href="#/admin/verifications">🪪 Selfie review</a>
+        <a class="btn btn-outline" href="#/admin/verifications" id="btn-selfie-review">🪪 Selfie review</a>
         <a class="btn btn-outline" href="#/admin/resets">🔑 Password resets</a>
       </div>
     </div></div>`;
+    badgeSelfieCount();
     return;
   }
   app.innerHTML = `
@@ -2237,11 +2238,12 @@ async function viewAdmin() {
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
       <a class="btn btn-sm btn-outline" href="#/admin/jobs">📋 All jobs</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/verifications">🪪 Selfie review</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/verifications" id="btn-selfie-review">🪪 Selfie review</a>
       <a class="btn btn-sm btn-outline" href="#/admin/resets">🔑 Password resets</a>
     </div>
     <div id="admin-body">${loadingHtml('Loading stats…')}</div>
   </div></div>`;
+  badgeSelfieCount();
   const body = document.getElementById('admin-body');
   try {
     const s = await api('/api/admin/stats');
@@ -2255,6 +2257,7 @@ async function viewAdmin() {
         ${stat('Conversations', s.conversations)}
         ${stat('Messages sent', s.messages)}
         ${stat('Looking for Work', s.open_to_work)}
+        ${stat('Selfies pending', s.selfies_pending)}
       </div>
       <div class="card">
         <h3 style="margin-top:0">Signups, last 14 days</h3>
@@ -2335,6 +2338,15 @@ async function loadGiveawayAdmin() {
   });
 }
 
+/** Fetch the pending-selfie count and badge the Selfie review buttons. */
+async function badgeSelfieCount() {
+  try {
+    const { pending_count } = await api('/api/admin/verifications');
+    const btn = document.getElementById('btn-selfie-review');
+    if (btn && pending_count > 0) btn.innerHTML = `🪪 Selfie review <b class="count-badge">${pending_count}</b>`;
+  } catch { /* leave the button unbadged */ }
+}
+
 /** Admin selfie review — approve or reject new signups' verification selfies. */
 async function viewVerifications() {
   if (!requireAuth('#/admin/verifications')) return;
@@ -2345,14 +2357,16 @@ async function viewVerifications() {
   app.innerHTML = `
   <div class="view"><div class="page">
     <h1 class="page-title">Selfie review</h1>
-    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a><span id="verif-count"></span></p>
     <div id="verif-body">${loadingHtml('Loading pending selfies…')}</div>
   </div></div>`;
   const body = document.getElementById('verif-body');
   async function load() {
     body.innerHTML = loadingHtml('Loading pending selfies…');
     try {
-      const { pending } = await api('/api/admin/verifications');
+      const { pending, pending_count } = await api('/api/admin/verifications');
+      const cc = document.getElementById('verif-count');
+      if (cc) cc.innerHTML = pending_count ? ` · <b>${pending_count} waiting</b>` : '';
       if (!pending.length) {
         body.innerHTML = emptyHtml('check', 'All caught up', 'No selfies waiting for review.');
         return;

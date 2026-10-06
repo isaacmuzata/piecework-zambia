@@ -1070,12 +1070,14 @@ async function sweepExpiredNrc() {
 // ---------------------------------------------------------------- selfie verification (admin)
 app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
   if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
-  const rows = await getAll(`
+  const [rows, countRow] = await Promise.all([
+    getAll(`
     SELECT id, name, phone, city, selfie, selfie_status, created_at
     FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'
-    ORDER BY created_at ASC LIMIT 100
-  `);
-  res.json({ pending: rows });
+    ORDER BY created_at ASC LIMIT 100`),
+    getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'`),
+  ]);
+  res.json({ pending: rows, pending_count: Number(countRow.c || 0) });
 }));
 
 app.post('/api/admin/verifications/:userId', ah(auth), ah(async (req, res) => {
@@ -1214,7 +1216,7 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
   if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
   const [
     userCount, signupsByDay, appCount, appsByStatus,
-    jobsByStatus, convCount, msgCount, otwCount,
+    jobsByStatus, convCount, msgCount, otwCount, selfiePending,
   ] = await Promise.all([
     getOne('SELECT COUNT(*) AS c FROM users'),
     getAll(`SELECT date(created_at) AS d, COUNT(*) AS c FROM users
@@ -1225,6 +1227,7 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
     getOne('SELECT COUNT(*) AS c FROM conversations'),
     getOne('SELECT COUNT(*) AS c FROM messages'),
     getOne('SELECT COUNT(*) AS c FROM users WHERE open_to_work = 1'),
+    getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'`),
   ]);
   res.json({
     users: Number(userCount.c || 0),
@@ -1235,6 +1238,7 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
     conversations: Number(convCount.c || 0),
     messages: Number(msgCount.c || 0),
     open_to_work: Number(otwCount.c || 0),
+    selfies_pending: Number(selfiePending.c || 0),
   });
 }));
 
