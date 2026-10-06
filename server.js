@@ -225,6 +225,9 @@ function publicUser(row, includePhone = true) {
     is_support: isSupport(row),
     selfie_status: row.selfie_status || 'pending',
     terms_accepted_at: row.terms_accepted_at || null,
+    orientation_accepted_at: row.orientation_accepted_at || null,
+    food_license_valid: foodLicenseValid(row),
+    food_license_status: row.food_license_status || 'none',
     rating_avg: row.rating_avg || 0, rating_count: row.rating_count || 0,
     lat: row.lat != null ? Number(row.lat) : null,
     lng: row.lng != null ? Number(row.lng) : null,
@@ -237,14 +240,22 @@ function publicUser(row, includePhone = true) {
 /**
  * Trust badges for a user row. verified = selfie approved by the team;
  * id = national ID on file; vouched = vouched for by verified members;
- * proven = 3+ completed ratings averaging 4 stars or more.
+ * proven = 3+ completed ratings averaging 4 stars or more;
+ * food = valid food handler's license on file.
  */
+function foodLicenseValid(row) {
+  if (!row || row.food_license_status !== 'approved') return false;
+  const exp = String(row.food_license_expires_at || '');
+  if (!exp) return true; // approved with no expiry recorded
+  return exp >= new Date().toISOString().slice(0, 10);
+}
 function trustBadges(row, vouchCount) {
   const badges = [];
   if ((row.selfie_status || 'pending') === 'approved') badges.push('verified');
   if (row.nrc_verified) badges.push('id');
   if (Number(vouchCount || 0) >= 1) badges.push('vouched');
   if (Number(row.rating_count || 0) >= 3 && Number(row.rating_avg || 0) >= 4) badges.push('proven');
+  if (foodLicenseValid(row)) badges.push('food');
   return badges;
 }
 
@@ -732,6 +743,7 @@ function serializeJob(j) {
     pay_amount: j.pay_amount, pay_type: j.pay_type,
     workers_needed: j.workers_needed, status: j.status,
     created_at: j.created_at,
+    requires_food_license: !!j.requires_food_license,
     poster: {
       id: j.poster_id, name: j.poster_name, city: j.poster_city,
       rating_avg: j.poster_rating || 0, rating_count: j.poster_rating_count || 0,
@@ -838,15 +850,16 @@ app.post('/api/jobs', ah(auth), ah(async (req, res) => {
   }
   const whatsapp = b.whatsapp ? normalizePhone(b.whatsapp) : '';
   const coords = parseLatLng(b);
+  const requiresFoodLicense = b.requires_food_license === '1' || b.requires_food_license === true || b.requires_food_license === 1 ? 1 : 0;
   const info = await runWrite(`
     INSERT INTO jobs (poster_id, title, category, description, city, area, date_needed,
-                      pay_amount, pay_type, workers_needed, whatsapp, lat, lng)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      pay_amount, pay_type, workers_needed, whatsapp, lat, lng, requires_food_license)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     req.user.id, String(b.title).trim(), b.category, String(b.description).trim(),
     b.city, String(b.area || '').trim(), b.date_needed,
     parseInt(b.pay_amount, 10), b.pay_type, parseInt(b.workers_needed, 10), whatsapp,
-    coords ? coords.lat : null, coords ? coords.lng : null,
+    coords ? coords.lat : null, coords ? coords.lng : null, requiresFoodLicense,
   ]);
   res.status(201).json({ id: insertId(info) });
 }));
@@ -875,7 +888,7 @@ app.patch('/api/jobs/:id', ah(auth), ah(async (req, res) => {
   if (['completed', 'cancelled'].includes(job.status)) {
     return err(res, 422, 'This job is closed and can no longer be edited.');
   }
-  const editable = ['title', 'description', 'category', 'city', 'area', 'date_needed', 'pay_amount', 'pay_type', 'workers_needed', 'whatsapp'];
+  const editable = ['title', 'description', 'category', 'city', 'area', 'date_needed', 'pay_amount', 'pay_type', 'workers_needed', 'whatsapp', 'requires_food_license'];
   const merged = { ...job, ...b };
   const fields = validateJobInput(merged);
   // Only surface errors for fields the poster actually tried to change.
@@ -885,6 +898,7 @@ app.patch('/api/jobs/:id', ah(auth), ah(async (req, res) => {
     return err(res, 422, 'Please fix the highlighted fields.', rf);
   }
   for (const k of editable) {
+    if (k === 'requires_food_license') continue; // handled below as a real boolean
     if (k in b) {
       let v = b[k];
       if (k === 'pay_amount' || k === 'workers_needed') v = parseInt(v, 10);
@@ -892,6 +906,10 @@ app.patch('/api/jobs/:id', ah(auth), ah(async (req, res) => {
       if (typeof v === 'string') v = v.trim();
       updates.push(`${k} = ?`); params.push(v);
     }
+  }
+  if ('requires_food_license' in b) {
+    const v = b.requires_food_license === '1' || b.requires_food_license === true || b.requires_food_license === 1 ? 1 : 0;
+    updates.push('requires_food_license = ?'); params.push(v);
   }
   // Job location: precise GPS coords, or cleared (falls back to the city centre).
   if ('lat' in b || 'lng' in b) {
@@ -913,6 +931,15 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
   if (!job) return err(res, 404, 'Job not found.');
   if (job.status !== 'open') return err(res, 422, 'This job is no longer open for applications.');
   if (job.poster_id === req.user.id) return err(res, 403, 'You cannot apply to your own job.');
+  // Orientation gate: workers must accept the Code of Conduct before applying.
+  const me = await getOne('SELECT orientation_accepted_at, food_license_status, food_license_expires_at FROM users WHERE id = ?', [req.user.id]);
+  if (!me || !me.orientation_accepted_at) {
+    return err(res, 422, 'Please complete the worker orientation before applying.', { orientation: 'required' });
+  }
+  // Food handler's license gate for hospitality jobs that require it.
+  if (job.requires_food_license && !foodLicenseValid(me)) {
+    return err(res, 422, 'This job requires a valid food handler\u2019s license. Upload yours under Profile to apply.', { food_license: 'required' });
+  }
   const dup = await getOne('SELECT id, status FROM applications WHERE job_id = ? AND worker_id = ?', [id, req.user.id]);
   if (dup && dup.status !== 'withdrawn') return err(res, 409, 'You have already applied to this job.');
 
@@ -1115,6 +1142,35 @@ app.post('/api/admin/verifications/:userId', ah(auth), ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------------------------------------------------------------- food handler's license review (admin)
+// Hospitality workers upload their council food handler's license; the team
+// reviews it (and can phone the issuing council to verify) before approval.
+app.get('/api/admin/food-licenses', ah(auth), ah(async (req, res) => {
+  if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
+  const rows = await getAll(`
+    SELECT id, name, phone, city, food_license_image, food_license_number,
+           food_license_expires_at, food_license_status, created_at
+    FROM users WHERE food_license_status IN ('pending', 'approved', 'rejected')
+    ORDER BY CASE food_license_status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
+             food_license_expires_at ASC
+    LIMIT 100
+  `);
+  const pending = await getOne(
+    `SELECT COUNT(*) AS c FROM users WHERE food_license_status = 'pending'`);
+  res.json({ licenses: rows, pending_count: Number(pending.c || 0) });
+}));
+
+app.post('/api/admin/food-licenses/:userId', ah(auth), ah(async (req, res) => {
+  if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
+  const userId = parseInt(req.params.userId, 10);
+  const { status } = req.body || {};
+  if (!['approved', 'rejected'].includes(status)) return err(res, 422, 'Status must be approved or rejected.');
+  const user = await getOne('SELECT id FROM users WHERE id = ?', [userId]);
+  if (!user) return err(res, 404, 'User not found.');
+  await runWrite('UPDATE users SET food_license_status = ? WHERE id = ?', [status, userId]);
+  res.json({ ok: true });
+}));
+
 // ---------------------------------------------------------------- vouches
 // A verified member publicly stands behind someone they personally know.
 // Only selfie-approved members can vouch; one vouch per pair; no self-vouch.
@@ -1186,6 +1242,14 @@ app.get('/api/users/:id', maybeAuth, ah(async (req, res) => {
   u.badges = trustBadges(user, vouchCount);
   u.vouch_count = vouchCount;
   u.intro_video = user.intro_video || null;
+  if (isSelf || (req.user && (isAdmin(req.user) || isSupport(req.user)))) {
+    u.food_license = {
+      status: user.food_license_status || 'none',
+      number: user.food_license_number || null,
+      expires_at: user.food_license_expires_at || null,
+      image: user.food_license_image || null,
+    };
+  }
   res.json({
     user: u, completed_jobs: completed, reviews,
     vouched_by: vouchedBy.map(r => r.name), viewer_vouched: viewerVouched,
@@ -1221,6 +1285,29 @@ app.patch('/api/users/me', ah(auth), ah(async (req, res) => {
     } else if (v.length > 8000000) {
       fields.intro_video = 'That video is too large. Record a 10-second clip instead.';
     } else { updates.push('intro_video = ?'); params.push(v || null); }
+  }
+  if ('orientation_accepted' in b) {
+    if (b.orientation_accepted === true || b.orientation_accepted === '1' || b.orientation_accepted === 1) {
+      updates.push("orientation_accepted_at = datetime('now')");
+    }
+  }
+  if ('food_license_image' in b || 'food_license_number' in b || 'food_license_expires_at' in b) {
+    const img = String(b.food_license_image || '');
+    const num = String(b.food_license_number || '').trim().slice(0, 60);
+    const exp = String(b.food_license_expires_at || '').trim();
+    if (img && !/^data:image\/(jpeg|png|webp);base64,/.test(img)) {
+      fields.food_license_image = 'License photo must be a JPEG, PNG or WebP image.';
+    } else if (img.length > 800000) {
+      fields.food_license_image = 'That photo is too large. Try a smaller one.';
+    } else if (exp && !/^\d{4}-\d{2}-\d{2}$/.test(exp)) {
+      fields.food_license_expires_at = 'Enter the expiry date as YYYY-MM-DD.';
+    } else {
+      if (img) { updates.push('food_license_image = ?'); params.push(img); }
+      updates.push('food_license_number = ?'); params.push(num || null);
+      updates.push('food_license_expires_at = ?'); params.push(exp || null);
+      // Any (re)submission goes back to the review queue.
+      updates.push("food_license_status = 'pending'");
+    }
   }
   if ('lat' in b || 'lng' in b) {
     const c = parseLatLng(b);

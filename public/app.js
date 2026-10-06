@@ -4,7 +4,7 @@
 const CATEGORIES = [
   'Events Setup', 'Moving Help', 'Cleaning', 'Construction & Labor',
   'Delivery & Errands', 'Cooking & Catering', 'Gardening', 'Painting',
-  'Security & Ushering', 'Other',
+  'Security & Ushering', 'Waiter', 'Bartender', 'Mixologist', 'Other',
 ];
 const CITIES = [
   'Lusaka', 'Kitwe', 'Ndola', 'Kabwe', 'Chipata', 'Livingstone',
@@ -71,6 +71,9 @@ const CATEGORY_STYLE = {
   'Gardening': ['leaf', 'linear-gradient(135deg,#16a34a,#14532d)'],
   'Painting': ['paint', 'linear-gradient(135deg,#7c3aed,#4c1d95)'],
   'Security & Ushering': ['shield', 'linear-gradient(135deg,#475569,#1e293b)'],
+  'Waiter': ['utensils', 'linear-gradient(135deg,#0d9488,#115e59)'],
+  'Bartender': ['utensils', 'linear-gradient(135deg,#7c3aed,#4c1d95)'],
+  'Mixologist': ['sparkles', 'linear-gradient(135deg,#db2777,#831843)'],
   'Other': ['briefcase', 'linear-gradient(135deg,#6B7280,#374151)'],
 };
 function catStyle(cat) { return CATEGORY_STYLE[cat] || CATEGORY_STYLE.Other; }
@@ -783,12 +786,30 @@ async function viewJobDetail(id) {
       ${s === 'accepted' ? `<p class="small muted" style="margin-bottom:0">You've been hired! The poster will message you in the app to arrange the details. Check your <a href="#/messages" style="font-weight:700">messages</a>.</p>` : ''}
     </div>`;
   } else if (job.status === 'open') {
+    const oriented = !!(currentUser && currentUser.orientation_accepted_at);
+    const licenseOk = !job.requires_food_license || !!(currentUser && currentUser.food_license_valid);
+    if (!oriented) {
+      actionHtml = `
+      <div class="card" style="text-align:center">
+        <h3 style="margin-top:0">${icon('clipboard')}One quick step first</h3>
+        <p class="small muted">Before you apply, complete a short orientation on the Worker Code of Conduct. It takes two minutes and you only do it once.</p>
+        <button class="btn btn-primary full" id="btn-to-orientation">Start orientation</button>
+      </div>`;
+    } else if (!licenseOk) {
+      actionHtml = `
+      <div class="card" style="text-align:center">
+        <h3 style="margin-top:0">${icon('utensils')}Food handler's license required</h3>
+        <p class="small muted">This job needs a valid food handler's license. Upload yours under Profile and wait for approval, then come back and apply.</p>
+        <a class="btn btn-primary full" href="#/profile/edit">Upload my license</a>
+      </div>`;
+    } else {
     actionHtml = `
       <div class="btn-row" style="margin-bottom:14px">
         <button class="btn btn-primary" id="btn-to-apply">${icon('send')}Apply for this job</button>
       </div>
       <div class="card" id="apply-card">
         <h3 style="margin-top:0">Apply for this job</h3>
+        ${job.requires_food_license ? `<p class="small" style="margin-top:0"><span class="tbadge tb-food">${icon('utensils')}Food handler's license required</span></p>` : ''}
         ${job.my_application ? `<p class="small muted" style="margin-top:0">You withdrew your earlier application. You are welcome to apply again below.</p>` : ''}
         <div class="card-row" style="margin-bottom:12px">
           ${jobThumb(job.category)}
@@ -802,6 +823,7 @@ async function viewJobDetail(id) {
           <button class="btn btn-primary full" type="submit">Submit Application</button>
         </form>
       </div>`;
+    }
   } else {
     actionHtml = `<div class="card"><p class="small muted" style="margin:0">This job is ${job.status} and no longer accepting applications.</p></div>`;
   }
@@ -885,6 +907,11 @@ async function viewJobDetail(id) {
   const toApply = document.getElementById('btn-to-apply');
   if (toApply) toApply.addEventListener('click', () => {
     document.getElementById('apply-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  const toOrientation = document.getElementById('btn-to-orientation');
+  if (toOrientation) toOrientation.addEventListener('click', () => {
+    sessionStorage.setItem('orientation_next', '#/job/' + id);
+    location.hash = '#/orientation';
   });
   const applyForm = document.getElementById('apply-form');
   if (applyForm) {
@@ -1072,6 +1099,12 @@ function jobFormHtml(prefill = {}, mode = 'post') {
       <div class="hint" id="jf-loc-status">${prefill.lat != null ? '<b>Location pinned</b> — workers will see how many km away the job is.' : 'No GPS pinned — distance matching will use your city centre.'}</div>
       <button type="button" class="btn btn-sm btn-outline" id="btn-pin-loc" style="margin-top:8px">${icon('pin')}Pin my current location</button>
     </div>
+    <div class="field">
+      <label class="check-row" for="jf-foodlic">
+        <input type="checkbox" name="requires_food_license" id="jf-foodlic" value="1" ${prefill.requires_food_license ? 'checked' : ''}>
+        <span><b>Require a food handler's license</b><br><span class="hint">Only workers with a valid, PieceWork-verified food handler's license can apply. Use this for waiter, bartender, mixologist, cooking and catering jobs.</span></span>
+      </label>
+    </div>
     ${isEdit ? '' : (currentUser && currentUser.terms_accepted_at ? `
     <div class="field">
       <div class="hint">${icon('shield')} You accepted the <a href="#/terms">Terms and Conditions</a> on ${esc(String(currentUser.terms_accepted_at).slice(0, 10))}.</div>
@@ -1187,6 +1220,7 @@ async function viewJobEdit(id) {
     btn.disabled = true;
     const data = Object.fromEntries(new FormData(form).entries());
     delete data.terms_accepted;
+    data.requires_food_license = form.requires_food_license && form.requires_food_license.checked ? '1' : '0';
     try {
       await api('/api/jobs/' + id, { method: 'PATCH', body: JSON.stringify(data) });
       toast('Job updated!');
@@ -1399,6 +1433,16 @@ function viewProfileEdit() {
       <div class="hint" style="margin-top:8px">10 seconds max. Say your name, what you do, and why someone should hire you. Posters trust a face they have seen.</div>
     </div>
     <div class="card">
+      <h3 style="margin-top:0">${icon('utensils')}Food handler's license</h3>
+      <p class="small muted" style="margin-top:0">Do waiter, bartender, mixologist or catering work? Upload your council food handler's license. Our team reviews it (and may phone the council to confirm) before approval. Only approved licenses unlock hospitality jobs that require one.</p>
+      <div id="fl-status"></div>
+      <div id="fl-preview" style="margin-bottom:8px"></div>
+      <input type="file" id="fl-file" accept="image/*" hidden>
+      <button type="button" class="btn btn-sm btn-outline" id="fl-btn">${icon('camera')}Upload license photo</button>
+      <div class="field" style="margin-top:12px"><label for="fl-number">License number</label><input id="fl-number" maxlength="60" placeholder="e.g. LCC/FH/2026/12345"></div>
+      <div class="field"><label for="fl-exp">Expiry date</label><input id="fl-exp" type="date"></div>
+    </div>
+    <div class="card">
       <form id="profile-form" novalidate>
         <div class="field"><label for="pf-name">Full name</label><input name="name" id="pf-name" value="${esc(currentUser.name)}"></div>
         <div class="field"><label for="pf-city">City</label>
@@ -1474,6 +1518,35 @@ function viewProfileEdit() {
     renderIvPreview(null);
   });
 
+  // Food handler's license: photo + number + expiry, goes to team review.
+  let newFoodLicenseImage = null;
+  let flInitNumber = '', flInitExp = '';
+  const flStatus = document.getElementById('fl-status');
+  const flPreview = document.getElementById('fl-preview');
+  const flFile = document.getElementById('fl-file');
+  const flNumber = document.getElementById('fl-number');
+  const flExp = document.getElementById('fl-exp');
+  const FL_LABEL = { none: 'No license on file.', pending: 'Under review by the PieceWork team.', approved: 'Approved.', rejected: 'Not approved — please upload a clear photo of a valid license.' };
+  api('/api/users/' + currentUser.id).then(({ user }) => {
+    const fl = user && user.food_license;
+    if (!fl) return;
+    flStatus.innerHTML = `<p class="small"><b>Status:</b> ${esc(FL_LABEL[fl.status] || fl.status)}${fl.expires_at ? ` · expires ${esc(fl.expires_at)}` : ''}</p>`;
+    if (fl.number) { flNumber.value = fl.number; flInitNumber = fl.number; }
+    if (fl.expires_at) { flExp.value = fl.expires_at; flInitExp = fl.expires_at; }
+    if (fl.image) flPreview.innerHTML = `<img src="${fl.image}" alt="Food handler's license" style="width:100%;border-radius:12px">`;
+  }).catch(() => {});
+  document.getElementById('fl-btn').addEventListener('click', () => flFile.click());
+  flFile.addEventListener('change', async () => {
+    const file = flFile.files[0];
+    if (!file) return;
+    try {
+      newFoodLicenseImage = await fileToSizedImage(file, 1024, false);
+      flPreview.innerHTML = `<img src="${newFoodLicenseImage}" alt="Food handler's license" style="width:100%;border-radius:12px">`;
+      toast('License photo ready — tap Save changes to submit it for review.');
+    } catch (e) { toast(e.message, true); }
+    flFile.value = '';
+  });
+
   document.getElementById('btn-save-loc').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
@@ -1503,6 +1576,11 @@ function viewProfileEdit() {
     };
     if (newAvatar) payload.avatar = newAvatar;
     if (ivState !== 'unchanged') payload.intro_video = ivState === 'removed' ? '' : newIntroVideo;
+    if (newFoodLicenseImage || flNumber.value.trim() !== flInitNumber || flExp.value !== flInitExp) {
+      payload.food_license_image = newFoodLicenseImage || '';
+      payload.food_license_number = flNumber.value.trim();
+      payload.food_license_expires_at = flExp.value;
+    }
     try {
       const { user } = await api('/api/users/me', { method: 'PATCH', body: JSON.stringify(payload) });
       currentUser = user; renderChrome();
@@ -2179,6 +2257,56 @@ function viewAbout() {
 }
 
 /** Terms and Conditions — liability waiver, poster responsibilities. */
+/** Worker Code of Conduct — orientation every worker completes before applying. */
+const ORIENTATION_SECTIONS = [
+  { t: 'Show up', b: 'Arrive on time, every time. When you accept a job, someone is counting on you. Running late? Message the poster in the app immediately. No-shows with no warning damage your rating and can get your account suspended.' },
+  { t: 'Do the work properly', b: 'Do what was agreed, the way it was described in the job. If you are unsure about something, ask before guessing. Leave the place as you found it, or better.' },
+  { t: 'Be honest', b: 'Only apply for work you can actually do. Never take anything that is not yours. Never lie about your skills or experience. Dishonesty ends your time on PieceWork.' },
+  { t: 'Respect people and property', b: 'Treat the poster, their family, their staff and their property with respect. No shouting, no insults, no harassment of any kind — in person or in messages.' },
+  { t: 'Stay safe', b: 'Do not take risks with your body to finish a job. If the work looks dangerous, or is very different from what was described, stop and report it in the app.' },
+  { t: 'Money', b: 'The pay shown on the job is the pay. Do not demand more money once you arrive. Payment happens between you and the poster exactly as agreed.' },
+  { t: 'Your rating is your future', b: 'After every job, posters rate you. High ratings bring more work and better pay. Low ratings and complaints push you down the list where nobody hires.' },
+  { t: 'One person, one account', b: 'One account per person. Fake or duplicate accounts are removed, together with any giveaway entries tied to them.' },
+  { t: 'If something goes wrong', b: 'Talk it through in the app messages first — most problems are misunderstandings. If you cannot resolve it, report the job and the PieceWork team will step in.' },
+];
+
+/** Orientation: read the Code of Conduct, agree, then you can apply for jobs. */
+async function viewOrientation() {
+  if (!requireAuth('#/orientation')) return;
+  const next = sessionStorage.getItem('orientation_next') || '#/dashboard';
+  if (currentUser && currentUser.orientation_accepted_at) { location.hash = next; return; }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Worker orientation</h1>
+    <p class="page-sub">Read this short code of conduct. You only do it once — then you can apply for any job on PieceWork.</p>
+    ${ORIENTATION_SECTIONS.map((s, i) => `
+      <div class="card">
+        <h3 style="margin:0 0 6px"><span class="tbadge tb-verified" style="margin-right:8px">${i + 1}</span>${esc(s.t)}</h3>
+        <p class="small" style="margin:0">${esc(s.b)}</p>
+      </div>`).join('')}
+    <div class="card">
+      <label class="check-row" for="or-agree">
+        <input type="checkbox" id="or-agree">
+        <span><b>I have read the Worker Code of Conduct and I agree to follow it.</b></span>
+      </label>
+      <button class="btn btn-primary full" id="or-done" disabled style="margin-top:12px">${icon('check')}Complete orientation</button>
+    </div>
+  </div></div>`;
+  const agree = document.getElementById('or-agree');
+  const done = document.getElementById('or-done');
+  agree.addEventListener('change', () => { done.disabled = !agree.checked; });
+  done.addEventListener('click', async () => {
+    done.disabled = true;
+    try {
+      await api('/api/users/me', { method: 'PATCH', body: JSON.stringify({ orientation_accepted: true }) });
+      await refreshMe();
+      sessionStorage.removeItem('orientation_next');
+      toast('Orientation complete. You can now apply for jobs.');
+      location.hash = next;
+    } catch (e) { toast(e.message, true); done.disabled = false; }
+  });
+}
+
 function viewTerms() {
   app.innerHTML = `
   <div class="view"><div class="page">
@@ -2342,10 +2470,12 @@ async function viewAdmin() {
       <p class="page-sub">Selfie reviews and password resets.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <a class="btn btn-outline" href="#/admin/verifications" id="btn-selfie-review">🪪 Selfie review</a>
+        <a class="btn btn-outline" href="#/admin/food-licenses" id="btn-food-review">🍽️ Food licenses</a>
         <a class="btn btn-outline" href="#/admin/resets">🔑 Password resets</a>
       </div>
     </div></div>`;
     badgeSelfieCount();
+    badgeFoodLicenseCount();
     return;
   }
   app.innerHTML = `
@@ -2356,11 +2486,13 @@ async function viewAdmin() {
       <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
       <a class="btn btn-sm btn-outline" href="#/admin/jobs">📋 All jobs</a>
       <a class="btn btn-sm btn-outline" href="#/admin/verifications" id="btn-selfie-review">🪪 Selfie review</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/food-licenses" id="btn-food-review">🍽️ Food licenses</a>
       <a class="btn btn-sm btn-outline" href="#/admin/resets">🔑 Password resets</a>
     </div>
     <div id="admin-body">${loadingHtml('Loading stats…')}</div>
   </div></div>`;
   badgeSelfieCount();
+  badgeFoodLicenseCount();
   const body = document.getElementById('admin-body');
   try {
     const s = await api('/api/admin/stats');
@@ -2470,6 +2602,7 @@ const TRUST_BADGE_DEFS = {
   id: { label: 'ID verified', icon: 'shield', cls: 'tb-id', hint: 'National ID on file' },
   vouched: { label: 'Vouched', icon: 'users', cls: 'tb-vouched', hint: 'Vouched for by people who know them' },
   proven: { label: 'Proven', icon: null, cls: 'tb-proven', hint: 'Completed jobs with top ratings' },
+  food: { label: 'Food certified', icon: 'utensils', cls: 'tb-food', hint: 'Valid food handler\u2019s license verified' },
 };
 function trustBadgesHtml(badges, vouchCount) {
   if (!badges || !badges.length) return '';
@@ -2489,6 +2622,83 @@ const SELFIE_REASONS = [
   { label: '24-hour wait', text: (n) => `Hi ${n}, thanks for joining PieceWork Zambia. Selfie verifications can take up to 24 hours. Yours is in the queue and we will review it soon. You can still browse jobs while you wait.` },
   { label: 'Custom message', text: (n) => `Hi ${n}, this is the PieceWork Zambia team about your verification selfie: ` },
 ];
+
+/** Fetch the pending food-license count and badge the review buttons. */
+async function badgeFoodLicenseCount() {
+  try {
+    const { pending_count } = await api('/api/admin/food-licenses');
+    const btn = document.getElementById('btn-food-review');
+    if (btn && pending_count > 0) btn.innerHTML = `🍽️ Food licenses <b class="count-badge">${pending_count}</b>`;
+  } catch { /* leave the button unbadged */ }
+}
+
+/** Admin food handler's license review — approve or reject hospitality workers' licenses. */
+async function viewFoodLicenses() {
+  if (!requireAuth('#/admin/food-licenses')) return;
+  if (!(currentUser.is_admin || currentUser.is_support)) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork team only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Food licenses</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a><span id="food-count"></span></p>
+    <p class="small muted">Check each license photo. To verify, phone the issuing council and quote the license number. Approve only valid, unexpired licenses.</p>
+    <div id="food-body">${loadingHtml('Loading licenses…')}</div>
+  </div></div>`;
+  const body = document.getElementById('food-body');
+  const today = new Date().toISOString().slice(0, 10);
+  const soonDate = new Date(); soonDate.setDate(soonDate.getDate() + 30);
+  const soon = soonDate.toISOString().slice(0, 10);
+  async function load() {
+    body.innerHTML = loadingHtml('Loading licenses…');
+    try {
+      const { licenses, pending_count } = await api('/api/admin/food-licenses');
+      const cc = document.getElementById('food-count');
+      if (cc) cc.innerHTML = pending_count ? ` · <b>${pending_count} waiting</b>` : '';
+      if (!licenses.length) {
+        body.innerHTML = emptyHtml('check', 'All caught up', 'No food handler licenses to review.');
+        return;
+      }
+      body.innerHTML = licenses.map(l => {
+        const expired = l.food_license_expires_at && l.food_license_expires_at < today;
+        const expiring = !expired && l.food_license_expires_at && l.food_license_expires_at <= soon;
+        return `
+        <div class="card" data-food="${l.id}">
+          <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:10px">
+            ${l.food_license_image ? `<img src="${l.food_license_image}" alt="License" style="width:120px;height:120px;object-fit:cover;border-radius:12px;cursor:zoom-in" data-zoom="${l.food_license_image}">` : ''}
+            <div style="flex:1">
+              <b>${esc(l.name)}</b><br>
+              <span class="small muted">${esc(l.phone)} · ${esc(l.city)}</span><br>
+              <span class="small"><b>License no:</b> ${esc(l.food_license_number || '—')}</span><br>
+              <span class="small"><b>Expires:</b> ${esc(l.food_license_expires_at || '—')}
+                ${expired ? ' <b style="color:#B91C1C">EXPIRED</b>' : expiring ? ' <b style="color:#C2410C">expiring soon</b>' : ''}</span><br>
+              <span class="badge badge-app-${l.food_license_status}">${esc(l.food_license_status)}</span>
+            </div>
+          </div>
+          ${l.food_license_status === 'pending' ? `
+          <div class="btn-row">
+            <button class="btn btn-sm btn-primary" data-food-approve="${l.id}">${icon('check')}Approve</button>
+            <button class="btn btn-sm btn-danger" data-food-reject="${l.id}">Reject</button>
+            <a class="btn btn-sm btn-outline" href="tel:${esc(String(l.phone).replace(/\D/g, ''))}">${icon('phone')}Call worker</a>
+          </div>` : ''}
+        </div>`;
+      }).join('');
+      body.querySelectorAll('[data-food-approve]').forEach(b => b.addEventListener('click', () => decide(b.dataset.foodApprove, 'approved')));
+      body.querySelectorAll('[data-food-reject]').forEach(b => b.addEventListener('click', () => decide(b.dataset.foodReject, 'rejected')));
+      body.querySelectorAll('[data-zoom]').forEach(img => img.addEventListener('click', () => window.open(img.dataset.zoom, '_blank', 'noopener')));
+    } catch (e) { body.innerHTML = emptyHtml('info', 'Could not load', e.message); }
+  }
+  async function decide(userId, status) {
+    try {
+      await api(`/api/admin/food-licenses/${userId}`, { method: 'POST', body: JSON.stringify({ status }) });
+      toast(status === 'approved' ? 'License approved.' : 'License rejected.');
+      badgeFoodLicenseCount();
+      load();
+    } catch (e) { toast(e.message, true); }
+  }
+  load();
+}
 
 /** Admin selfie review — approve or reject new signups' verification selfies. */
 async function viewVerifications() {
@@ -2884,12 +3094,14 @@ const routes = [
   [/^#\/admin\/jobs$/, viewAdminJobs],
   [/^#\/admin\/referrals$/, viewReferralDashboard],
   [/^#\/admin\/verifications$/, viewVerifications],
+  [/^#\/admin\/food-licenses$/, viewFoodLicenses],
   [/^#\/admin\/resets$/, viewAdminResets],
   [/^#\/categories$/, viewCategories],
   [/^#\/messages$/, viewMessages],
   [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],
   [/^#\/admin$/, viewAdmin],
   [/^#\/terms$/, viewTerms],
+  [/^#\/orientation$/, viewOrientation],
   [/^#\/saved$/, viewSaved],
   [/^#\/how$/, viewHow],
   [/^#\/about$/, viewAbout],

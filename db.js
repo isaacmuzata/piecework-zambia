@@ -179,6 +179,12 @@ const OPTIONAL_COLUMNS = [
   ['users', 'terms_accepted_at', 'TEXT'],
   ['users', 'nrc_verified', 'INTEGER DEFAULT 0'],
   ['users', 'intro_video', 'TEXT'],
+  ['users', 'orientation_accepted_at', 'TEXT'],
+  ['users', 'food_license_image', 'TEXT'],
+  ['users', 'food_license_status', "TEXT DEFAULT 'none'"],
+  ['users', 'food_license_number', 'TEXT'],
+  ['users', 'food_license_expires_at', 'TEXT'],
+  ['jobs', 'requires_food_license', 'INTEGER DEFAULT 0'],
 ];
 
 async function init() {
