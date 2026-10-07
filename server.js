@@ -607,7 +607,7 @@ app.get('/api/admin/jobs', ah(auth), ah(async (req, res) => {
   const jobs = await getAll(`
     SELECT j.id, j.title, j.category, j.city, j.area, j.pay_amount, j.pay_type,
            j.workers_needed, j.status, j.created_at,
-           u.name AS poster_name, u.phone AS poster_phone
+           u.name AS poster_name
     FROM jobs j JOIN users u ON u.id = j.poster_id
     ${where} ORDER BY j.id DESC LIMIT ? OFFSET ?`, [...params, limit, (page - 1) * limit]);
   res.json({ jobs, total, page, pages: Math.max(1, Math.ceil(total / limit)) });
@@ -792,10 +792,11 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
   job.delivery_status = dt ? dt.status : 'none';
   if (isPoster) {
     job.applications = await getAll(`
-      SELECT a.id, a.message, a.status, a.created_at,
+      SELECT a.id, a.message, a.status, a.created_at, a.arrived_at,
              u.id AS worker_id, u.name AS worker_name, u.city AS worker_city,
              u.rating_avg AS worker_rating, u.rating_count AS worker_rating_count,
-             u.avatar AS worker_avatar
+             u.avatar AS worker_avatar,
+             CASE WHEN a.status = 'accepted' THEN u.phone ELSE NULL END AS worker_phone
       FROM applications a JOIN users u ON u.id = a.worker_id
       WHERE a.job_id = ? AND a.status != 'withdrawn'
       ORDER BY a.created_at ASC
@@ -963,10 +964,11 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
 /** Jobs the signed-in user has applied to. */
 app.get('/api/applications/mine', ah(auth), ah(async (req, res) => {
   const rows = await getAll(`
-    SELECT a.id, a.status AS app_status, a.message, a.created_at AS applied_at,
+    SELECT a.id, a.status AS app_status, a.message, a.created_at AS applied_at, a.arrived_at,
            j.id AS job_id, j.title, j.city, j.area, j.date_needed, j.pay_amount, j.pay_type,
            j.status AS job_status, j.category,
-           u.name AS poster_name
+           u.name AS poster_name,
+           CASE WHEN a.status = 'accepted' THEN u.phone ELSE NULL END AS poster_phone
     FROM applications a
     JOIN jobs j ON j.id = a.job_id
     JOIN users u ON u.id = j.poster_id
@@ -983,10 +985,11 @@ app.get('/api/jobs/:id/applications', ah(auth), ah(async (req, res) => {
   if (!job) return err(res, 404, 'Job not found.');
   if (job.poster_id !== req.user.id) return err(res, 403, 'Only the poster can view applications.');
   const rows = await getAll(`
-    SELECT a.id, a.message, a.status, a.created_at,
+    SELECT a.id, a.message, a.status, a.created_at, a.arrived_at,
            u.id AS worker_id, u.name AS worker_name, u.city AS worker_city,
            u.bio AS worker_bio, u.skills AS worker_skills,
-           u.rating_avg AS worker_rating, u.rating_count AS worker_rating_count
+           u.rating_avg AS worker_rating, u.rating_count AS worker_rating_count,
+           CASE WHEN a.status = 'accepted' THEN u.phone ELSE NULL END AS worker_phone
     FROM applications a JOIN users u ON u.id = a.worker_id
     WHERE a.job_id = ? AND a.status != 'withdrawn'
     ORDER BY a.created_at ASC
@@ -1044,6 +1047,24 @@ app.patch('/api/applications/:id', ah(auth), ah(async (req, res) => {
     await runWrite('UPDATE applications SET status = ? WHERE id = ?', ['declined', id]);
   }
   res.json({ ok: true });
+}));
+
+/** Hired worker: "I've arrived" — marks arrival; the job begins. */
+app.post('/api/applications/:id/arrive', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const appRow = await getOne('SELECT * FROM applications WHERE id = ?', [id]);
+  if (!appRow) return err(res, 404, 'Application not found.');
+  if (appRow.worker_id !== req.user.id) return err(res, 403, 'Only the hired worker can mark arrival.');
+  if (appRow.status !== 'accepted') return err(res, 422, 'You can mark arrival once the poster accepts you.');
+  const job = await getOne('SELECT id, status FROM jobs WHERE id = ?', [appRow.job_id]);
+  if (!job || ['completed', 'cancelled'].includes(job.status)) {
+    return err(res, 422, 'This job is no longer active.');
+  }
+  if (!appRow.arrived_at) {
+    await runWrite("UPDATE applications SET arrived_at = datetime('now') WHERE id = ?", [id]);
+  }
+  const updated = await getOne('SELECT arrived_at FROM applications WHERE id = ?', [id]);
+  res.json({ ok: true, arrived_at: updated.arrived_at });
 }));
 
 // ---------------------------------------------------------------- NRC identity docs
@@ -1670,6 +1691,7 @@ function convSummary(c, meId) {
     other_id: otherIsPoster ? c.worker_id : c.poster_id,
     other_name: otherIsPoster ? c.worker_name : c.poster_name,
     other_avatar: otherIsPoster ? c.worker_avatar : c.poster_avatar,
+    other_phone: c.other_phone || null,
     last_body: c.last_body || '', last_at: c.last_at || c.updated_at,
     last_sender: c.last_sender || null,
     unread: Number(c.unread || 0),
@@ -1745,13 +1767,18 @@ app.get('/api/conversations/:id', ah(auth), ah(async (req, res) => {
   const conv = await getOne(`
     SELECT c.*, j.title AS job_title,
       p.name AS poster_name, p.avatar AS poster_avatar,
-      w.name AS worker_name, w.avatar AS worker_avatar
+      w.name AS worker_name, w.avatar AS worker_avatar,
+      CASE WHEN EXISTS (SELECT 1 FROM applications a
+                        WHERE a.job_id = c.job_id AND a.worker_id = c.worker_id
+                          AND a.status = 'accepted')
+           THEN CASE WHEN c.poster_id = ? THEN w.phone ELSE p.phone END
+           ELSE NULL END AS other_phone
     FROM conversations c
     JOIN jobs j ON j.id = c.job_id
     JOIN users p ON p.id = c.poster_id
     JOIN users w ON w.id = c.worker_id
     WHERE c.id = ?
-  `, [cid]);
+  `, [me, cid]);
   if (!conv) return err(res, 404, 'Conversation not found.');
   if (conv.poster_id !== me && conv.worker_id !== me) return err(res, 403, 'Not your conversation.');
   const messages = await getAll(

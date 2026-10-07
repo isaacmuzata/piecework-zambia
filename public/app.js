@@ -1090,7 +1090,11 @@ async function viewJobDetail(id) {
       <div class="btn-row" style="margin-top:8px">
         <button class="btn btn-sm btn-outline" data-msg="${a.worker_id}">${icon('message')}Message</button>
         ${a.status === 'accepted' ? `<button class="btn btn-sm btn-outline" data-nrc="${a.id}">${icon('shield')}View NRC</button>` : ''}
+        ${a.status === 'accepted' && a.worker_phone ? `<a class="btn btn-sm btn-outline" href="tel:${esc(String(a.worker_phone).replace(/\D/g, ''))}">${icon('phone')}Call worker</a>` : ''}
       </div>` : ''}
+      ${a.status === 'accepted' ? `<div class="small" style="margin-top:6px">${a.arrived_at
+        ? `<b style="color:#166534">Arrived ${esc(relTime(a.arrived_at))} — job in progress</b>`
+        : `<span class="muted">Worker has not arrived yet</span>`}</div>` : ''}
     </div>`;
   }
 
@@ -1099,7 +1103,7 @@ async function viewJobDetail(id) {
     if (!confirm(`${verb} this applicant?`)) return;
     try {
       await api(`/api/applications/${appId}`, { method: 'PATCH', body: JSON.stringify({ status }) });
-      toast(status === 'accepted' ? 'Worker hired!' : 'Application declined.');
+      toast(status === 'accepted' ? 'Worker hired! You can now see each other\'s numbers.' : 'Application declined.');
       viewJobDetail(id);
     } catch (e) { toast(e.message, true); }
   }
@@ -1504,8 +1508,25 @@ async function viewDashboard() {
             <div class="pay">${kwacha(a.pay_amount)}<small style="font-weight:600;color:var(--gray)"> ${esc(PAY_LABEL[a.pay_type] || '')}</small></div>
             <div class="job-meta"><span>${icon('pin')}<b>${esc(a.city)}</b></span><span>${icon('calendar')}${esc(fmtDate(a.date_needed))}</span></div>
             <div class="job-meta"><span>by ${esc(a.poster_name)} · applied ${esc(fmtDateTime(a.applied_at))}</span></div>
+            ${a.app_status === 'accepted' ? `<div class="btn-row" style="margin-top:8px">
+              ${a.poster_phone ? `<a class="btn btn-sm btn-outline" href="tel:${esc(String(a.poster_phone).replace(/\D/g, ''))}">${icon('phone')}Call poster</a>` : ''}
+              ${a.arrived_at
+                ? `<span class="badge" style="background:#DCFCE7;color:#166534">In progress since ${esc(fmtDateTime(a.arrived_at))}</span>`
+                : `<button class="btn btn-sm btn-primary" data-arrive="${a.id}">${icon('pin')}I've arrived — start job</button>`}
+            </div>` : ''}
           </div>
         </article>`).join('');
+      body.querySelectorAll('[data-arrive]').forEach(b => b.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const btn = ev.currentTarget;
+        if (!confirm("Mark yourself as arrived? This starts the job.")) return;
+        btn.disabled = true;
+        try {
+          await api(`/api/applications/${btn.dataset.arrive}/arrive`, { method: 'POST' });
+          toast('You have arrived — the job has begun!');
+          showGigs();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+      }));
     } catch (e) { body.innerHTML = emptyHtml('info', 'Could not load', e.message); }
   }
   segP.addEventListener('click', showPostings);
@@ -2062,12 +2083,14 @@ async function viewChat(id) {
     try {
       const { conversation, messages } = await api('/api/conversations/' + id);
       peerId = conversation.other_id;
+      peerEl.style.display = 'flex'; peerEl.style.alignItems = 'center';
       peerEl.innerHTML = `
-        <a href="#/user/${conversation.other_id}" style="display:flex;align-items:center;gap:10px;min-width:0">
+        <a href="#/user/${conversation.other_id}" style="display:flex;align-items:center;gap:10px;min-width:0;flex:1">
           ${avatarHtml({ name: conversation.other_name, avatar: conversation.other_avatar }, 'sm')}
           <span style="min-width:0"><b style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(conversation.other_name)}</b>
           <span class="small muted" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(conversation.job_title)}</span></span>
-        </a>`;
+        </a>
+        ${conversation.other_phone ? `<a class="icon-btn" href="tel:${esc(String(conversation.other_phone).replace(/\D/g, ''))}" aria-label="Call ${esc(conversation.other_name)}">${icon('phone')}</a>` : ''}`;
       if (initial) {
         msgsEl.innerHTML = messages.length ? messages.map(bubble).join('')
           : `<div class="empty" style="padding:24px"><p>Start the conversation — agree on the details, time, and pay.</p></div>`;
@@ -3060,7 +3083,7 @@ async function viewAdminJobs() {
         <div class="card">
           <div class="split" style="align-items:center">
             <div><b>${esc(j.title)}</b><br>
-              <span class="small muted">${esc(j.poster_name)} · ${esc(j.poster_phone)} · ${esc(j.city)}${j.area ? ' · ' + esc(j.area) : ''} · ${fmtDate(j.created_at)}</span><br>
+              <span class="small muted">${esc(j.poster_name)} · ${esc(j.city)}${j.area ? ' · ' + esc(j.area) : ''} · ${fmtDate(j.created_at)}</span><br>
               <span class="small">${kwacha(j.pay_amount)} ${esc(PAY_LABEL[j.pay_type] || '')} · ${esc(j.category)} · ${j.workers_needed} needed</span>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
