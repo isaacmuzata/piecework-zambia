@@ -300,11 +300,38 @@ function stars(avg) {
 function avatarHtml(user, size) {
   const cls = 'avatar ' + (size || 'md');
   if (user && user.avatar) {
-    return `<img class="${cls}" src="${user.avatar}" alt="${esc(user.name || 'Profile photo')}">`;
+    return `<img class="${cls} zoomable" src="${user.avatar}" alt="${esc(user.name || 'Profile photo')}" data-zoom-avatar="${esc(user.avatar)}" title="Tap to enlarge">`;
   }
   const initial = ((user && user.name) || '?').trim().charAt(0).toUpperCase();
   return `<span class="${cls}" aria-hidden="true">${esc(initial)}</span>`;
 }
+/** Full-screen profile photo viewer. One delegated listener covers every avatar. */
+function openAvatarZoom(src, alt) {
+  closeAvatarZoom();
+  const overlay = document.createElement('div');
+  overlay.id = 'avatar-zoom';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-label', 'Profile photo enlarged');
+  overlay.innerHTML = `
+    <button class="avatar-zoom-close" aria-label="Close">${icon('x')}</button>
+    <img src="${esc(src)}" alt="${esc(alt || 'Profile photo')}">`;
+  overlay.addEventListener('click', closeAvatarZoom);
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', escCloseAvatarZoom);
+}
+function escCloseAvatarZoom(e) { if (e.key === 'Escape') closeAvatarZoom(); }
+function closeAvatarZoom() {
+  const o = document.getElementById('avatar-zoom');
+  if (o) o.remove();
+  document.removeEventListener('keydown', escCloseAvatarZoom);
+}
+document.addEventListener('click', (ev) => {
+  const t = ev.target && ev.target.closest ? ev.target.closest('[data-zoom-avatar]') : null;
+  if (!t) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  openAvatarZoom(t.getAttribute('data-zoom-avatar'), t.getAttribute('alt'));
+});
 function toast(msg, isErr) {
   const root = document.getElementById('toast-root');
   const el = document.createElement('div');
