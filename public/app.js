@@ -2407,7 +2407,7 @@ function viewLanding() {
         <p class="small muted">PieceWork is a product of Isaac “Zac” Muzata — complementing government's efforts on unemployment, one job at a time.</p>
         <a class="link-btn" href="#/about">Our story</a>
       </div>
-      <p class="landing-foot">PieceWork Zambia · Operated in Zambia by <b>Tritonix Technologies</b> · Built by <a href="https://2911itservices.com" target="_blank" rel="noopener">2911 IT Services</a></p>
+      <p class="landing-foot">PieceWork Zambia · A product of Isaac Muzata (Zac), <a href="https://2911itservices.com" target="_blank" rel="noopener">2911 IT Services</a></p>
     </div>
   </div>`;
   document.querySelectorAll('[data-cat-link]').forEach(el => {
@@ -2427,7 +2427,7 @@ function viewAbout() {
     <h1 class="page-title">About PieceWork</h1>
     <div class="card">
       <h3 style="margin-top:0">Our story</h3>
-      <p>PieceWork Zambia is a product of <b>Isaac Muzata</b>, known as <b>Zac</b> — CEO of <b>2911 IT Services</b>, a Zambian based in Georgia, United States. In Zambia, the platform is operated by his company <b>Tritonix Technologies</b>.</p>
+      <p>PieceWork Zambia is a product of <b>Isaac Muzata</b>, known as <b>Zac</b> — CEO of <b>2911 IT Services</b>, a Zambian based in Georgia, United States.</p>
       <p>Zac has a deep love for seeing young people grow and become the best they can be in life. That love is what built this platform: a simple system that connects young people to piece work — quick jobs, quick cash — so they can earn with dignity, build real skills, and take charge of their future.</p>
       <p>PieceWork Zambia is his effort to complement the government's efforts on unemployment — and to stand behind every push to create opportunity for the next generation.</p>
       <p style="margin-bottom:0"><b>One job at a time, we're putting Zambia's youth to work.</b></p>
@@ -2498,7 +2498,7 @@ function viewTerms() {
     <p class="page-sub">Last updated: 5 October 2026</p>
     <div class="card">
       <h3 style="margin-top:0">1. What PieceWork is</h3>
-      <p>PieceWork Zambia ("PieceWork", "we") is a marketplace that connects people who need piece work done ("posters") with people looking for piece work ("workers"). PieceWork is a product of 2911 IT Services, operated in Zambia by Tritonix Technologies. We provide the platform only. We are <b>not</b> an employer, employment agent, contractor or subcontractor of any worker, and we are <b>not</b> a party to any agreement between a poster and a worker.</p>
+      <p>PieceWork Zambia ("PieceWork", "we") is a marketplace that connects people who need piece work done ("posters") with people looking for piece work ("workers"). PieceWork is a product of 2911 IT Services. We provide the platform only. We are <b>not</b> an employer, employment agent, contractor or subcontractor of any worker, and we are <b>not</b> a party to any agreement between a poster and a worker.</p>
     </div>
     <div class="card">
       <h3 style="margin-top:0">2. Your account</h3>
@@ -2520,7 +2520,7 @@ function viewTerms() {
       <h3 style="margin-top:0">4. Limitation of liability</h3>
       <p>To the fullest extent allowed by law:</p>
       <ul>
-        <li>PieceWork, 2911 IT Services and Tritonix Technologies are <b>not liable for any loss, damage, theft, injury or dispute</b> arising from work arranged through the app. Every work agreement is strictly between the poster and the worker.</li>
+        <li>PieceWork and 2911 IT Services are <b>not liable for any loss, damage, theft, injury or dispute</b> arising from work arranged through the app. Every work agreement is strictly between the poster and the worker.</li>
         <li>We do not guarantee the identity, qualifications, conduct or reliability of any user.</li>
         <li>The app is provided "as is". We are not liable for downtime, data loss or errors.</li>
       </ul>
