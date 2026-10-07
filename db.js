@@ -185,6 +185,7 @@ const OPTIONAL_COLUMNS = [
   ['users', 'referral_code', 'TEXT'],
   ['users', 'referred_by', 'INTEGER'],
   ['applications', 'arrived_at', 'TEXT'],
+  ['applications', 'arrival_confirmed_at', 'TEXT'],
   ['users', 'device_id', 'TEXT'],
   ['users', 'signup_ip', 'TEXT'],
   ['users', 'ip_duplicate', 'INTEGER DEFAULT 0'],

@@ -792,7 +792,7 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
   job.delivery_status = dt ? dt.status : 'none';
   if (isPoster) {
     job.applications = await getAll(`
-      SELECT a.id, a.message, a.status, a.created_at, a.arrived_at,
+      SELECT a.id, a.message, a.status, a.created_at, a.arrived_at, a.arrival_confirmed_at,
              u.id AS worker_id, u.name AS worker_name, u.city AS worker_city,
              u.rating_avg AS worker_rating, u.rating_count AS worker_rating_count,
              u.avatar AS worker_avatar,
@@ -964,7 +964,7 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
 /** Jobs the signed-in user has applied to. */
 app.get('/api/applications/mine', ah(auth), ah(async (req, res) => {
   const rows = await getAll(`
-    SELECT a.id, a.status AS app_status, a.message, a.created_at AS applied_at, a.arrived_at,
+    SELECT a.id, a.status AS app_status, a.message, a.created_at AS applied_at, a.arrived_at, a.arrival_confirmed_at,
            j.id AS job_id, j.title, j.city, j.area, j.date_needed, j.pay_amount, j.pay_type,
            j.status AS job_status, j.category,
            u.name AS poster_name,
@@ -985,7 +985,7 @@ app.get('/api/jobs/:id/applications', ah(auth), ah(async (req, res) => {
   if (!job) return err(res, 404, 'Job not found.');
   if (job.poster_id !== req.user.id) return err(res, 403, 'Only the poster can view applications.');
   const rows = await getAll(`
-    SELECT a.id, a.message, a.status, a.created_at, a.arrived_at,
+    SELECT a.id, a.message, a.status, a.created_at, a.arrived_at, a.arrival_confirmed_at,
            u.id AS worker_id, u.name AS worker_name, u.city AS worker_city,
            u.bio AS worker_bio, u.skills AS worker_skills,
            u.rating_avg AS worker_rating, u.rating_count AS worker_rating_count,
@@ -1065,6 +1065,31 @@ app.post('/api/applications/:id/arrive', ah(auth), ah(async (req, res) => {
   }
   const updated = await getOne('SELECT arrived_at FROM applications WHERE id = ?', [id]);
   res.json({ ok: true, arrived_at: updated.arrived_at });
+}));
+
+/** Poster confirms the worker's arrival — the job begins. */
+app.post('/api/applications/:id/arrival-confirm', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const appRow = await getOne('SELECT * FROM applications WHERE id = ?', [id]);
+  if (!appRow) return err(res, 404, 'Application not found.');
+  const job = await getOne('SELECT id, poster_id, status FROM jobs WHERE id = ?', [appRow.job_id]);
+  if (!job || job.poster_id !== req.user.id) return err(res, 403, 'Only the client can confirm the job started.');
+  if (appRow.status !== 'accepted') return err(res, 422, 'Only a hired worker can start the job.');
+  if (!appRow.arrived_at) return err(res, 422, 'The worker has not marked arrival yet.');
+  await runWrite("UPDATE applications SET arrival_confirmed_at = datetime('now') WHERE id = ?", [id]);
+  res.json({ ok: true });
+}));
+
+/** Poster says "not yet" — clears the arrival claim so the worker can tap again later. */
+app.post('/api/applications/:id/arrival-reject', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const appRow = await getOne('SELECT * FROM applications WHERE id = ?', [id]);
+  if (!appRow) return err(res, 404, 'Application not found.');
+  const job = await getOne('SELECT id, poster_id, status FROM jobs WHERE id = ?', [appRow.job_id]);
+  if (!job || job.poster_id !== req.user.id) return err(res, 403, 'Only the client can do this.');
+  if (appRow.status !== 'accepted') return err(res, 422, 'Only a hired worker can start the job.');
+  await runWrite('UPDATE applications SET arrived_at = NULL, arrival_confirmed_at = NULL WHERE id = ?', [id]);
+  res.json({ ok: true });
 }));
 
 // ---------------------------------------------------------------- NRC identity docs

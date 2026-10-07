@@ -1054,6 +1054,8 @@ async function viewJobDetail(id) {
   document.querySelectorAll('[data-decline]').forEach(btn => btn.addEventListener('click', () => decideApplication(btn.dataset.decline, 'declined')));
   document.querySelectorAll('[data-msg]').forEach(btn => btn.addEventListener('click', () => openChat(id, btn.dataset.msg, btn)));
   document.querySelectorAll('[data-nrc]').forEach(btn => btn.addEventListener('click', () => viewNrc(btn.dataset.nrc, btn)));
+  document.querySelectorAll('[data-arrival-ok]').forEach(btn => btn.addEventListener('click', () => decideArrival(btn.dataset.arrivalOk, true, btn)));
+  document.querySelectorAll('[data-arrival-no]').forEach(btn => btn.addEventListener('click', () => decideArrival(btn.dataset.arrivalNo, false, btn)));
   document.querySelectorAll('[data-review-btn]').forEach(btn => btn.addEventListener('click', async () => {
     const forId = btn.dataset.reviewBtn;
     const sel = document.querySelector(`select[data-review-for="${forId}"]`);
@@ -1092,9 +1094,15 @@ async function viewJobDetail(id) {
         ${a.status === 'accepted' ? `<button class="btn btn-sm btn-outline" data-nrc="${a.id}">${icon('shield')}View NRC</button>` : ''}
         ${a.status === 'accepted' && a.worker_phone ? `<a class="btn btn-sm btn-outline" href="tel:${esc(String(a.worker_phone).replace(/\D/g, ''))}">${icon('phone')}Call worker</a>` : ''}
       </div>` : ''}
-      ${a.status === 'accepted' ? `<div class="small" style="margin-top:6px">${a.arrived_at
-        ? `<b style="color:#166534">Arrived ${esc(relTime(a.arrived_at))} — job in progress</b>`
-        : `<span class="muted">Worker has not arrived yet</span>`}</div>` : ''}
+      ${a.status === 'accepted' ? `<div class="small" style="margin-top:6px">${a.arrival_confirmed_at
+        ? `<b style="color:#166534">Job in progress since ${esc(fmtDateTime(a.arrival_confirmed_at))}</b>`
+        : a.arrived_at
+          ? `Worker says they've arrived (${esc(relTime(a.arrived_at))}).
+             <div class="btn-row" style="margin-top:6px">
+               <button class="btn btn-sm btn-primary" data-arrival-ok="${a.id}">${icon('check')}Confirm job started</button>
+               <button class="btn btn-sm btn-outline" data-arrival-no="${a.id}">Not yet</button>
+             </div>`
+          : `<span class="muted">Worker has not arrived yet</span>`}</div>` : ''}
     </div>`;
   }
 
@@ -1106,6 +1114,17 @@ async function viewJobDetail(id) {
       toast(status === 'accepted' ? 'Worker hired! You can now see each other\'s numbers.' : 'Application declined.');
       viewJobDetail(id);
     } catch (e) { toast(e.message, true); }
+  }
+
+  async function decideArrival(appId, confirmed, btn) {
+    const verb = confirmed ? 'Confirm the job has started?' : 'Mark as not arrived yet? The worker can tap "I\'ve arrived" again later.';
+    if (!confirm(verb)) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/applications/${appId}/arrival-${confirmed ? 'confirm' : 'reject'}`, { method: 'POST' });
+      toast(confirmed ? 'Job started!' : 'Noted. The worker can mark arrival again.');
+      viewJobDetail(id);
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
   }
 
   /** Poster views the hired worker's NRC (auto-deletes after 10 days). */
@@ -1510,16 +1529,18 @@ async function viewDashboard() {
             <div class="job-meta"><span>by ${esc(a.poster_name)} · applied ${esc(fmtDateTime(a.applied_at))}</span></div>
             ${a.app_status === 'accepted' ? `<div class="btn-row" style="margin-top:8px">
               ${a.poster_phone ? `<a class="btn btn-sm btn-outline" href="tel:${esc(String(a.poster_phone).replace(/\D/g, ''))}">${icon('phone')}Call poster</a>` : ''}
-              ${a.arrived_at
-                ? `<span class="badge" style="background:#DCFCE7;color:#166534">In progress since ${esc(fmtDateTime(a.arrived_at))}</span>`
-                : `<button class="btn btn-sm btn-primary" data-arrive="${a.id}">${icon('pin')}I've arrived — start job</button>`}
+              ${a.arrival_confirmed_at
+                ? `<span class="badge" style="background:#DCFCE7;color:#166534">In progress since ${esc(fmtDateTime(a.arrival_confirmed_at))}</span>`
+                : a.arrived_at
+                  ? `<span class="badge" style="background:#FEF3C7;color:#92400E">Arrival sent — waiting for client</span>`
+                  : `<button class="btn btn-sm btn-primary" data-arrive="${a.id}">${icon('pin')}I've arrived — start job</button>`}
             </div>` : ''}
           </div>
         </article>`).join('');
       body.querySelectorAll('[data-arrive]').forEach(b => b.addEventListener('click', async (ev) => {
         ev.stopPropagation();
         const btn = ev.currentTarget;
-        if (!confirm("Mark yourself as arrived? This starts the job.")) return;
+        if (!confirm("Mark yourself as arrived? The client will confirm to start the job.")) return;
         btn.disabled = true;
         try {
           await api(`/api/applications/${btn.dataset.arrive}/arrive`, { method: 'POST' });
