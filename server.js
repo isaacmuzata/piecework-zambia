@@ -9,6 +9,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
+const compression = require('compression');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
@@ -28,6 +29,7 @@ if (!JWT_SECRET || JWT_SECRET.length < 32) {
 
 const app = express();
 app.set('trust proxy', 1);
+app.use(compression()); // gzip text payloads: cuts bandwidth on HTML/JS/CSS/JSON
 app.use(helmet({
   contentSecurityPolicy: false, // single-origin vanilla app; no external resources to allow
   crossOriginEmbedderPolicy: false,
