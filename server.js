@@ -897,7 +897,13 @@ app.patch('/api/jobs/:id', ah(auth), ah(async (req, res) => {
   const merged = { ...job, ...b };
   const fields = validateJobInput(merged);
   // Only surface errors for fields the poster actually tried to change.
-  const relevant = Object.keys(fields).filter(k => k in b);
+  // A job's date_needed can pass while it stays open; the prefilled old date
+  // must not block edits that leave the date untouched.
+  const relevant = Object.keys(fields).filter(k => {
+    if (!(k in b)) return false;
+    if (k === 'date_needed' && String(b.date_needed) === String(job.date_needed)) return false;
+    return true;
+  });
   if (relevant.length) {
     const rf = {}; relevant.forEach(k => rf[k] = fields[k]);
     return err(res, 422, 'Please fix the highlighted fields.', rf);
