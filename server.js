@@ -1117,7 +1117,12 @@ app.post('/api/applications/:id/nrc', ah(auth), ah(async (req, res) => {
   if (imgErr) return err(res, 422, imgErr);
   // Zambian NRC numbers follow a documented format: 6 digits, district code,
   // nationality digit — e.g. 123456/11/1. Reject anything else at the door.
-  const nrcNumber = String((req.body && req.body.nrc_number) || '').trim();
+  // Accept the number with or without slashes (phone keypads have no slash
+  // key); normalize 9 digits to the stored 123456/11/1 format.
+  const nrcDigits = String((req.body && req.body.nrc_number) || '').replace(/\D/g, '');
+  const nrcNumber = nrcDigits.length === 9
+    ? `${nrcDigits.slice(0, 6)}/${nrcDigits.slice(6, 8)}/${nrcDigits.slice(8)}`
+    : String((req.body && req.body.nrc_number) || '').trim();
   if (!/^\d{6}\/\d{2}\/\d$/.test(nrcNumber)) {
     return err(res, 422, 'Enter your NRC number in the format 123456/11/1.', { nrc_number: 'Use the format 123456/11/1.' });
   }

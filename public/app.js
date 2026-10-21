@@ -1489,8 +1489,8 @@ async function viewDashboard() {
             </div>
             <div class="field" style="margin-bottom:0">
               <label for="nrc-num-${p.application_id}">Your NRC number</label>
-              <input id="nrc-num-${p.application_id}" inputmode="numeric" maxlength="12" placeholder="e.g. 123456/11/1">
-              <div class="hint">Type it exactly as on your card: 6 digits, slash, 2 digits, slash, 1 digit.</div>
+              <input id="nrc-num-${p.application_id}" inputmode="numeric" autocomplete="off" maxlength="11" placeholder="e.g. 123456/11/1">
+              <div class="hint">Just type the 9 digits on your card. The slashes are added for you.</div>
             </div>
           </div>`).join('')}`;
       body.parentElement.insertBefore(banner, body);
@@ -1498,7 +1498,18 @@ async function viewDashboard() {
         const btn = document.getElementById(`nrc-btn-${p.application_id}`);
         const fileInput = document.getElementById(`nrc-file-${p.application_id}`);
         const numInput = document.getElementById(`nrc-num-${p.application_id}`);
+        // Auto-format: users type digits only (phone keypads have no slash key);
+        // the slashes are inserted as 123456/11/1 while they type or paste.
+        const fmtNrc = () => {
+          const d = numInput.value.replace(/\D/g, '').slice(0, 9);
+          let v = d;
+          if (d.length > 6) v = d.slice(0, 6) + '/' + d.slice(6);
+          if (d.length > 8) v = d.slice(0, 6) + '/' + d.slice(6, 8) + '/' + d.slice(8);
+          numInput.value = v;
+        };
+        numInput.addEventListener('input', fmtNrc);
         btn.addEventListener('click', () => {
+          fmtNrc();
           if (!/^\d{6}\/\d{2}\/\d$/.test(numInput.value.trim())) {
             toast('Enter your NRC number first, in the format 123456/11/1.', true);
             numInput.focus();
