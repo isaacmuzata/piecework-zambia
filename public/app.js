@@ -1582,7 +1582,9 @@ async function viewDashboard() {
           const nrcNumber = numInput.value.trim();
           btn.disabled = true;
           try {
-            const image = await fileToDoc(file);
+            const raw = await fileToDoc(file);
+            // The stored NRC itself is stamped CONFIDENTIAL before upload.
+            const image = await stampConfidential(raw).catch(() => raw);
             await api(`/api/applications/${p.application_id}/nrc`, { method: 'POST', body: JSON.stringify({ image, nrc_number: nrcNumber }) });
             toast('NRC uploaded. The poster can now verify you.');
             viewDashboard(); renderChrome();
@@ -1979,6 +1981,56 @@ function fileToSizedImage(file, maxDim, square) {
 /** Shrink a document/ID photo (keeps aspect ratio so text stays readable). */
 function fileToDoc(file) {
   return fileToSizedImage(file, 1024, false);
+}
+
+/**
+ * Burn a CONFIDENTIAL mark into an ID photo before it is uploaded, so the
+ * stored copy itself carries the mark (Oct 22, 2026). Diagonal repeated
+ * text plus a footer line with the platform name and upload date. Kept
+ * light enough that the card stays readable for verification. If stamping
+ * fails on an unusual phone, the caller falls back to the plain photo so
+ * a hire is never blocked by the stamp.
+ */
+function stampConfidential(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width; canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const diag = Math.sqrt((img.width ** 2) + (img.height ** 2));
+        const fontSize = Math.max(28, Math.round(img.width / 11));
+        ctx.save();
+        ctx.translate(img.width / 2, img.height / 2);
+        ctx.rotate(-Math.atan2(img.height, img.width));
+        ctx.font = `800 ${fontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const stepY = fontSize * 2.8;
+        for (let y = -diag / 2; y <= diag / 2; y += stepY) {
+          ctx.fillStyle = 'rgba(0,0,0,0.16)';
+          ctx.fillText('CONFIDENTIAL', 2, y + 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.34)';
+          ctx.fillText('CONFIDENTIAL', 0, y);
+        }
+        ctx.restore();
+        const foot = `CONFIDENTIAL • PieceWork Zambia • ${new Date().toLocaleDateString('en-GB')}`;
+        const fSize = Math.max(13, Math.round(img.width / 46));
+        ctx.font = `700 ${fSize}px sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillText(foot, 11, img.height - 15);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillText(foot, 10, img.height - 16);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      } catch (e) { reject(e); }
+    };
+    img.onerror = () => reject(new Error('Could not stamp that image.'));
+    img.src = dataUrl;
+  });
 }
 
 /** Public profile. */
