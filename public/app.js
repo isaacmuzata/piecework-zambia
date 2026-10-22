@@ -268,6 +268,15 @@ function fmtDateTime(iso) {
   if (isNaN(d)) return '';
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
+/** Presence (Oct 22, 2026): green dot + Active now, or Last seen, from
+ * the other person's last_seen_at (shipped at the testers' request). */
+function presenceHtml(c) {
+  if (!c) return '';
+  if (c.other_online) return '<span class="presence-dot online"></span>Active now';
+  if (c.other_last_seen_at) return '<span class="presence-dot"></span>Last seen ' + esc(relTime(c.other_last_seen_at));
+  return '';
+}
+
 function relTime(iso) {
   if (!iso) return '';
   const d = new Date(String(iso).replace(' ', 'T') + 'Z');
@@ -2200,6 +2209,7 @@ async function viewMessages() {
         <div class="conv-body">
           <div class="conv-top"><b>${esc(c.other_name)}</b><span class="small muted">${esc(relTime(c.last_at))}</span></div>
           <div class="small muted">${esc(c.job_title)}</div>
+          ${presenceHtml(c) ? `<div class="small" style="margin-top:2px">${presenceHtml(c)}</div>` : ''}
           <div class="conv-preview">${c.last_body ? esc(c.last_body) : '<span class="small muted">Say hello…</span>'}</div>
         </div>
         ${c.unread ? `<span class="conv-unread">${c.unread}</span>` : ''}
@@ -2258,7 +2268,8 @@ async function viewChat(id) {
         <a href="#/user/${conversation.other_id}" style="display:flex;align-items:center;gap:10px;min-width:0;flex:1">
           ${avatarHtml({ name: conversation.other_name, avatar: conversation.other_avatar }, 'sm')}
           <span style="min-width:0"><b style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(conversation.other_name)}</b>
-          <span class="small muted" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(conversation.job_title)}</span></span>
+          <span class="small muted" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(conversation.job_title)}</span>
+          ${presenceHtml(conversation) ? `<span class="small" style="display:block">${presenceHtml(conversation)}</span>` : ''}</span>
         </a>
         ${conversation.other_phone ? `<a class="icon-btn" href="tel:${esc(String(conversation.other_phone).replace(/\D/g, ''))}" aria-label="Call ${esc(conversation.other_name)}">${icon('phone')}</a>` : ''}`;
       if (initial) {

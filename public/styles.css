@@ -621,3 +621,7 @@ img.avatar{display:block}
 /* Theme toggle sits with the auth controls at the right of the topbar. */
 #theme-btn{margin-left:auto;font-size:17px}
 .topbar-auth{margin-left:0}
+
+/* Presence (Oct 22, 2026) */
+.presence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af;margin-right:5px;vertical-align:1px}
+.presence-dot.online{background:#22c55e}

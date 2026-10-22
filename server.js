@@ -1885,6 +1885,18 @@ app.post('/api/admin/giveaways/:id/draw', ah(auth), ah(async (req, res) => {
 // contact out.
 const msgLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true });
 
+// Presence (Oct 22, 2026, shipped at the testers' request): last_seen_at
+// is touched on signed-in activity (throttled to 5 minutes), so "online"
+// means seen within the last 6 minutes.
+function presenceOf(ts) {
+  if (!ts) return { other_last_seen_at: null, other_online: false };
+  const t = new Date(String(ts).replace(' ', 'T') + 'Z').getTime();
+  return {
+    other_last_seen_at: ts,
+    other_online: Number.isFinite(t) && (Date.now() - t) < 6 * 60 * 1000,
+  };
+}
+
 function convSummary(c, meId) {
   const otherIsPoster = c.poster_id === meId;
   return {
@@ -1892,6 +1904,7 @@ function convSummary(c, meId) {
     other_id: otherIsPoster ? c.worker_id : c.poster_id,
     other_name: otherIsPoster ? c.worker_name : c.poster_name,
     other_avatar: otherIsPoster ? c.worker_avatar : c.poster_avatar,
+    ...presenceOf(otherIsPoster ? c.poster_last_seen : c.worker_last_seen),
     other_phone: c.other_phone || null,
     last_body: c.last_body || '', last_at: c.last_at || c.updated_at,
     last_sender: c.last_sender || null,
@@ -1905,8 +1918,8 @@ app.get('/api/conversations', ah(auth), ah(async (req, res) => {
   const me = req.user.id;
   const rows = await getAll(`
     SELECT c.*, j.title AS job_title,
-      p.name AS poster_name, p.avatar AS poster_avatar,
-      w.name AS worker_name, w.avatar AS worker_avatar,
+      p.name AS poster_name, p.avatar AS poster_avatar, p.last_seen_at AS poster_last_seen,
+      w.name AS worker_name, w.avatar AS worker_avatar, w.last_seen_at AS worker_last_seen,
       (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body,
       (SELECT created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_at,
       (SELECT sender_id FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_sender,
@@ -1967,8 +1980,8 @@ app.get('/api/conversations/:id', ah(auth), ah(async (req, res) => {
   const cid = parseInt(req.params.id, 10);
   const conv = await getOne(`
     SELECT c.*, j.title AS job_title,
-      p.name AS poster_name, p.avatar AS poster_avatar,
-      w.name AS worker_name, w.avatar AS worker_avatar,
+      p.name AS poster_name, p.avatar AS poster_avatar, p.last_seen_at AS poster_last_seen,
+      w.name AS worker_name, w.avatar AS worker_avatar, w.last_seen_at AS worker_last_seen,
       CASE WHEN EXISTS (SELECT 1 FROM applications a
                         WHERE a.job_id = c.job_id AND a.worker_id = c.worker_id
                           AND a.status = 'accepted')
