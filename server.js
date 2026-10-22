@@ -1173,6 +1173,13 @@ app.get('/api/applications/:id/nrc', ah(auth), ah(async (req, res) => {
     await runWrite('DELETE FROM nrc_docs WHERE id = ?', [doc.id]);
     return err(res, 410, 'This NRC has expired and was deleted.');
   }
+  // Access log: who viewed this NRC and when. The log survives the document.
+  try {
+    await runWrite(
+      'INSERT INTO nrc_views (application_id, worker_id, viewer_id) VALUES (?, ?, ?)',
+      [id, doc.worker_id, req.user.id]
+    );
+  } catch (e) { console.error('[nrc-view-log]', e.message); }
   res.json({
     image: doc.image,
     nrc_number: doc.nrc_number || null,
@@ -1519,6 +1526,32 @@ app.post('/api/reviews', ah(auth), ah(async (req, res) => {
       args: [rid, rid, rid] },
   ], 'write');
   res.status(201).json({ ok: true });
+}));
+
+// ---------------------------------------------------------------- admin NRC access log
+// Latest NRC views across the platform: who looked at whose ID, and when.
+app.get('/api/admin/nrc-views', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const rows = await getAll(`
+    SELECT v.viewed_at,
+           vu.name AS viewer_name, vu.phone AS viewer_phone,
+           wu.name AS worker_name, j.title AS job_title
+    FROM nrc_views v
+    LEFT JOIN users vu ON vu.id = v.viewer_id
+    LEFT JOIN users wu ON wu.id = v.worker_id
+    LEFT JOIN applications a ON a.id = v.application_id
+    LEFT JOIN jobs j ON j.id = a.job_id
+    ORDER BY v.viewed_at DESC, v.id DESC
+    LIMIT 50`);
+  res.json({
+    views: rows.map((r) => ({
+      viewed_at: r.viewed_at,
+      viewer_name: r.viewer_name || 'Unknown user',
+      viewer_phone: r.viewer_phone || '',
+      worker_name: r.worker_name || 'Unknown worker',
+      job_title: r.job_title || '',
+    })),
+  });
 }));
 
 // ---------------------------------------------------------------- admin stats

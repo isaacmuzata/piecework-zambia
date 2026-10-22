@@ -139,6 +139,16 @@ const SCHEMA = [
     uploaded_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at     TEXT NOT NULL
   )`,
+  // NRC access log: every successful view of an NRC photo is recorded.
+  // No foreign keys on purpose: the log must survive the document itself,
+  // which is deleted 10 days after upload.
+  `CREATE TABLE IF NOT EXISTS nrc_views (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL,
+    worker_id      INTEGER NOT NULL,
+    viewer_id      INTEGER NOT NULL,
+    viewed_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
   // Vouches: a verified member publicly stands behind someone they
   // personally know. One vouch per pair; powers the "Vouched" trust badge.
   `CREATE TABLE IF NOT EXISTS vouches (

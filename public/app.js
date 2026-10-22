@@ -1172,32 +1172,73 @@ async function viewJobDetail(id) {
     } catch (e) { toast(e.message, true); btn.disabled = false; }
   }
 
-  /** Poster views the hired worker's NRC (auto-deletes after 10 days). */
+  /** Poster views the hired worker's NRC (auto-deletes after 10 days).
+   * Protection pack (Oct 22, 2026): the photo is not fetched until the
+   * poster taps Reveal (every fetch is logged server-side), it is shown
+   * under a watermark naming the viewer, it hides itself after 30
+   * seconds, and save gestures (long-press, right-click, drag) are
+   * blocked as friction. Screenshots cannot be blocked in a web app;
+   * the watermark makes any leaked copy name its source. */
   async function viewNrc(appId, btn) {
-    btn.disabled = true;
-    try {
-      const doc = await api(`/api/applications/${appId}/nrc`);
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
-      overlay.innerHTML = `
-        <div style="background:#fff;border-radius:12px;max-width:560px;width:100%;overflow:hidden">
-          <div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
-            <b>Worker NRC</b>
-            <button class="btn btn-sm btn-outline" id="nrc-close">Close</button>
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--card);color:var(--ink);border-radius:12px;max-width:560px;width:100%;overflow:hidden">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+          <b>Worker NRC</b>
+          <button class="btn btn-sm btn-outline" id="nrc-close">Close</button>
+        </div>
+        <div id="nrc-stage" style="padding:16px">
+          <p class="small" style="margin-top:0">This is a private ID document, shared with you only because you hired this worker.</p>
+          <p class="small muted">Every view is recorded with your name and the time. While you view it, the photo carries a watermark with your name, and it hides itself after 30 seconds.</p>
+          <button class="btn btn-primary" id="nrc-reveal">Reveal NRC</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    let timer = null;
+    let ticker = null;
+    const cleanup = () => { if (timer) clearTimeout(timer); if (ticker) clearInterval(ticker); timer = null; ticker = null; };
+    const close = () => { cleanup(); overlay.remove(); };
+    overlay.querySelector('#nrc-close').addEventListener('click', close);
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close(); });
+    overlay.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+    overlay.querySelector('#nrc-reveal').addEventListener('click', async (ev) => {
+      const revealBtn = ev.currentTarget;
+      revealBtn.disabled = true;
+      revealBtn.textContent = 'Loading…';
+      try {
+        const doc = await api(`/api/applications/${appId}/nrc`);
+        const stage = overlay.querySelector('#nrc-stage');
+        const wmText = `${currentUser.name} • ${currentUser.phone} • ${new Date().toLocaleDateString('en-GB')}`;
+        const wmSpans = Array.from({ length: 8 }, () =>
+          `<span style="display:block;white-space:nowrap;font-weight:800;font-size:17px;letter-spacing:.04em;color:rgba(255,255,255,.5);text-shadow:0 0 4px rgba(0,0,0,.65);padding:14px 0">${esc(wmText)}</span>`).join('');
+        stage.innerHTML = `
+          <div style="position:relative;overflow:hidden;border-radius:8px;-webkit-touch-callout:none;user-select:none">
+            <img src="${doc.image}" alt="NRC" draggable="false" style="width:100%;display:block;pointer-events:none">
+            <div style="position:absolute;inset:-30%;display:flex;flex-direction:column;justify-content:space-around;align-items:center;transform:rotate(-18deg);pointer-events:none">${wmSpans}</div>
           </div>
-          <img src="${doc.image}" alt="NRC" style="width:100%;display:block">
-          <div class="small" style="padding:12px 16px">
+          <div class="small" style="padding-top:12px">
             ${doc.nrc_number ? `<div style="margin-bottom:8px"><b>NRC number:</b> ${esc(doc.nrc_number)}</div>` : ''}
             <a class="btn btn-sm btn-outline" href="https://www.zra.org.zm" target="_blank" rel="noopener">${icon('shield')}Verify on ZRA</a>
             <p class="small muted" style="margin:8px 0 0">On the ZRA site, open <b>Taxpayer Search</b> and enter the NRC number. If the name matches the card, the ID is genuine. No result only means they are not tax-registered, not that the ID is fake.</p>
-            <p class="small muted" style="margin:8px 0 0">Uploaded ${esc(fmtDateTime(doc.uploaded_at))}. Deleted automatically on ${esc(fmtDate(doc.expires_at))}. Only you can see this.</p>
-          </div>
-        </div>`;
-      document.body.appendChild(overlay);
-      overlay.querySelector('#nrc-close').addEventListener('click', () => overlay.remove());
-      overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
-    } catch (e) { toast(e.message, true); }
-    btn.disabled = false;
+            <p class="small muted" style="margin:8px 0 0">Uploaded ${esc(fmtDateTime(doc.uploaded_at))}. Deleted automatically on ${esc(fmtDate(doc.expires_at))}. Only you can see this. <b id="nrc-countdown">Hides in 30s.</b></p>
+          </div>`;
+        let left = 30;
+        const cd = stage.querySelector('#nrc-countdown');
+        ticker = setInterval(() => { left -= 1; if (cd) cd.textContent = `Hides in ${left}s.`; }, 1000);
+        timer = setTimeout(() => {
+          cleanup();
+          stage.innerHTML = `
+            <p class="small" style="margin-top:0">Hidden again to protect the worker's ID.</p>
+            <button class="btn btn-primary" id="nrc-reveal-again">Reveal again</button>`;
+          stage.querySelector('#nrc-reveal-again').addEventListener('click', () => { close(); viewNrc(appId, btn); });
+        }, 30000);
+      } catch (e) {
+        toast(e.message, true);
+        close();
+      }
+    });
   }
 }
 
@@ -2776,9 +2817,11 @@ async function viewAdmin() {
       <a class="btn btn-sm btn-outline" href="#/admin/resets">🔑 Password resets</a>
     </div>
     <div id="admin-body">${loadingHtml('Loading stats…')}</div>
+    <div id="nrc-views-body" style="margin-top:14px"></div>
   </div></div>`;
   badgeSelfieCount();
   badgeFoodLicenseCount();
+  loadNrcViews();
   const body = document.getElementById('admin-body');
   try {
     const s = await api('/api/admin/stats');
@@ -2824,6 +2867,29 @@ async function viewAdmin() {
     loadGiveawayAdmin();
   } catch (e) {
     body.innerHTML = emptyHtml('info', 'Could not load stats', e.message);
+  }
+}
+
+/** Admin: NRC access log — who viewed whose ID, and when. */
+async function loadNrcViews() {
+  const body = document.getElementById('nrc-views-body');
+  if (!body) return;
+  try {
+    const s = await api('/api/admin/nrc-views');
+    const views = s.views || [];
+    body.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0">🪪 NRC access log</h3>
+        <p class="small muted" style="margin-top:-6px">Every time a poster opens a worker's NRC photo, it is recorded here. The documents delete themselves after 10 days; this log stays.</p>
+        ${views.length ? views.map((v) => `
+          <div style="padding:7px 0;border-bottom:1px solid var(--line)">
+            <b>${esc(v.viewer_name)}</b> <span class="small muted">viewed the NRC of</span> <b>${esc(v.worker_name)}</b>
+            ${v.job_title ? `<span class="small muted">for the job "${esc(v.job_title)}"</span>` : ''}
+            <br><span class="small muted">${esc(fmtDateTime(v.viewed_at))}${v.viewer_phone ? ` • viewer phone ${esc(v.viewer_phone)}` : ''}</span>
+          </div>`).join('') : '<p class="small muted">No NRC views recorded yet.</p>'}
+      </div>`;
+  } catch (e) {
+    body.innerHTML = '';
   }
 }
 
