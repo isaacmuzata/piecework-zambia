@@ -611,6 +611,7 @@ function jobCard(job) {
         <span>${icon('users')}${job.workers_needed || 1} worker${Number(job.workers_needed || 1) === 1 ? '' : 's'}</span>
         <span>${esc(relTime(job.created_at))}</span>
       </div>
+      ${job.poster ? `<div class="job-poster">${avatarHtml(job.poster, 'xs')}<span>Posted by <b>${esc(job.poster.name)}</b></span>${job.poster.verified ? '<span class="verified-inline">✓ Verified Poster</span>' : ''}<span style="margin-left:auto">${stars(job.poster.rating_avg || 0)} <span class="muted">(${job.poster.rating_count || 0})</span></span></div>` : ''}
     </div>
     <button class="job-share" data-share="${job.id}" data-title="${esc(job.title)}" aria-label="Share this job">${icon('share')}</button>
     <button class="job-save ${saved ? 'saved' : ''}" data-save="${job.id}" aria-label="Save this job" aria-pressed="${saved ? 'true' : 'false'}">${icon('heart')}</button>
@@ -653,20 +654,29 @@ async function viewHome() {
       <div class="searchbar">${icon('search')}<input id="home-q" type="search" placeholder="Search jobs, products, services" aria-label="Search jobs, products and people"></div>
     </div>
     <div class="qa-grid">
-      <a class="qa-item" href="#/jobs"><span class="qa-ico" style="background:#1E9E4A">${icon('briefcase')}</span>Find Work</a>
-      <a class="qa-item" href="#/post"><span class="qa-ico" style="background:#2B7FFF">${icon('plus')}</span>Post a Job</a>
-      <a class="qa-item" href="#/market"><span class="qa-ico" style="background:#0EA47A">${icon('tag')}</span>Marketplace</a>
-      <a class="qa-item" href="#/sell"><span class="qa-ico" style="background:#F04B8B">${icon('plus')}</span>Sell an Item</a>
-      <a class="qa-item" href="#/businesses"><span class="qa-ico" style="background:#4C6FFF">${icon('grid')}</span>Businesses</a>
-      <span class="qa-item soon" title="Delivery is coming soon"><span class="qa-ico" style="background:#F5820B">${icon('truck')}</span>Delivery<span class="soon-pill">Soon</span></span>
-      <a class="qa-item" href="#/messages"><span class="qa-ico" style="background:#8B5CF6">${icon('message')}</span>Messages</a>
+      <a class="qa-item" href="#/jobs"><span class="qa-ico" style="background:#E3EBFE;color:#2468FD">${icon('briefcase')}</span>Find Work</a>
+      <a class="qa-item" href="#/post"><span class="qa-ico" style="background:#E2F4E8;color:#16A34A">${icon('plus')}</span>Post a Job</a>
+      <a class="qa-item" href="#/market"><span class="qa-ico" style="background:#FFF0D2;color:#B45309">${icon('tag')}</span>Marketplace</a>
+      <a class="qa-item" href="#/sell"><span class="qa-ico" style="background:#E4E9F5;color:#101B35">${icon('plus')}</span>Sell an Item</a>
+      <a class="qa-item" href="#/businesses"><span class="qa-ico" style="background:#E3EBFE;color:#101B35">${icon('grid')}</span>Businesses</a>
+      <span class="qa-item soon" title="Delivery is coming soon"><span class="qa-ico" style="background:#E2F4E8;color:#16A34A">${icon('truck')}</span>Delivery<span class="soon-pill">Soon</span></span>
+      <a class="qa-item" href="#/messages"><span class="qa-ico" style="background:#E3EBFE;color:#2468FD">${icon('message')}</span>Messages</a>
       <a class="qa-item" href="#/categories"><span class="qa-ico" style="background:#E5E7EB;color:#6B7280">${icon('sliders')}</span>More</a>
     </div>
     <div class="page" style="padding-top:6px">
       <a class="promo-card" href="#/jobs" style="text-decoration:none;color:#fff">
         <img src="/img/landing/hero.jpg" alt="Zambians doing piece work" loading="lazy">
-        <div class="promo-text"><h3>Skilled People, Stronger Communities</h3><p>Real jobs from real neighbours, matched by distance.</p></div>
+        <div class="promo-text"><h3>Find Opportunities Around You</h3><p>Jobs, products, services and more in ${esc(currentUser.city || 'Zambia')}</p></div>
+        <span class="promo-arrow">${icon('chevR')}</span>
       </a>
+      <div class="section-title"><span>Popular Categories</span><a href="#/categories">See all</a></div>
+      <div class="pop-strip">
+        ${[['Painting', 'painting.jpg'], ['Gardening', 'gardening.jpg'], ['Cleaning', 'cleaning.jpg'], ['Construction', 'construction.jpg'], ['Delivery & Errands', 'deliveries.jpg'], ['Car Wash', 'carwash.jpg']].map(([c, img]) => `
+          <div class="pop-tile" data-cat-link="${esc(c)}" tabindex="0" role="link" aria-label="Browse ${esc(c)} jobs">
+            <img src="/img/landing/${img}" alt="${esc(c)}" loading="lazy">
+            <b>${esc(c === 'Delivery & Errands' ? 'Delivery' : c)}</b>
+          </div>`).join('')}
+      </div>
       <div id="gw-promo"></div>
       <div id="home-reco"></div>
       <div class="section-title"><span>${getLoc() ? 'Jobs Near You' : 'Fresh Jobs'}</span><a href="#/jobs">See all</a></div>
@@ -692,7 +702,7 @@ async function viewHome() {
     const slot = document.getElementById('gw-promo');
     if (!slot || !giveaway) return;
     slot.innerHTML = `
-      <a class="promo-card" href="#/invite" style="text-decoration:none;color:#fff;background:linear-gradient(135deg,#062b1c,#0e6b3a);display:flex;align-items:center;gap:14px;padding:18px">
+      <a class="promo-card" href="#/invite" style="text-decoration:none;color:#fff;background:linear-gradient(135deg,#101B35,#2468FD);display:flex;align-items:center;gap:14px;padding:18px">
         <div style="font-size:34px">🎉</div>
         <div class="promo-text"><h3>Win K${Number(giveaway.prize_kwacha).toLocaleString()}!</h3><p>Invite friends, earn raffle entries. Drawn live on Facebook.</p></div>
       </a>`;
@@ -792,16 +802,18 @@ async function viewSearch() {
 async function viewBrowse() {
   app.innerHTML = `
   <div class="view"><div class="page">
+    <div class="browse-hero">
     <h1 class="page-title">Find Work</h1>
-    <p class="page-sub">Real piece work near you, matched by kilometres.</p>
+    <p class="page-sub">Discover jobs near you</p>
     <div class="searchbar">${icon('search')}
-      <input id="q" type="search" placeholder="Search jobs… e.g. moving, cleaning" value="${esc(browseState.q)}" aria-label="Search jobs">
+      <input id="q" type="search" placeholder="Search for jobs, e.g. cleaner, cashier" value="${esc(browseState.q)}" aria-label="Search jobs">
     </div>
     <div class="chips" id="quick-chips" style="margin-top:10px">
-      <button class="chip" id="q-all">All</button>
+      <button class="chip ${browseState.sort !== 'pay_high' && browseState.maxKm !== 25 && !browseState.urgent ? 'active' : ''}" id="q-all">All</button>
       <button class="chip ${browseState.maxKm === 25 ? 'active' : ''}" id="q-near">Near Me</button>
       <button class="chip ${browseState.sort === 'pay_high' ? 'active' : ''}" id="q-pay">Highest Pay</button>
       <button class="chip ${browseState.urgent ? 'active' : ''}" id="f-urgent" aria-pressed="${browseState.urgent ? 'true' : 'false'}">Urgent</button>
+    </div>
     </div>
     <div class="filters">
       <div class="locbar">
@@ -1163,7 +1175,8 @@ async function viewProduct(id) {
       <a class="small" href="#/market">← Back to Marketplace</a>
       ${p.photos && p.photos.length ? `<div class="pd-gallery">
         <img class="pd-main" id="pd-main" src="${esc(p.photos[0].url)}" alt="${esc(p.title)}">
-        ${p.photos.length > 1 ? `<div class="pd-thumbs">${p.photos.map((ph, i) => `<img class="pd-thumb ${i === 0 ? 'active' : ''}" data-pd-thumb="${esc(ph.url)}" src="${esc(ph.url)}" alt="Photo ${i + 1} of this item" loading="lazy">`).join('')}</div>` : ''}
+        <span class="pd-count" id="pd-count">1/${p.photos.length}</span>
+        ${p.photos.length > 1 ? `<div class="pd-thumbs">${p.photos.map((ph, i) => `<img class="pd-thumb ${i === 0 ? 'active' : ''}" data-pd-thumb="${esc(ph.url)}" data-pd-idx="${i}" src="${esc(ph.url)}" alt="Photo ${i + 1} of this item" loading="lazy">`).join('')}</div>` : ''}
       </div>` : ''}
       <div class="card" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
@@ -1176,6 +1189,11 @@ async function viewProduct(id) {
           <span>${esc(p.category)}</span>
           <span>${icon('pin')} ${esc(p.city)}${p.area ? ' · ' + esc(p.area) : ''}</span>
           ${p.status !== 'active' ? `<span class="badge badge-status-completed">${esc(p.status)}</span>` : ''}
+        </div>
+        <div class="pd-stats">
+          <div class="pd-stat"><span>Condition</span><b>${esc(p.condition)}</b></div>
+          <div class="pd-stat"><span>Category</span><b>${esc(p.category)}</b></div>
+          <div class="pd-stat"><span>Posted</span><b>${esc(relTime(p.created_at))}</b></div>
         </div>
         <p style="margin-top:12px;white-space:pre-wrap">${esc(p.description)}</p>
         <p class="small muted" style="margin-top:8px"><span class="job-meta" style="display:inline-flex;align-items:center;gap:4px">${icon('eye')} ${p.view_count} views</span></p>
@@ -1225,12 +1243,19 @@ async function viewProduct(id) {
                 : `<span class="badge badge-app-${o.status === 'accepted' ? 'accepted' : 'declined'}">${esc(o.status)}</span>`}
             </div>`).join('') : '<p class="small muted">No offers yet.</p>'}
         </div>`}
+      ${!isOwner && p.status === 'active' ? `<div class="sticky-cta pd-cta"><button class="btn btn-outline" id="pd-msg">Message</button><button class="btn btn-primary" id="pd-offer">Make Offer</button></div>` : ''}
       </div>`;
     box.querySelectorAll('[data-pd-thumb]').forEach(t => t.addEventListener('click', () => {
       const main = document.getElementById('pd-main');
       if (main) main.src = t.dataset.pdThumb;
+      const cnt = document.getElementById('pd-count');
+      if (cnt) cnt.textContent = (Number(t.dataset.pdIdx || 0) + 1) + '/' + p.photos.length;
       box.querySelectorAll('.pd-thumb').forEach(x => x.classList.toggle('active', x === t));
     }));
+    const pdMsgBtn = document.getElementById('pd-msg');
+    if (pdMsgBtn) pdMsgBtn.addEventListener('click', () => { const b = document.getElementById('btn-msg-seller'); if (b) b.click(); });
+    const pdOfferBtn = document.getElementById('pd-offer');
+    if (pdOfferBtn) pdOfferBtn.addEventListener('click', () => { const f = document.getElementById('offer-form'); if (f) f.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
     const msgBtn = document.getElementById('btn-msg-seller');
     if (msgBtn) msgBtn.addEventListener('click', async () => {
       msgBtn.disabled = true;
@@ -4314,10 +4339,10 @@ async function viewAdmin() {
       <div class="admin-dash">
         <div class="dash-head"><h2>Admin Dashboard</h2><span>PieceWork Zambia at a glance</span></div>
         <div class="dash-tiles">
-          ${tile('#2563EB', 'users', 'Users', s.users)}
+          ${tile('#2468FD', 'users', 'Users', s.users)}
           ${tile('#16A34A', 'briefcase', 'Jobs', jobsTotal)}
-          ${tile('#F97316', 'tag', 'Products', s.products_total || 0)}
-          ${tile('#7C3AED', 'grid', 'Businesses', s.businesses_total || 0)}
+          ${tile('#FFB547;color:#101B35', 'tag', 'Products', s.products_total || 0)}
+          ${tile('#16294F', 'grid', 'Businesses', s.businesses_total || 0)}
           ${tile('#0D9488', 'clipboard', 'Applications', s.applications)}
           ${tile('#E0245E', 'shield', 'Reports open', s.reports_open || 0)}
         </div>
