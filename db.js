@@ -270,6 +270,13 @@ const SCHEMA = [
     image       TEXT NOT NULL,
     created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS business_follows (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (business_id, follower_id)
+  )`,
   // NRC access log: every successful view of an NRC photo is recorded.
   // No foreign keys on purpose: the log must survive the document itself,
   // which is deleted 10 days after upload.
@@ -351,6 +358,7 @@ const OPTIONAL_COLUMNS = [
   ['users', 'food_license_expires_at', 'TEXT'],
   ['jobs', 'requires_food_license', 'INTEGER DEFAULT 0'],
   ['products', 'business_id', 'INTEGER'],
+  ['products', 'negotiable', 'INTEGER NOT NULL DEFAULT 0'],
   ['jobs', 'is_draft', 'INTEGER DEFAULT 0'],
   ['jobs', 'expected_duration', "TEXT DEFAULT ''"],
   ['jobs', 'start_time', "TEXT DEFAULT ''"],

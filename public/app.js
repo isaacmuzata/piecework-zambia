@@ -25,6 +25,9 @@ const ICONS = {
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  heart: '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>',
+  wallet: '<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
   chevL: '<path d="M15 18l-6-6 6-6"/>',
   chevR: '<path d="M9 18l6-6-6-6"/>',
   back: '<path d="M19 12H5M12 19l-7-7 7-7"/>',
@@ -92,7 +95,7 @@ const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
 const topbarAuth = document.getElementById('topbar-auth');
 let currentUser = null;
-let browseState = { q: '', city: '', category: '', page: 1, maxKm: 50, payMin: '', payMax: '', duration: '', urgent: false };
+let browseState = { q: '', city: '', category: '', page: 1, maxKm: 50, payMin: '', payMax: '', duration: '', urgent: false, sort: '' };
 let chatTimer = null;
 let deliveryWatchId = null;
 
@@ -541,7 +544,7 @@ function renderChrome() {
   // and the home hero quick actions.
   const tabs = [
     { href: '#/', label: 'Home', ic: 'home', match: (hh) => hh === '#/' || hh === '' },
-    { href: '#/jobs', label: 'Find Work', ic: 'briefcase', match: (hh) => hh === '#/jobs' || hh.startsWith('#/job/') || hh.startsWith('#/categories') || hh.startsWith('#/saved') || hh.startsWith('#/search') },
+    { href: '#/jobs', label: 'Jobs', ic: 'briefcase', match: (hh) => hh === '#/jobs' || hh.startsWith('#/job/') || hh.startsWith('#/categories') || hh.startsWith('#/saved') || hh.startsWith('#/search') },
     { href: '#/market', label: 'Marketplace', ic: 'tag', match: (hh) => hh.startsWith('#/market') || hh.startsWith('#/product/') || hh.startsWith('#/sell') || hh.startsWith('#/selling') },
     { href: '#/messages', label: 'Messages', ic: 'message', match: (hh) => hh.startsWith('#/messages') || hh.startsWith('#/chat/') },
     {
@@ -590,26 +593,27 @@ function dedupeJobs(jobs) {
 
 function jobCard(job) {
   const saved = isSaved(job.id);  const area = job.area && job.area.toLowerCase() !== String(job.city || '').toLowerCase() ? job.area : '';
-  const statusBadge = job.status === 'open' ? `<span class="badge badge-status-open">Open</span>` : '';
-  const urgentBadge = job.is_urgent ? `<span class="badge badge-urgent">🔥 Urgent</span>` : '';
+  const statusBadge = job.status === 'open' ? '' : `<span class="badge badge-status-${esc(job.status)}">${esc(job.status)}</span>`;
+  const urgentBadge = job.is_urgent ? `<span class="badge badge-urgent">Urgent</span>` : '';
   const draftBadge = job.is_draft ? `<span class="badge badge-draft">Draft</span>` : '';
+  const durText = job.expected_duration || (job.pay_type && job.pay_type !== 'per_job' ? (PAY_LABEL[job.pay_type] || '').replace('per ', '') : '');
   return `
   <article class="job-card" data-job="${job.id}" tabindex="0" role="link" aria-label="${esc(job.title)}">
     ${job.cover_photo ? `<img class="job-cover" src="${esc(job.cover_photo)}" alt="" loading="lazy">` : jobThumb(job.category)}
     <div class="job-body">
       <h3>${esc(job.title)}</h3>
-      <div class="pay">${kwacha(job.pay_amount)}<small style="font-weight:600;color:var(--gray)"> ${esc(PAY_LABEL[job.pay_type] || '')}</small> ${statusBadge} ${urgentBadge} ${draftBadge}</div>
       <div class="job-meta">
-        <span>${icon('pin')}<b>${esc(job.city)}</b>${area ? ' · ' + esc(area) : ''}${job.distance_km != null ? ` · <b>${esc(fmtKm(job.distance_km))}</b> away` : ''}</span>
+        <span>${icon('pin')}${esc(job.city)}${area ? ' · ' + esc(area) : ''}${job.distance_km != null ? ` · ${esc(fmtKm(job.distance_km))} away` : ''}</span>
       </div>
+      <div class="pay">${kwacha(job.pay_amount)}${durText ? `<small style="font-weight:600;color:var(--gray)"> · ${esc(durText)}</small>` : ''} ${statusBadge} ${urgentBadge} ${draftBadge}</div>
       <div class="job-meta">
         <span>${icon('tag')}${esc(job.category)}</span>
-        <span>${icon('calendar')}${esc(fmtDate(job.date_needed))}</span>
-        ${job.expected_duration ? `<span>${icon('clock')}${esc(job.expected_duration)}</span>` : ''}
+        <span>${icon('users')}${job.workers_needed || 1} worker${Number(job.workers_needed || 1) === 1 ? '' : 's'}</span>
+        <span>${esc(relTime(job.created_at))}</span>
       </div>
     </div>
     <button class="job-share" data-share="${job.id}" data-title="${esc(job.title)}" aria-label="Share this job">${icon('share')}</button>
-    <button class="job-save ${saved ? 'saved' : ''}" data-save="${job.id}" aria-label="Save this job" aria-pressed="${saved ? 'true' : 'false'}">${icon('bookmark')}</button>
+    <button class="job-save ${saved ? 'saved' : ''}" data-save="${job.id}" aria-label="Save this job" aria-pressed="${saved ? 'true' : 'false'}">${icon('heart')}</button>
   </article>`;
 }
 
@@ -642,28 +646,30 @@ async function viewHome() {
   const first = currentUser.name.split(' ')[0];
   app.innerHTML = `
   <div class="view">
-    <div class="home-hero">
-      <div class="hello">${daypart()}, ${esc(first)}</div>
-      <h1>Let's get to work</h1>
+    <div class="home-head">
       <div class="home-town">${icon('pin')}<span>${esc(currentUser.city || 'Zambia')}</span></div>
-      <div class="searchbar">${icon('search')}<input id="home-q" type="search" placeholder="Search jobs, skills or people" aria-label="Search jobs and people"></div>
-      <div class="hero-actions"><a class="primary" href="#/post">Post a job</a><a href="#/dashboard">My Gigs</a></div>
+      <h1>${daypart()}, ${esc(first)} 👋</h1>
+      <p class="muted" style="margin:0 0 10px">Find work, hire workers, buy and sell. Get things done.</p>
+      <div class="searchbar">${icon('search')}<input id="home-q" type="search" placeholder="Search jobs, products, services" aria-label="Search jobs, products and people"></div>
     </div>
-    <div class="page" style="padding-top:16px">
-      <div class="section-title" style="margin-top:0"><span>Browse categories</span><a href="#/categories">View all</a></div>
-      <div class="cat-strip">
-        ${CATEGORIES.map(c => {
-          const [ic, bg] = catStyle(c);
-          return `<div class="cat-card" data-cat-link="${esc(c)}" tabindex="0" role="link" aria-label="Browse ${esc(c)} jobs"><div class="cat-ico" style="background:${bg}">${icon(ic)}</div><b>${esc(c)}</b></div>`;
-        }).join('')}
-      </div>
+    <div class="qa-grid">
+      <a class="qa-item" href="#/jobs"><span class="qa-ico" style="background:#1E9E4A">${icon('briefcase')}</span>Find Work</a>
+      <a class="qa-item" href="#/post"><span class="qa-ico" style="background:#2B7FFF">${icon('plus')}</span>Post a Job</a>
+      <a class="qa-item" href="#/market"><span class="qa-ico" style="background:#0EA47A">${icon('tag')}</span>Marketplace</a>
+      <a class="qa-item" href="#/sell"><span class="qa-ico" style="background:#F04B8B">${icon('plus')}</span>Sell an Item</a>
+      <a class="qa-item" href="#/businesses"><span class="qa-ico" style="background:#4C6FFF">${icon('grid')}</span>Businesses</a>
+      <span class="qa-item soon" title="Delivery is coming soon"><span class="qa-ico" style="background:#F5820B">${icon('truck')}</span>Delivery<span class="soon-pill">Soon</span></span>
+      <a class="qa-item" href="#/messages"><span class="qa-ico" style="background:#8B5CF6">${icon('message')}</span>Messages</a>
+      <a class="qa-item" href="#/categories"><span class="qa-ico" style="background:#E5E7EB;color:#6B7280">${icon('sliders')}</span>More</a>
+    </div>
+    <div class="page" style="padding-top:6px">
       <a class="promo-card" href="#/jobs" style="text-decoration:none;color:#fff">
         <img src="/img/landing/hero.jpg" alt="Zambians doing piece work" loading="lazy">
         <div class="promo-text"><h3>Skilled People, Stronger Communities</h3><p>Real jobs from real neighbours, matched by distance.</p></div>
       </a>
       <div id="gw-promo"></div>
       <div id="home-reco"></div>
-      <div class="section-title"><span>${getLoc() ? 'Near you' : 'Fresh opportunities'}</span><a href="#/jobs">View all</a></div>
+      <div class="section-title"><span>${getLoc() ? 'Jobs Near You' : 'Fresh Jobs'}</span><a href="#/jobs">See all</a></div>
       <div id="home-jobs">${skeletonCards(3)}</div>
       <div class="card safety-card" style="margin-top:18px">
         <div class="safety-ico">${icon('shield')}</div>
@@ -711,7 +717,7 @@ async function viewHome() {
     const slot = document.getElementById('home-reco');
     if (!slot || !d.jobs || !d.jobs.length) return;
     slot.innerHTML = `
-      <div class="section-title"><span>Recommended for you</span></div>
+      <div class="section-title"><span>Recommended Jobs Near You</span><a href="#/jobs">See all</a></div>
       <div class="card-grid">${d.jobs.slice(0, 3).map(j => `<div class="reco-item"><div class="small reco-reason">⭐ ${esc(j.recommend_reason || 'Recommended for you')}</div>${jobCard(j)}</div>`).join('')}</div>`;
   }).catch(() => {});
   try {
@@ -760,7 +766,7 @@ async function viewSearch() {
   api('/api/products?q=' + encodeURIComponent(q)).then((data) => {
     if (!document.getElementById('search-products')) return;
     prodBox.innerHTML = data.products.length
-      ? `<div class="card-grid">${data.products.map(productCard).join('')}</div>`
+      ? `<div class="product-grid">${data.products.map(productCard).join('')}</div>`
       : emptyHtml('tag', 'No items match', 'Nothing for sale matches that search yet.');
   }).catch((e) => { if (document.getElementById('search-products')) prodBox.innerHTML = errorHtml(e.message); });
   api('/api/jobs?q=' + encodeURIComponent(q) + '&page=1').then((data) => {
@@ -786,10 +792,16 @@ async function viewSearch() {
 async function viewBrowse() {
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Find Jobs</h1>
+    <h1 class="page-title">Find Work</h1>
     <p class="page-sub">Real piece work near you, matched by kilometres.</p>
     <div class="searchbar">${icon('search')}
       <input id="q" type="search" placeholder="Search jobs… e.g. moving, cleaning" value="${esc(browseState.q)}" aria-label="Search jobs">
+    </div>
+    <div class="chips" id="quick-chips" style="margin-top:10px">
+      <button class="chip" id="q-all">All</button>
+      <button class="chip ${browseState.maxKm === 25 ? 'active' : ''}" id="q-near">Near Me</button>
+      <button class="chip ${browseState.sort === 'pay_high' ? 'active' : ''}" id="q-pay">Highest Pay</button>
+      <button class="chip ${browseState.urgent ? 'active' : ''}" id="f-urgent" aria-pressed="${browseState.urgent ? 'true' : 'false'}">Urgent</button>
     </div>
     <div class="filters">
       <div class="locbar">
@@ -811,7 +823,6 @@ async function viewBrowse() {
         <option value="">Any duration</option>
         ${JOB_DURATIONS.map(d => `<option ${browseState.duration === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
       </select>
-      <button class="chip ${browseState.urgent ? 'active' : ''}" id="f-urgent" aria-pressed="${browseState.urgent ? 'true' : 'false'}">🔥 Urgent only</button>
     </div>
     <div class="split" style="margin:6px 2px 10px"><span class="small muted" id="res-count"></span><span class="small muted" id="res-order"></span></div>
     <div id="results">${skeletonCards(3)}</div>
@@ -837,6 +848,24 @@ async function viewBrowse() {
   };
   payDebounce('payMin', document.getElementById('f-paymin'));
   payDebounce('payMax', document.getElementById('f-paymax'));
+  document.getElementById('q-all').addEventListener('click', () => {
+    browseState.sort = ''; browseState.urgent = false; browseState.maxKm = 50; browseState.page = 1;
+    document.getElementById('q-pay').classList.remove('active');
+    document.getElementById('q-near').classList.remove('active');
+    const u = document.getElementById('f-urgent'); u.classList.remove('active'); u.setAttribute('aria-pressed', 'false');
+    loadJobs(true);
+  });
+  document.getElementById('q-near').addEventListener('click', (e) => {
+    if (!getLoc()) { toast('Set your location first: tap Use my location above.', 'error'); return; }
+    browseState.maxKm = browseState.maxKm === 25 ? 50 : 25; browseState.page = 1;
+    e.currentTarget.classList.toggle('active', browseState.maxKm === 25);
+    loadJobs(true);
+  });
+  document.getElementById('q-pay').addEventListener('click', (e) => {
+    browseState.sort = browseState.sort === 'pay_high' ? '' : 'pay_high'; browseState.page = 1;
+    e.currentTarget.classList.toggle('active', browseState.sort === 'pay_high');
+    loadJobs(true);
+  });
   document.getElementById('f-duration').addEventListener('change', (e) => {
     browseState.duration = e.target.value; browseState.page = 1; loadJobs(true);
   });
@@ -909,6 +938,7 @@ async function viewBrowse() {
     if (browseState.payMax) params.set('pay_max', browseState.payMax);
     if (browseState.duration) params.set('duration', browseState.duration);
     if (browseState.urgent) params.set('urgent', '1');
+    if (browseState.sort) params.set('sort', browseState.sort);
     const loc = getLoc();
     if (loc) {
       params.set('lat', loc.lat);
@@ -921,7 +951,7 @@ async function viewBrowse() {
       const count = document.getElementById('res-count');
       if (count) count.textContent = `${data.total} ${data.total === 1 ? 'opportunity' : 'opportunities'}`;
       const order = document.getElementById('res-order');
-      if (order) order.textContent = loc ? 'Nearest first' : 'Newest first';
+      if (order) order.textContent = browseState.sort === 'pay_high' ? 'Highest pay first' : (loc ? 'Nearest first' : 'Newest first');
       if (!data.jobs.length && reset) {
         results.innerHTML = emptyHtml('search', 'No jobs found',
           'Try a different search or city — or hire workers for it.',
@@ -994,32 +1024,28 @@ async function viewWorkers() {
 
 /* ================= Marketplace (2.0 M3) ================= */
 
-let marketState = { q: '', category: '', city: '', condition: '', sort: 'newest', page: 1 };
+let marketState = { q: '', category: '', city: '', condition: '', condGroup: '', sort: 'newest', page: 1 };
+const MARKET_CAT_ICONS = { 'Vehicles & Parts': 'truck', 'Electronics': 'grid', 'Phones & Tablets': 'phone', 'Computers & IT': 'briefcase', 'Home & Furniture': 'home', 'Appliances': 'sparkles', 'Fashion & Clothing': 'tag', 'Beauty & Health': 'heart', 'Building & Hardware': 'wrench', 'Agriculture & Livestock': 'leaf', 'Food & Produce': 'utensils', 'Baby & Kids': 'user', 'Sports & Leisure': 'sparkles', 'Books & Education': 'clipboard', 'Property & Rentals': 'pin', 'Other': 'grid' };
 
 function fmtK(n) { return 'K' + Number(n || 0).toLocaleString('en-ZM'); }
 
 function productCard(p) {
   const savedP = isSavedProduct(p.id);
   return `
-  <article class="job-card product-card" data-product="${p.id}">
-    ${p.cover_photo
-      ? `<img class="product-cover" src="${esc(p.cover_photo)}" alt="${esc(p.title)}" loading="lazy">`
-      : `<div class="job-thumb product-thumb">${icon('tag')}</div>`}
-    <div class="job-body">
-      <h3>${esc(p.title)}</h3>
-      <div class="product-price">${fmtK(p.price)}</div>
-      <div class="job-meta">
-        <span>${icon('pin')} ${esc(p.city)}${p.area ? ' · ' + esc(p.area) : ''}</span>
-        ${p.distance_km != null ? `<span>${p.distance_km} km away</span>` : ''}
-      </div>
-      <div class="job-meta">
-        <span class="badge badge-cond">${esc(p.condition)}</span>
-        <span>${esc(p.category)}</span>
-        ${p.status !== 'active' ? `<span class="badge badge-status-${p.status === 'sold' ? 'completed' : 'cancelled'}">${esc(p.status)}</span>` : ''}
-      </div>
-      ${p.business ? `<div class="small muted">by ${esc(p.business.name)}${p.business.verified ? ' ✓' : ''}</div>` : ''}
+  <article class="product-card-g" data-product="${p.id}">
+    <div class="pg-media">
+      ${p.cover_photo
+        ? `<img src="${esc(p.cover_photo)}" alt="${esc(p.title)}" loading="lazy">`
+        : `<div class="job-thumb product-thumb">${icon('tag')}</div>`}
+      <button class="job-save ${savedP ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${savedP ? 'true' : 'false'}">${icon('heart')}</button>
     </div>
-    <button class="job-save ${savedP ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${savedP ? 'true' : 'false'}">${icon('bookmark')}</button>
+    <div class="pg-body">
+      <h3>${esc(p.title)}</h3>
+      <div class="product-price">${fmtK(p.price)}${p.negotiable ? ' <span class="neg-pill">Negotiable</span>' : ''}</div>
+      <div class="pg-meta">${icon('pin')}<span>${esc(p.city)}${p.area ? ' · ' + esc(p.area) : ''}${p.distance_km != null ? ' · ' + p.distance_km + ' km away' : ''}</span></div>
+      <div class="pg-meta"><span class="badge badge-cond">${esc(p.condition)}</span>${p.status !== 'active' ? `<span class="badge badge-status-${p.status === 'sold' ? 'completed' : 'cancelled'}">${esc(p.status)}</span>` : ''}</div>
+      ${p.business ? `<div class="pg-meta">by <b>${esc(p.business.name)}</b>${p.business.verified ? ' ✓' : ''}</div>` : ''}
+    </div>
   </article>`;
 }
 
@@ -1032,18 +1058,20 @@ async function viewMarket() {
     <a class="btn btn-outline" href="#/selling" style="margin-bottom:12px">My selling</a>` : ''}
     <a class="btn btn-outline" href="#/businesses" style="margin-bottom:12px">Browse businesses</a>
     <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="m-q" type="search" placeholder="Search items" value="${esc(marketState.q)}" aria-label="Search items"></div>
-    <div class="chips" id="m-chips">
-      <button class="chip ${!marketState.category ? 'active' : ''}" data-mcat="">All</button>
-      ${MARKET_CATEGORIES.map(c => `<button class="chip ${marketState.category === c ? 'active' : ''}" data-mcat="${esc(c)}">${esc(c)}</button>`).join('')}
+    <div class="mcat-strip" id="m-chips">
+      <button class="mcat-item ${!marketState.category ? 'active' : ''}" data-mcat=""><span class="mcat-ico">${icon('grid')}</span>All</button>
+      ${MARKET_CATEGORIES.map(c => `<button class="mcat-item ${marketState.category === c ? 'active' : ''}" data-mcat="${esc(c)}"><span class="mcat-ico">${icon(MARKET_CAT_ICONS[c] || 'tag')}</span>${esc(c.split(' ')[0])}</button>`).join('')}
+    </div>
+    <div class="chips" id="m-quick" style="margin-top:8px">
+      <button class="chip ${!marketState.condGroup && marketState.sort !== 'nearby' ? 'active' : ''}" id="mq-all">All</button>
+      <button class="chip ${marketState.condGroup === 'new' ? 'active' : ''}" id="mq-new">New</button>
+      <button class="chip ${marketState.condGroup === 'used' ? 'active' : ''}" id="mq-used">Used</button>
+      <button class="chip ${marketState.sort === 'nearby' ? 'active' : ''}" id="mq-near">Near Me</button>
     </div>
     <div class="filters" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 4px">
       <select id="m-city" aria-label="Filter by town" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
         <option value="">All towns</option>
         ${CITIES.map(c => `<option ${marketState.city === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
-      </select>
-      <select id="m-cond" aria-label="Filter by condition" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
-        <option value="">Any condition</option>
-        ${['New', 'Like new', 'Good', 'Fair'].map(c => `<option ${marketState.condition === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
       </select>
       <select id="m-sort" aria-label="Sort items" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
         <option value="newest" ${marketState.sort === 'newest' ? 'selected' : ''}>Newest first</option>
@@ -1065,15 +1093,18 @@ async function viewMarket() {
       if (marketState.q) params.set('q', marketState.q);
       if (marketState.category) params.set('category', marketState.category);
       if (marketState.city) params.set('city', marketState.city);
-      if (marketState.condition) params.set('condition', marketState.condition);
+      if (marketState.condGroup === 'new') params.set('condition', 'New');
+      if (marketState.condGroup === 'used') params.set('used', '1');
+      const mLoc = getLoc();
+      if (mLoc) { params.set('lat', mLoc.lat); params.set('lng', mLoc.lng); }
       const data = await api('/api/products?' + params.toString());
       const html = data.products.map(productCard).join('');
       if (reset) {
         results.innerHTML = data.products.length
-          ? `<div class="card-grid">${html}</div>`
+          ? `<div class="product-grid">${html}</div>`
           : emptyHtml('tag', 'Nothing for sale here yet', 'Try another category or town, or be the first to sell.', currentUser ? `<a class="btn btn-sm btn-primary" href="#/sell">Sell an item</a>` : `<a class="btn btn-sm btn-primary" href="#/register">Join free</a>`);
       } else {
-        const grid = results.querySelector('.card-grid');
+        const grid = results.querySelector('.product-grid');
         if (grid) grid.insertAdjacentHTML('beforeend', html);
       }
       more.innerHTML = data.page < data.totalPages
@@ -1090,15 +1121,33 @@ async function viewMarket() {
     clearTimeout(qt);
     qt = setTimeout(() => { marketState.q = e.target.value.trim(); load(true); }, 400);
   });
+  document.getElementById('m-quick').addEventListener('click', (e) => {
+    const id = e.target.closest('button') && e.target.closest('button').id;
+    if (!id) return;
+    if (id === 'mq-all') { marketState.condGroup = ''; if (marketState.sort === 'nearby') marketState.sort = 'newest'; }
+    if (id === 'mq-new') marketState.condGroup = marketState.condGroup === 'new' ? '' : 'new';
+    if (id === 'mq-used') marketState.condGroup = marketState.condGroup === 'used' ? '' : 'used';
+    if (id === 'mq-near') {
+      if (!getLoc()) { toast('Set your location first: tap Use my location on Find Work.', 'error'); return; }
+      marketState.sort = marketState.sort === 'nearby' ? 'newest' : 'nearby';
+      const sortSel = document.getElementById('m-sort'); if (sortSel) sortSel.value = marketState.sort === 'nearby' ? 'nearby' : 'newest';
+    }
+    document.querySelectorAll('#m-quick .chip').forEach(c => c.classList.toggle('active',
+      (c.id === 'mq-all' && !marketState.condGroup && marketState.sort !== 'nearby') ||
+      (c.id === 'mq-new' && marketState.condGroup === 'new') ||
+      (c.id === 'mq-used' && marketState.condGroup === 'used') ||
+      (c.id === 'mq-near' && marketState.sort === 'nearby')));
+    load(true);
+  });
   document.getElementById('m-chips').addEventListener('click', (e) => {
     const chip = e.target.closest('[data-mcat]');
     if (!chip) return;
     marketState.category = chip.dataset.mcat;
-    document.querySelectorAll('#m-chips .chip').forEach(c => c.classList.toggle('active', c === chip));
+    document.querySelectorAll('#m-chips .mcat-item').forEach(c => c.classList.toggle('active', c === chip));
     load(true);
   });
   document.getElementById('m-city').addEventListener('change', (e) => { marketState.city = e.target.value; load(true); });
-  document.getElementById('m-cond').addEventListener('change', (e) => { marketState.condition = e.target.value; load(true); });
+  /* condition is owned by the quick chips (All / New / Used) */
   document.getElementById('m-sort').addEventListener('change', (e) => { marketState.sort = e.target.value; load(true); });
   load(true);
 }
@@ -1112,13 +1161,16 @@ async function viewProduct(id) {
     const isOwner = currentUser && currentUser.id === p.seller_id;
     box.innerHTML = `
       <a class="small" href="#/market">← Back to Marketplace</a>
-      ${p.photos && p.photos.length ? `<div class="job-gallery" style="margin-top:10px">${p.photos.map(ph => `<img src="${esc(ph.url)}" alt="${esc(p.title)}" loading="lazy">`).join('')}</div>` : ''}
+      ${p.photos && p.photos.length ? `<div class="pd-gallery">
+        <img class="pd-main" id="pd-main" src="${esc(p.photos[0].url)}" alt="${esc(p.title)}">
+        ${p.photos.length > 1 ? `<div class="pd-thumbs">${p.photos.map((ph, i) => `<img class="pd-thumb ${i === 0 ? 'active' : ''}" data-pd-thumb="${esc(ph.url)}" src="${esc(ph.url)}" alt="Photo ${i + 1} of this item" loading="lazy">`).join('')}</div>` : ''}
+      </div>` : ''}
       <div class="card" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
           <h1 class="page-title" style="font-size:22px;margin:0">${esc(p.title)}</h1>
-          <button class="icon-btn ${isSavedProduct(p.id) ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${isSavedProduct(p.id) ? 'true' : 'false'}">${icon('bookmark')}</button>
+          <button class="icon-btn ${isSavedProduct(p.id) ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${isSavedProduct(p.id) ? 'true' : 'false'}">${icon('heart')}</button>
         </div>
-        <div class="product-price" style="font-size:24px">${fmtK(p.price)}</div>
+        <div class="product-price" style="font-size:24px">${fmtK(p.price)}${p.negotiable ? ' <span class="neg-pill">Negotiable</span>' : ''}</div>
         <div class="job-meta" style="margin-top:6px">
           <span class="badge badge-cond">${esc(p.condition)}</span>
           <span>${esc(p.category)}</span>
@@ -1135,6 +1187,7 @@ async function viewProduct(id) {
           ${avatarHtml({ name: p.seller_name, avatar: p.seller_avatar }, 'md')}
           <span><b>${esc(p.seller_name)}</b>
           <span class="small muted" style="display:block">${esc(p.seller_city || '')}${p.seller_since ? ' · Member since ' + esc(String(p.seller_since).slice(0, 4)) : ''}</span>
+          <span style="display:block">${stars(p.seller_rating || 0)} <span class="small muted">(${p.seller_rating_count || 0} reviews)</span></span>
           ${p.seller_verified ? '<span class="badge badge-status-open">ID verified</span>' : '<span class="small muted">ID not verified yet</span>'}</span>
         </a>
         ${!isOwner ? `
@@ -1173,6 +1226,11 @@ async function viewProduct(id) {
             </div>`).join('') : '<p class="small muted">No offers yet.</p>'}
         </div>`}
       </div>`;
+    box.querySelectorAll('[data-pd-thumb]').forEach(t => t.addEventListener('click', () => {
+      const main = document.getElementById('pd-main');
+      if (main) main.src = t.dataset.pdThumb;
+      box.querySelectorAll('.pd-thumb').forEach(x => x.classList.toggle('active', x === t));
+    }));
     const msgBtn = document.getElementById('btn-msg-seller');
     if (msgBtn) msgBtn.addEventListener('click', async () => {
       msgBtn.disabled = true;
@@ -1239,35 +1297,117 @@ async function viewProduct(id) {
 
 function productFormHtml(prefill, isEdit) {
   const p = prefill || {};
+  const condGroup = p.condition && p.condition !== 'New' ? 'used' : 'new';
   return `
   <form id="product-form" class="card" style="padding:20px">
-    <div class="field"><label for="pf-title">What are you selling? *</label>
-      <input id="pf-title" maxlength="120" required value="${esc(p.title || '')}" placeholder="e.g. Samsung Galaxy A15, 128GB"></div>
-    <div class="field"><label for="pf-photos">Photos (up to 5)</label>
-      <input id="pf-photos" type="file" accept="image/*" multiple>
-      <div id="pf-photo-previews" class="job-gallery" style="margin-top:6px"></div>
-      ${isEdit && p.photos && p.photos.length ? `<button type="button" class="btn btn-sm btn-outline" id="pf-remove-photos">Remove all photos</button>` : ''}
-      <div class="hint">Clear photos sell faster. The first photo is the cover.</div></div>
-    <div class="form-2col">
+    <div class="wiz-steps" id="pf-steps">
+      <div class="wiz-step active" data-wstep="1"><span class="n">1</span>Details</div>
+      <div class="wiz-step" data-wstep="2"><span class="n">2</span>Photos</div>
+      <div class="wiz-step" data-wstep="3"><span class="n">3</span>Review</div>
+    </div>
+    <div data-wiz="1">
+      <div class="field"><label for="pf-title">Product Title *</label>
+        <input id="pf-title" maxlength="120" required value="${esc(p.title || '')}" placeholder="e.g. iPhone 13, Sofa Set, Men's Shoes"></div>
       <div class="field"><label for="pf-category">Category *</label>
         <select id="pf-category" required>${MARKET_CATEGORIES.map(c => `<option ${p.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
-      <div class="field"><label for="pf-condition">Condition</label>
-        <select id="pf-condition">${['New', 'Like new', 'Good', 'Fair'].map(c => `<option ${p.condition === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      <div class="field"><label for="pf-price">Price (ZMW) *</label>
+        <input id="pf-price" type="number" min="1" inputmode="numeric" required value="${p.price || ''}" placeholder="e.g. 1500">
+        <label class="switch-row"><span>Negotiable</span><input type="checkbox" id="pf-negotiable" ${p.negotiable ? 'checked' : ''}><span class="switch"></span></label></div>
+      <div class="field"><label>Condition</label>
+        <div class="seg" id="pf-cond-seg">
+          <button type="button" class="seg-btn ${condGroup === 'new' ? 'active' : ''}" data-cond-group="new">New</button>
+          <button type="button" class="seg-btn ${condGroup === 'used' ? 'active' : ''}" data-cond-group="used">Used</button>
+        </div>
+        <select id="pf-condition" style="margin-top:8px;${condGroup === 'new' ? 'display:none' : ''}">${['New', 'Like new', 'Good', 'Fair'].map(c => `<option ${p.condition === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label for="pf-desc">Description *</label>
+        <textarea id="pf-desc" rows="4" maxlength="2000" required placeholder="Describe your item: details, what is included, any faults, where to meet">${esc(p.description || '')}</textarea></div>
+      <div class="form-2col">
+        <div class="field"><label for="pf-city">Town *</label>
+          <select id="pf-city" required>${CITIES.map(c => `<option ${p.city === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+        <div class="field"><label for="pf-area">Area</label>
+          <input id="pf-area" maxlength="80" value="${esc(p.area || '')}" placeholder="e.g. Kamwala"></div>
+      </div>
+      <div id="pf-business-slot"></div>
     </div>
-    <div class="field"><label for="pf-price">Price (Kwacha) *</label>
-      <input id="pf-price" type="number" min="1" inputmode="numeric" required value="${p.price || ''}" placeholder="e.g. 2500"></div>
-    <div class="field"><label for="pf-desc">Description *</label>
-      <textarea id="pf-desc" rows="4" maxlength="2000" required placeholder="Condition details, what is included, any faults, where to meet">${esc(p.description || '')}</textarea></div>
-    <div class="form-2col">
-      <div class="field"><label for="pf-city">Town *</label>
-        <select id="pf-city" required>${CITIES.map(c => `<option ${p.city === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
-      <div class="field"><label for="pf-area">Area</label>
-        <input id="pf-area" maxlength="80" value="${esc(p.area || '')}" placeholder="e.g. Kamwala"></div>
+    <div data-wiz="2" hidden>
+      <div class="field"><label for="pf-photos">Photos (up to 5)</label>
+        <input id="pf-photos" type="file" accept="image/*" multiple>
+        <div id="pf-photo-previews" class="job-gallery" style="margin-top:6px"></div>
+        ${isEdit && p.photos && p.photos.length ? `<button type="button" class="btn btn-sm btn-outline" id="pf-remove-photos">Remove all photos</button>` : ''}
+        <div class="hint">Clear photos sell faster. The first photo is the cover.</div></div>
     </div>
-    <div id="pf-business-slot"></div>
-    <p class="small muted">Buyers pay you directly when you meet. PieceWork never takes a cut and never handles the money.</p>
-    <button class="btn btn-primary btn-block" type="submit">${isEdit ? 'Save changes' : 'List it for sale'}</button>
+    <div data-wiz="3" hidden>
+      <h3 style="margin-top:0">Review your listing</h3>
+      <div id="pf-review"></div>
+      <p class="small muted">Buyers pay you directly when you meet. PieceWork never takes a cut and never handles the money.</p>
+    </div>
+    <div class="wiz-nav">
+      <button class="btn btn-outline" type="button" id="pf-back" hidden>Back</button>
+      <button class="btn btn-primary" type="button" id="pf-next">Continue</button>
+      <button class="btn btn-primary" type="submit" id="pf-submit" hidden>${isEdit ? 'Save changes' : 'List it for sale'}</button>
+    </div>
   </form>`;
+}
+
+function wireSellWizard(form) {
+  let step = 1;
+  const sections = { 1: form.querySelector('[data-wiz="1"]'), 2: form.querySelector('[data-wiz="2"]'), 3: form.querySelector('[data-wiz="3"]') };
+  const back = form.querySelector('#pf-back');
+  const next = form.querySelector('#pf-next');
+  const submit = form.querySelector('#pf-submit');
+  function show(n) {
+    step = n;
+    Object.entries(sections).forEach(([k, el]) => { if (el) el.hidden = Number(k) !== n; });
+    form.querySelectorAll('.wiz-step').forEach(el => {
+      const k = Number(el.dataset.wstep);
+      el.classList.toggle('active', k === n);
+      el.classList.toggle('done', k < n);
+    });
+    back.hidden = n === 1;
+    next.hidden = n === 3;
+    submit.hidden = n !== 3;
+    if (n === 3) renderReview();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function renderReview() {
+    const d = collectProductData(form);
+    const photoCount = form.querySelectorAll('#pf-photo-previews img').length;
+    document.getElementById('pf-review').innerHTML = `
+      <div class="detail-rows">
+        <div class="drow"><span>Title</span><b>${esc(d.title || '')}</b></div>
+        <div class="drow"><span>Category</span><b>${esc(d.category || '')}</b></div>
+        <div class="drow"><span>Price</span><b>${fmtK(d.price || 0)}${d.negotiable ? ' · Negotiable' : ''}</b></div>
+        <div class="drow"><span>Condition</span><b>${esc(d.condition || '')}</b></div>
+        <div class="drow"><span>Town</span><b>${esc(d.city || '')}${d.area ? ' · ' + esc(d.area) : ''}</b></div>
+        <div class="drow"><span>Photos</span><b>${photoCount}</b></div>
+      </div>
+      <p style="margin-top:10px;white-space:pre-wrap">${esc(d.description || '')}</p>`;
+  }
+  function validStep1() {
+    const title = document.getElementById('pf-title').value.trim();
+    const price = Number(document.getElementById('pf-price').value);
+    const desc = document.getElementById('pf-desc').value.trim();
+    if (title.length < 3) { toast('Give your item a clear title first.', 'error'); return false; }
+    if (!price || price < 1) { toast('Add a price in Kwacha.', 'error'); return false; }
+    if (desc.length < 10) { toast('Add a short description so buyers trust the listing.', 'error'); return false; }
+    return true;
+  }
+  next.addEventListener('click', () => { if (step === 1 && !validStep1()) return; show(step + 1); });
+  back.addEventListener('click', () => show(step - 1));
+  form.addEventListener('submit', (e) => {
+    if (step !== 3) { e.preventDefault(); e.stopImmediatePropagation(); if (step === 1 && !validStep1()) return; show(step + 1); }
+  }, true);
+  const seg = form.querySelector('#pf-cond-seg');
+  const condSel = form.querySelector('#pf-condition');
+  seg.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cond-group]');
+    if (!btn) return;
+    seg.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b === btn));
+    if (btn.dataset.condGroup === 'new') { condSel.value = 'New'; condSel.style.display = 'none'; }
+    else { condSel.style.display = ''; if (condSel.value === 'New') condSel.value = 'Good'; }
+  });
+  show(1);
 }
 
 function wireProductPhotos(form, existing) {
@@ -1307,6 +1447,7 @@ function collectProductData(form) {
     description: document.getElementById('pf-desc').value.trim(),
     city: document.getElementById('pf-city').value,
     area: document.getElementById('pf-area').value.trim(),
+    negotiable: !!(document.getElementById('pf-negotiable') && document.getElementById('pf-negotiable').checked),
   };
   if (form._photos) data.photos = form._photos;
   const bizSel = document.getElementById('pf-business');
@@ -1341,6 +1482,7 @@ async function viewSell() {
   </div></div>`;
   const form = document.getElementById('product-form');
   wireProductPhotos(form, []);
+  wireSellWizard(form);
   mountBusinessSelect(form, null);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1369,6 +1511,7 @@ async function viewProductEdit(id) {
     </div></div>`;
     const form = document.getElementById('product-form');
     wireProductPhotos(form, p.photos || []);
+    wireSellWizard(form);
     mountBusinessSelect(form, p.business ? p.business.id : null);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1411,6 +1554,7 @@ async function viewSelling() {
   api('/api/products?mine=1').then((d) => {
     const el = document.getElementById('sell-listings');
     if (!el) return;
+    el.classList.toggle('product-grid', !!d.products.length);
     el.innerHTML = d.products.length
       ? d.products.map(productCard).join('')
       : emptyHtml('tag', 'No listings yet', 'List your first item and reach buyers near you.', `<a class="btn btn-sm btn-primary" href="#/sell">Sell an item</a>`);
@@ -1499,11 +1643,11 @@ async function viewBusiness(slug) {
   app.innerHTML = `<div class="view"><div class="page"><div id="biz-box">${skeletonCards(2)}</div></div></div>`;
   const box = document.getElementById('biz-box');
   try {
-    const { business: b, products, jobs } = await api('/api/businesses/' + encodeURIComponent(slug));
+    const { business: b, products, jobs, reviews } = await api('/api/businesses/' + encodeURIComponent(slug));
     const isOwner = currentUser && currentUser.id === b.owner_id;
     box.innerHTML = `
       ${b.cover ? `<img class="biz-cover" src="${b.cover}" alt="${esc(b.name)}">` : ''}
-      <div class="card" style="margin-top:${b.cover ? '12px' : '0'}">
+      <div class="card" style="margin-top:${b.cover ? '-30px' : '0'};position:relative;z-index:1">
         <div style="display:flex;gap:12px;align-items:flex-start">
           ${b.logo ? `<img class="biz-logo" src="${b.logo}" alt="${esc(b.name)} logo">` : `<div class="biz-logo biz-logo-fallback">${icon('tag')}</div>`}
           <div style="flex:1;min-width:0">
@@ -1514,20 +1658,62 @@ async function viewBusiness(slug) {
           </div>
         </div>
         ${b.description ? `<p style="margin-top:12px;white-space:pre-wrap">${esc(b.description)}</p>` : ''}
-        ${isOwner ? `<div class="btn-row" style="margin-top:12px"><a class="btn btn-outline" href="#/business/${b.id}/manage">${icon('edit')} Manage storefront</a></div>` : ''}
+        ${isOwner ? `<div class="btn-row" style="margin-top:12px"><a class="btn btn-outline" href="#/business/${b.id}/manage">${icon('edit')} Manage storefront</a></div>` : `
+        <div class="btn-row" style="margin-top:12px">
+          <a class="btn btn-outline" href="#/user/${b.owner_id}">${icon('message')} Message</a>
+          ${currentUser ? `<button class="btn ${b.following ? 'btn-outline' : 'btn-primary'}" id="biz-follow">${b.following ? 'Following' : 'Follow'}</button>` : `<a class="btn btn-primary" href="#/login">Follow</a>`}
+          <span class="small muted" id="biz-followers">${b.follower_count || 0} followers</span>
+        </div>`}
       </div>
-      <div class="card">
-        <h3 style="margin-top:0">Contact and hours</h3>
-        ${b.address ? `<p class="small icon-line">${icon('pin')} ${esc(b.address)}, ${esc(b.city)}</p>` : ''}
-        ${b.hours_text ? `<p class="small icon-line">${icon('clock')} ${esc(b.hours_text)}</p>` : ''}
-        ${b.phone ? `<p class="small icon-line">${icon('phone')} <a href="tel:${esc(b.phone.replace(/\D/g, ''))}">${esc(b.phone)}</a></p>` : ''}
-        ${b.email ? `<p class="small icon-line">${icon('send')} <a href="mailto:${esc(b.email)}">${esc(b.email)}</a></p>` : ''}
-        <p class="small muted">Run by <a href="#/user/${b.owner_id}">${esc(b.owner_name)}</a></p>
+      <div class="biz-tabs" role="tablist">
+        <button class="biz-tab active" data-btab="products">Products</button>
+        <button class="biz-tab" data-btab="about">About</button>
+        <button class="biz-tab" data-btab="reviews">Reviews (${(reviews || []).length})</button>
       </div>
-      <div class="section-title"><span>Items for sale (${products.length})</span></div>
-      ${products.length ? `<div class="card-grid">${products.map(productCard).join('')}</div>` : '<p class="small muted">Nothing listed right now.</p>'}
-      ${jobs.length ? `<div class="section-title"><span>Jobs from this business</span></div>${jobs.map(jobCard).join('')}` : ''}
+      <div data-bpanel="products">
+        ${products.length ? `<div class="product-grid">${products.map(productCard).join('')}</div>` : '<p class="small muted">Nothing listed right now.</p>'}
+        ${jobs.length ? `<div class="section-title"><span>Jobs from this business</span></div>${jobs.map(jobCard).join('')}` : ''}
+      </div>
+      <div data-bpanel="about" hidden>
+        <div class="card">
+          <h3 style="margin-top:0">Contact and hours</h3>
+          ${b.address ? `<p class="small icon-line">${icon('pin')} ${esc(b.address)}, ${esc(b.city)}</p>` : ''}
+          ${b.hours_text ? `<p class="small icon-line">${icon('clock')} ${esc(b.hours_text)}</p>` : ''}
+          ${b.phone ? `<p class="small icon-line">${icon('phone')} <a href="tel:${esc(b.phone.replace(/\D/g, ''))}">${esc(b.phone)}</a></p>` : ''}
+          ${b.email ? `<p class="small icon-line">${icon('send')} <a href="mailto:${esc(b.email)}">${esc(b.email)}</a></p>` : ''}
+          <p class="small muted">Run by <a href="#/user/${b.owner_id}">${esc(b.owner_name)}</a></p>
+        </div>
+      </div>
+      <div data-bpanel="reviews" hidden>
+        ${(reviews || []).length ? reviews.map(r => `
+          <div class="card" style="display:flex;gap:10px">
+            ${avatarHtml({ name: r.reviewer_name, avatar: r.reviewer_avatar }, 'sm')}
+            <div style="flex:1;min-width:0">
+              <b>${esc(r.reviewer_name)}</b> ${stars(r.rating)}
+              ${r.job_title ? `<div class="small muted">for ${esc(r.job_title)}</div>` : ''}
+              ${r.comment ? `<p style="margin:4px 0 0">${esc(r.comment)}</p>` : ''}
+              <div class="small muted">${esc(relTime(r.created_at))}</div>
+            </div>
+          </div>`).join('') : emptyHtml('star', 'No reviews yet', 'Reviews from completed jobs with this business will appear here.')}
+      </div>
     `;
+    box.querySelectorAll('[data-btab]').forEach(btn => btn.addEventListener('click', () => {
+      box.querySelectorAll('[data-btab]').forEach(x => x.classList.toggle('active', x === btn));
+      box.querySelectorAll('[data-bpanel]').forEach(pn => { pn.hidden = pn.dataset.bpanel !== btn.dataset.btab; });
+    }));
+    const followBtn = document.getElementById('biz-follow');
+    if (followBtn) followBtn.addEventListener('click', async () => {
+      followBtn.disabled = true;
+      try {
+        const now = followBtn.textContent.trim() === 'Following';
+        const r = await api('/api/businesses/' + b.id + '/follow', { method: now ? 'DELETE' : 'POST' });
+        followBtn.textContent = r.following ? 'Following' : 'Follow';
+        followBtn.className = 'btn ' + (r.following ? 'btn-outline' : 'btn-primary');
+        const fc = document.getElementById('biz-followers');
+        if (fc) fc.textContent = r.follower_count + ' followers';
+      } catch (e) { toast(e.message, 'error'); }
+      followBtn.disabled = false;
+    });
   } catch (e) {
     box.innerHTML = errorHtml(e.message);
   }
@@ -1936,15 +2122,16 @@ async function viewJobDetail(id) {
 
   app.innerHTML = `
   <div class="view">
-    <div class="detail-hero">
+    ${job.photos && job.photos.length ? `<img class="detail-photo" src="${esc(job.photos[0].url)}" alt="Photo of the job">` : ''}
+    <div class="detail-hero detail-light">
       <div class="detail-top">
         <button class="icon-btn" id="d-back" aria-label="Back to jobs">${icon('back')}</button>
         <div class="detail-actions">
           <button class="icon-btn" data-share="${job.id}" data-title="${esc(job.title)}" aria-label="Share this job">${icon('share')}</button>
-          <button class="icon-btn ${saved ? 'saved' : ''}" data-save="${job.id}" aria-label="Save this job" aria-pressed="${saved ? 'true' : 'false'}">${icon('bookmark')}</button>
+          <button class="icon-btn ${saved ? 'saved' : ''}" data-save="${job.id}" aria-label="Save this job" aria-pressed="${saved ? 'true' : 'false'}">${icon('heart')}</button>
         </div>
       </div>
-      <span class="badge badge-cat">${esc(job.category)}</span>
+      <span class="badge badge-cat">${esc(job.category)}</span>${job.is_urgent ? ' <span class="badge badge-urgent">Urgent</span>' : ''}
       <h1>${esc(job.title)}</h1>
       <div class="pay">${kwacha(job.pay_amount)}<small> ${esc(PAY_LABEL[job.pay_type] || '')}</small></div>
       <div class="detail-meta">
@@ -1954,7 +2141,7 @@ async function viewJobDetail(id) {
       </div>
     </div>
     <div class="page">
-      ${job.photos && job.photos.length ? `<div class="job-gallery">${job.photos.map(p => `<img src="${esc(p.url)}" alt="Photo of the job" loading="lazy">`).join('')}</div>` : ''}
+      ${job.photos && job.photos.length > 1 ? `<div class="job-gallery">${job.photos.slice(1).map(p => `<img src="${esc(p.url)}" alt="Photo of the job" loading="lazy">`).join('')}</div>` : ''}
       ${job.is_draft && isPoster ? `
       <div class="card" style="border:2px solid #b45309">
         <h3 style="margin-top:0">📝 This job is a draft</h3>
@@ -1967,15 +2154,15 @@ async function viewJobDetail(id) {
       <div class="card">
         <h3 style="margin-top:0">About this job</h3>
         <p style="margin:0">${esc(job.description).replace(/\n/g, '<br>')}</p>
-        <div class="tagrow">
-          <span class="tag">${esc(job.category)}</span>
-          <span class="tag">${esc(PAY_LABEL[job.pay_type] || 'Fixed price')}</span>
-          <span class="tag">${job.workers_needed} ${job.workers_needed === 1 ? 'worker' : 'workers'} needed</span>
-          ${job.expected_duration ? `<span class="tag">⏱ ${esc(job.expected_duration)}</span>` : ''}
-          ${job.start_time ? `<span class="tag">Starts ${esc(job.start_time)}</span>` : ''}
-          ${job.transport_provided ? `<span class="tag">🚌 Transport provided</span>` : ''}
-          ${job.materials_provided ? `<span class="tag">🧰 Materials and tools provided</span>` : ''}
-          ${job.is_urgent ? `<span class="tag" style="background:#fef2f2;color:#b91c1c">🔥 Urgent</span>` : ''}
+        <div class="detail-rows">
+          <div class="drow"><span>${icon('tag')}Category</span><b>${esc(job.category)}</b></div>
+          <div class="drow"><span>${icon('wallet')}Pay</span><b>${kwacha(job.pay_amount)} ${esc(PAY_LABEL[job.pay_type] || '')}</b></div>
+          <div class="drow"><span>${icon('users')}Workers needed</span><b>${job.workers_needed}</b></div>
+          <div class="drow"><span>${icon('calendar')}Start date</span><b>${esc(fmtDate(job.date_needed))}</b></div>
+          ${job.start_time ? `<div class="drow"><span>${icon('clock')}Start time</span><b>${esc(job.start_time)}</b></div>` : ''}
+          ${job.expected_duration ? `<div class="drow"><span>${icon('clock')}Expected duration</span><b>${esc(job.expected_duration)}</b></div>` : ''}
+          <div class="drow"><span>${icon('check')}Materials provided</span><b>${job.materials_provided ? 'Yes' : 'No'}</b></div>
+          <div class="drow"><span>${icon('truck')}Transport provided</span><b>${job.transport_provided ? 'Yes' : 'No'}</b></div>
         </div>
       </div>
       ${job.instructions ? `
@@ -1985,17 +2172,19 @@ async function viewJobDetail(id) {
       </div>` : ''}
       <a class="card card-row" href="#/user/${job.poster.id}" style="text-decoration:none;color:inherit">
         ${avatarHtml(job.poster, 'md')}
-        <div style="flex:1"><div class="small muted">About the client</div>
-          <b>${esc(job.poster.name)}</b>
+        <div style="flex:1"><div class="small muted">Posted by</div>
+          <b>${esc(job.poster.name)}</b> ${job.poster.verified ? '<span class="badge badge-verified">✓ Verified Poster</span>' : ''}
           <div>${stars(job.poster.rating_avg)} <span class="small muted">(${job.poster.rating_count} reviews)</span></div>
         </div>
         <span class="ico" style="color:var(--gray-soft)">${icon('chevR')}</span>
       </a>
+      <span id="apply-anchor"></span>
       ${actionHtml}
       ${momoNoteHtml()}
       ${reviewHtml}
       ${currentUser && !isPoster ? `<div style="text-align:center;margin-top:6px"><button class="btn btn-sm btn-outline" id="report-job-btn">🚩 Report this job</button></div>` : ''}
     </div>
+    ${!isPoster && currentUser && job.status === 'open' && !(job.my_application && job.my_application.status !== 'withdrawn') ? `<div class="sticky-cta"><button class="btn btn-primary" id="sticky-apply">Apply for This Job</button></div>` : ''}
   </div>`;
 
   document.getElementById('d-back').addEventListener('click', () => { location.hash = '#/jobs'; });
@@ -2008,6 +2197,11 @@ async function viewJobDetail(id) {
       await api('/api/reports', { method: 'POST', body: JSON.stringify({ target_type: 'job', target_id: job.id, reason: reason.trim() }) });
       toast('Thank you. The team will review this report.');
     } catch (e) { toast(e.message, true); reportJobBtn.disabled = false; }
+  });
+  const stickyApply = document.getElementById('sticky-apply');
+  if (stickyApply) stickyApply.addEventListener('click', () => {
+    const t = document.getElementById('apply-card') || document.getElementById('apply-anchor');
+    if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   const toApply = document.getElementById('btn-to-apply');
   if (toApply) toApply.addEventListener('click', () => {
@@ -2838,6 +3032,7 @@ async function viewProfile() {
       ${avatarHtml(currentUser, 'lg')}
       <h2>${esc(currentUser.name)}</h2>
       <div class="sub">${esc(currentUser.city)} · ${stars(currentUser.rating_avg)} (${currentUser.rating_count} reviews)</div>
+      ${currentUser.selfie_status === 'approved' ? '<div style="margin-top:6px"><span class="badge badge-verified">✓ Verified Member</span></div>' : ''}
       <div style="margin-top:12px"><a class="btn btn-sm btn-primary" href="#/user/${currentUser.id}">${icon('eye')}View public profile</a></div>
     </div>
     <div class="profile-stats" id="pf-stats">
@@ -2852,8 +3047,10 @@ async function viewProfile() {
       <div id="pf-reviews" class="card" hidden></div>
       <div class="section-title"><span>Menu</span></div>
       <div class="menu-list">
-        <a href="#/dashboard">${icon('clipboard')}<span>My gigs</span><span class="chev">${icon('chevR')}</span></a>
-        <a href="#/saved">${icon('bookmark')}<span>Saved jobs</span><span class="chev">${icon('chevR')}</span></a>
+        <a href="#/dashboard">${icon('clipboard')}<span>My Jobs</span><span class="chev">${icon('chevR')}</span></a>
+        <a href="#/selling">${icon('tag')}<span>My Products</span><span class="chev">${icon('chevR')}</span></a>
+        <a href="#/business/mine">${icon('grid')}<span>My Business Store</span><span class="chev">${icon('chevR')}</span></a>
+        <a href="#/saved">${icon('heart')}<span>Saved Items</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/invite">${icon('sparkles')}<span>Win cash — invite friends</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/how">${icon('help')}<span>Help &amp; support</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/terms">${icon('shield')}<span>Terms and conditions</span><span class="chev">${icon('chevR')}</span></a>
@@ -2875,16 +3072,14 @@ async function viewProfile() {
   tabR.addEventListener('click', () => { tabR.classList.add('active'); tabO.classList.remove('active'); paneR.hidden = false; paneO.hidden = true; });
 
   try {
-    const [{ user, completed_jobs, reviews }, mine] = await Promise.all([
+    const [{ user, completed_jobs, reviews }, stats] = await Promise.all([
       api('/api/users/' + currentUser.id),
-      api('/api/jobs?mine=1&status=open&page=1').catch(() => ({ total: 0 })),
+      api('/api/users/me/stats').catch(() => null),
     ]);
-    const avg = reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0;
-    const positive = reviews.length ? Math.round(avg / 5 * 100) + '%' : '–';
     statsEl.innerHTML = `
-      <div><strong>${completed_jobs}</strong><span>Jobs completed</span></div>
-      <div><strong>${positive}</strong><span>Positive reviews</span></div>
-      <div><strong>${mine.total || 0}</strong><span>Active listings</span></div>`;
+      <div><strong>${stats ? stats.jobs_completed : completed_jobs}</strong><span>Jobs Completed</span></div>
+      <div><strong>${stats ? stats.items_sold : 0}</strong><span>Items Sold</span></div>
+      <div><strong>${stats ? stats.rating_count : reviews.length}</strong><span>Reviews</span></div>`;
     const skills = (user.skills || '').split(',').map(s => s.trim()).filter(Boolean);
     paneO.innerHTML = `
       ${trustBadgesHtml(user.badges, user.vouch_count)}
@@ -3368,16 +3563,17 @@ async function viewSaved() {
   const ids = getSaved();
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Saved jobs</h1>
-    <p class="page-sub">Jobs you bookmarked for later — kept on this device.</p>
+    <h1 class="page-title">Saved</h1>
+    <p class="page-sub">Jobs and items you saved for later, kept on this device.</p>
+    <div class="section-title"><span>Saved jobs</span></div>
     <div id="saved-list">${loadingHtml()}</div>
+    <div class="section-title"><span>Saved items</span></div>
+    <div id="saved-products">${loadingHtml()}</div>
   </div></div>`;
   const box = document.getElementById('saved-list');
   if (!ids.length) {
-    box.innerHTML = emptyHtml('bookmark', 'No saved jobs yet', 'Tap the bookmark on any job to keep it here.', `<a class="btn btn-sm btn-primary" href="#/jobs">Browse jobs</a>`);
-    return;
-  }
-  try {
+    box.innerHTML = emptyHtml('heart', 'No saved jobs yet', 'Tap the heart on any job to keep it here.', `<a class="btn btn-sm btn-primary" href="#/jobs">Browse jobs</a>`);
+  } else try {
     const jobs = (await Promise.all(
       ids.map(jid => api('/api/jobs/' + jid).then(d => d.job).catch(() => null))
     )).filter(Boolean);
@@ -3386,6 +3582,24 @@ async function viewSaved() {
       : emptyHtml('bookmark', 'Nothing here', 'Those jobs are no longer available.', `<a class="btn btn-sm btn-primary" href="#/jobs">Browse jobs</a>`);
   } catch (e) {
     box.innerHTML = errorHtml(e.message);
+  }
+  const pbox = document.getElementById('saved-products');
+  const pids = getSavedProducts();
+  if (!pids.length) {
+    pbox.innerHTML = emptyHtml('heart', 'No saved items yet', 'Tap the heart on any marketplace item to keep it here.', `<a class="btn btn-sm btn-primary" href="#/market">Open the Marketplace</a>`);
+  } else if (!currentUser) {
+    pbox.innerHTML = emptyHtml('heart', 'Sign in to view saved items', 'Your saved items are on this device. Sign in to open them.', `<a class="btn btn-sm btn-primary" href="#/login">Sign in</a>`);
+  } else {
+    try {
+      const items = (await Promise.all(
+        pids.map(pid => api('/api/products/' + pid).then(d => d.product).catch(() => null))
+      )).filter(Boolean);
+      pbox.innerHTML = items.length
+        ? `<div class="product-grid">${items.map(productCard).join('')}</div>`
+        : emptyHtml('heart', 'Nothing here', 'Those items are no longer available.', `<a class="btn btn-sm btn-primary" href="#/market">Open the Marketplace</a>`);
+    } catch (e) {
+      pbox.innerHTML = errorHtml(e.message);
+    }
   }
 }
 
@@ -3397,6 +3611,7 @@ async function viewMessages() {
   <div class="view"><div class="page">
     <h1 class="page-title">Messages</h1>
     <p class="page-sub">Your conversations with posters and workers, about your jobs.</p>
+    <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="conv-q" type="search" placeholder="Search messages" aria-label="Search conversations"></div>
     <div id="conv-list">${loadingHtml('Loading conversations…')}</div>
   </div></div>`;
   const list = document.getElementById('conv-list');
@@ -3408,7 +3623,8 @@ async function viewMessages() {
         `<a class="btn btn-sm btn-primary" href="#/jobs">Browse jobs</a>`);
       return;
     }
-    list.innerHTML = conversations.map(c => `
+    const renderConvs = (rows) => {
+      list.innerHTML = rows.length ? rows.map(c => `
       <a class="conv-card" href="#/chat/${c.id}">
         ${avatarHtml({ name: c.other_name, avatar: c.other_avatar }, 'md')}
         <div class="conv-body">
@@ -3418,7 +3634,14 @@ async function viewMessages() {
           <div class="conv-preview">${c.last_body ? esc(c.last_body) : '<span class="small muted">Say hello…</span>'}</div>
         </div>
         ${c.unread ? `<span class="conv-unread">${c.unread}</span>` : ''}
-      </a>`).join('');
+      </a>`).join('') : '<p class="small muted" style="text-align:center;margin-top:16px">No conversations match your search.</p>';
+    };
+    renderConvs(conversations);
+    const convQ = document.getElementById('conv-q');
+    if (convQ) convQ.addEventListener('input', () => {
+      const q = convQ.value.trim().toLowerCase();
+      renderConvs(q ? conversations.filter(c => (c.other_name + ' ' + (c.job_title || '') + ' ' + (c.last_body || '')).toLowerCase().includes(q)) : conversations);
+    });
   } catch (e) {
     list.innerHTML = errorHtml(e.message);
   }
@@ -4073,21 +4296,6 @@ async function viewAdmin() {
   }
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Admin</h1>
-    <p class="page-sub">PieceWork Zambia at a glance.</p>
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-      <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/businesses">🏪 Businesses</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/activity">👀 User activity</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/testers">🧪 My testers</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/jobs">📋 All jobs</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/verifications" id="btn-selfie-review">🪪 Selfie review</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/food-licenses" id="btn-food-review">🍽️ Food licenses</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/resets">🔑 Password resets</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/reports">🚩 Reports</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/categories">🗂️ Categories</a>
-      <a class="btn btn-sm btn-outline" href="#/admin/audit">📜 Audit log</a>
-    </div>
     <div id="admin-body">${loadingHtml('Loading stats…')}</div>
     <div id="nrc-views-body" style="margin-top:14px"></div>
   </div></div>`;
@@ -4099,15 +4307,33 @@ async function viewAdmin() {
     const s = await api('/api/admin/stats');
     const stat = (label, val) => `<div class="card stat-card"><div class="big">${val}</div><div class="small muted">${label}</div></div>`;
     const openJobs = s.jobs_by_status.open || 0;
+    const jobsTotal = Object.values(s.jobs_by_status || {}).reduce((a, b) => a + b, 0);
+    const tile = (bg, ic, label, val) => `<div class="dash-tile" style="background:${bg}"><div class="l">${icon(ic)} ${label}</div><div class="n">${val}</div></div>`;
+    const mrow = (href, ic, label, badge) => `<a href="${href}">${icon(ic)}<span>${label}</span>${badge ? `<span class="dash-badge">${badge}</span>` : ''}<span class="chev">${icon('chevR')}</span></a>`;
     body.innerHTML = `
-      <div class="stat-grid">
-        ${stat('Total signups', s.users)}
-        ${stat('Applications', s.applications)}
-        ${stat('Open jobs', openJobs)}
-        ${stat('Conversations', s.conversations)}
-        ${stat('Messages sent', s.messages)}
-        ${stat('Looking for Work', s.open_to_work)}
-        ${stat('Selfies pending', s.selfies_pending)}
+      <div class="admin-dash">
+        <div class="dash-head"><h2>Admin Dashboard</h2><span>PieceWork Zambia at a glance</span></div>
+        <div class="dash-tiles">
+          ${tile('#2563EB', 'users', 'Users', s.users)}
+          ${tile('#16A34A', 'briefcase', 'Jobs', jobsTotal)}
+          ${tile('#F97316', 'tag', 'Products', s.products_total || 0)}
+          ${tile('#7C3AED', 'grid', 'Businesses', s.businesses_total || 0)}
+          ${tile('#0D9488', 'clipboard', 'Applications', s.applications)}
+          ${tile('#E0245E', 'shield', 'Reports open', s.reports_open || 0)}
+        </div>
+        <div class="dash-menu">
+          ${mrow('#/admin/activity', 'users', 'User Management', 0)}
+          ${mrow('#/admin/verifications', 'id', 'Verification Queue', s.selfies_pending || 0)}
+          ${mrow('#/admin/reports', 'shield', 'Marketplace Moderation', s.reports_open || 0)}
+          ${mrow('#/admin/businesses', 'grid', 'Business Applications', s.businesses_pending || 0)}
+          ${mrow('#/admin/testers', 'check', 'My Testers', 0)}
+          ${mrow('#/admin/jobs', 'briefcase', 'All Jobs', 0)}
+          ${mrow('#/admin/categories', 'sliders', 'Categories', 0)}
+          ${mrow('#/admin/referrals', 'sparkles', 'Referral Monitor', 0)}
+          ${mrow('#/admin/food-licenses', 'utensils', 'Food Licenses', 0)}
+          ${mrow('#/admin/resets', 'help', 'Password Resets', 0)}
+          ${mrow('#/admin/audit', 'clipboard', 'Audit Log', 0)}
+        </div>
       </div>
       <div class="card">
         <h3 style="margin-top:0">Signups, last 14 days</h3>

@@ -777,7 +777,7 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
   const rows = await getAll(`
     SELECT j.*, u.name AS poster_name, u.city AS poster_city,
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
-           u.avatar AS poster_avatar,
+           u.avatar AS poster_avatar, u.selfie_status AS poster_selfie_status,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count,
            (SELECT COUNT(*) FROM job_photos p WHERE p.job_id = j.id) AS photo_count,
@@ -803,7 +803,13 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
     return job;
   });
 
-  if (mine) {
+  const sortParam = String(req.query.sort || '');
+  if (sortParam === 'pay_high' || sortParam === 'pay_low') {
+    // Design alignment (Oct 22): explicit pay ordering beats distance.
+    const dir = sortParam === 'pay_high' ? -1 : 1;
+    if (Number.isFinite(maxKm) && viewer) jobs = jobs.filter((j) => j.distance_km != null && j.distance_km <= maxKm);
+    jobs.sort((a, b) => dir * ((a.pay_amount || 0) - (b.pay_amount || 0)) || b.created_at.localeCompare(a.created_at));
+  } else if (mine) {
     // Own dashboard: newest first, no distance games.
     jobs.sort((a, b) => b.created_at.localeCompare(a.created_at));
   } else if (viewer) {
@@ -891,6 +897,7 @@ function serializeJob(j) {
       id: j.poster_id, name: j.poster_name, city: j.poster_city,
       rating_avg: j.poster_rating || 0, rating_count: j.poster_rating_count || 0,
       avatar: j.poster_avatar || '',
+      verified: j.poster_selfie_status === 'approved',
     },
     applicant_count: j.applicant_count || 0,
     accepted_count: j.accepted_count || 0,
@@ -906,7 +913,7 @@ app.get('/api/jobs/recommended', ah(auth), ah(async (req, res) => {
   const rows = await getAll(`
     SELECT j.*, u.name AS poster_name, u.city AS poster_city,
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
-           u.avatar AS poster_avatar,
+           u.avatar AS poster_avatar, u.selfie_status AS poster_selfie_status,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count,
            (SELECT COUNT(*) FROM job_photos p WHERE p.job_id = j.id) AS photo_count,
@@ -952,7 +959,7 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
   const j = await getOne(`
     SELECT j.*, u.name AS poster_name, u.city AS poster_city,
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
-           u.avatar AS poster_avatar,
+           u.avatar AS poster_avatar, u.selfie_status AS poster_selfie_status,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count,
            (SELECT COUNT(*) FROM job_photos p WHERE p.job_id = j.id) AS photo_count,
@@ -1595,6 +1602,10 @@ app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
     FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'
     ORDER BY created_at ASC LIMIT 100`),
     getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'`),
+    getOne('SELECT COUNT(*) AS c FROM products'),
+    getOne('SELECT COUNT(*) AS c FROM businesses'),
+    getOne("SELECT COUNT(*) AS c FROM businesses WHERE status = 'pending'"),
+    getOne("SELECT COUNT(*) AS c FROM reports WHERE status = 'open'"),
   ]);
   res.json({ pending: rows, pending_count: Number(countRow.c || 0) });
 }));
@@ -1729,6 +1740,27 @@ app.get('/api/users/:id', maybeAuth, ah(async (req, res) => {
   res.json({
     user: u, completed_jobs: completed, reviews,
     vouched_by: vouchedBy.map(r => r.name), viewer_vouched: viewerVouched,
+  });
+}));
+
+app.get('/api/users/me/stats', ah(auth), ah(async (req, res) => {
+  const me = req.user.id;
+  const one = async (sql) => { const r = await getOne(sql, [me]); return r ? r.c : 0; };
+  const posted = await one("SELECT COUNT(*) AS c FROM jobs WHERE poster_id = ? AND status = 'completed'");
+  const worked = await getOne(
+    `SELECT COUNT(*) AS c FROM applications a JOIN jobs j ON j.id = a.job_id
+     WHERE a.worker_id = ? AND a.status = 'accepted' AND j.status = 'completed'`, [me]);
+  const sold = await one("SELECT COUNT(*) AS c FROM products WHERE seller_id = ? AND status = 'sold'");
+  const postedAll = await one('SELECT COUNT(*) AS c FROM jobs WHERE poster_id = ?');
+  const listed = await one("SELECT COUNT(*) AS c FROM products WHERE seller_id = ? AND status = 'active'");
+  const u = await getOne('SELECT rating_avg, rating_count FROM users WHERE id = ?', [me]);
+  res.json({
+    jobs_completed: posted + (worked ? worked.c : 0),
+    items_sold: sold,
+    jobs_posted: postedAll,
+    items_listed: listed,
+    rating_avg: u ? Number(u.rating_avg || 0) : 0,
+    rating_count: u ? Number(u.rating_count || 0) : 0,
   });
 }));
 
@@ -2072,6 +2104,7 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
   const [
     userCount, signupsByDay, appCount, appsByStatus,
     jobsByStatus, convCount, msgCount, otwCount, selfiePending,
+    productsTotal, businessesTotal, businessesPending, reportsOpen,
   ] = await Promise.all([
     getOne('SELECT COUNT(*) AS c FROM users'),
     getAll(`SELECT date(created_at) AS d, COUNT(*) AS c FROM users
@@ -2083,6 +2116,10 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
     getOne('SELECT COUNT(*) AS c FROM messages'),
     getOne('SELECT COUNT(*) AS c FROM users WHERE open_to_work = 1'),
     getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'`),
+    getOne('SELECT COUNT(*) AS c FROM products'),
+    getOne('SELECT COUNT(*) AS c FROM businesses'),
+    getOne("SELECT COUNT(*) AS c FROM businesses WHERE status = 'pending'"),
+    getOne("SELECT COUNT(*) AS c FROM reports WHERE status = 'open'"),
   ]);
   res.json({
     users: Number(userCount.c || 0),
@@ -2094,6 +2131,10 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
     messages: Number(msgCount.c || 0),
     open_to_work: Number(otwCount.c || 0),
     selfies_pending: Number(selfiePending.c || 0),
+    products_total: Number(productsTotal.c || 0),
+    businesses_total: Number(businessesTotal.c || 0),
+    businesses_pending: Number(businessesPending.c || 0),
+    reports_open: Number(reportsOpen.c || 0),
   });
 }));
 
@@ -2508,11 +2549,47 @@ app.get('/api/businesses/:slug', ah(maybeAuth), ah(async (req, res) => {
   const jobs = await getAll(
     "SELECT * FROM jobs WHERE poster_id = ? AND status = 'open' AND is_draft = 0 ORDER BY created_at DESC LIMIT 20", [row.owner_id]
   );
+  const reviews = await getAll(
+    `SELECT r.rating, r.comment, r.created_at, u.name AS reviewer_name, u.avatar AS reviewer_avatar,
+            j.title AS job_title
+     FROM reviews r JOIN users u ON u.id = r.reviewer_id
+     LEFT JOIN jobs j ON j.id = r.job_id
+     WHERE r.reviewee_id = ? ORDER BY r.created_at DESC, r.id DESC LIMIT 20`, [row.owner_id]
+  );
+  const fCount = await getOne('SELECT COUNT(*) AS c FROM business_follows WHERE business_id = ?', [row.id]);
+  business.follower_count = fCount ? fCount.c : 0;
+  business.following = false;
+  if (req.user) {
+    const f = await getOne('SELECT id FROM business_follows WHERE business_id = ? AND follower_id = ?', [row.id, req.user.id]);
+    business.following = !!f;
+  }
   res.json({
     business,
     products: products.map(serializeProduct),
     jobs: jobs.map(serializeJob),
+    reviews: reviews.map((r) => ({
+      rating: r.rating, comment: r.comment || '', created_at: r.created_at,
+      reviewer_name: r.reviewer_name, reviewer_avatar: r.reviewer_avatar || '',
+      job_title: r.job_title || '',
+    })),
   });
+}));
+
+app.post('/api/businesses/:id/follow', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT id, owner_id, status FROM businesses WHERE id = ?', [id]);
+  if (!row || row.status !== 'active') return err(res, 404, 'Business not found.');
+  if (row.owner_id === req.user.id) return err(res, 422, 'You cannot follow your own business.');
+  await runWrite('INSERT OR IGNORE INTO business_follows (business_id, follower_id) VALUES (?, ?)', [id, req.user.id]);
+  const c = await getOne('SELECT COUNT(*) AS c FROM business_follows WHERE business_id = ?', [id]);
+  res.json({ following: true, follower_count: c ? c.c : 0 });
+}));
+
+app.delete('/api/businesses/:id/follow', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  await runWrite('DELETE FROM business_follows WHERE business_id = ? AND follower_id = ?', [id, req.user.id]);
+  const c = await getOne('SELECT COUNT(*) AS c FROM business_follows WHERE business_id = ?', [id]);
+  res.json({ following: false, follower_count: c ? c.c : 0 });
 }));
 
 app.patch('/api/businesses/:id', ah(auth), ah(async (req, res) => {
@@ -2632,7 +2709,9 @@ function serializeProduct(p) {
     seller_city: p.seller_city || '', seller_verified: p.seller_selfie_status === 'approved',
     seller_since: p.seller_created_at || null,
     title: p.title, description: p.description || '',
-    price: Number(p.price || 0), category: p.category, condition: p.condition,
+    price: Number(p.price || 0), negotiable: !!p.negotiable, category: p.category, condition: p.condition,
+    seller_rating: p.seller_rating != null ? Number(p.seller_rating) : 0,
+    seller_rating_count: Number(p.seller_rating_count || 0),
     city: p.city, area: p.area || '', status: p.status,
     view_count: Number(p.view_count || 0),
     business: p.business_name ? {
@@ -2675,6 +2754,7 @@ function validateProductInput(b) {
 const PRODUCT_SELECT = `
   SELECT p.*, u.name AS seller_name, u.avatar AS seller_avatar, u.city AS seller_city,
          u.selfie_status AS seller_selfie_status, u.created_at AS seller_created_at,
+         u.rating_avg AS seller_rating, u.rating_count AS seller_rating_count,
          bz.name AS business_name, bz.slug AS business_slug,
          bz.verification_status AS business_verification,
          (SELECT COUNT(*) FROM product_photos ph WHERE ph.product_id = p.id) AS photo_count,
@@ -2696,6 +2776,7 @@ app.get('/api/products', ah(maybeAuth), ah(async (req, res) => {
   if (req.query.category && marketCategorySet.has(req.query.category)) { conds.push('p.category = ?'); params.push(req.query.category); }
   if (req.query.city && CITIES.includes(req.query.city)) { conds.push('p.city = ?'); params.push(req.query.city); }
   if (req.query.condition && PRODUCT_CONDITIONS.includes(req.query.condition)) { conds.push('p.condition = ?'); params.push(req.query.condition); }
+  if (String(req.query.used || '') === '1') { conds.push("p.condition != 'New'"); }
   const pmin = parseInt(req.query.price_min, 10);
   if (Number.isInteger(pmin) && pmin >= 0) { conds.push('p.price >= ?'); params.push(pmin); }
   const pmax = parseInt(req.query.price_max, 10);
@@ -2753,12 +2834,12 @@ app.post('/api/products', ah(auth), productLimiter, ah(async (req, res) => {
     businessId = biz.id;
   }
   const info = await runWrite(`
-    INSERT INTO products (seller_id, title, description, price, category, condition, city, area, lat, lng, business_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO products (seller_id, title, description, price, category, condition, city, area, lat, lng, business_id, negotiable)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     req.user.id, title, String(b.description).trim(), Number(b.price), b.category,
     b.condition || 'Good', b.city, String(b.area || '').trim().slice(0, 80),
-    coords ? coords.lat : null, coords ? coords.lng : null, businessId,
+    coords ? coords.lat : null, coords ? coords.lng : null, businessId, b.negotiable ? 1 : 0,
   ]);
   const id = insertId(info);
   if (Array.isArray(b.photos) && b.photos.length) {
@@ -2832,6 +2913,7 @@ app.patch('/api/products/:id', ah(auth), ah(async (req, res) => {
   if (b.condition !== undefined) updates.condition = b.condition;
   if (b.city !== undefined) updates.city = b.city;
   if (b.area !== undefined) updates.area = String(b.area).trim().slice(0, 80);
+  if (b.negotiable !== undefined) updates.negotiable = b.negotiable ? 1 : 0;
   if (b.status !== undefined) {
     if (!['active', 'hidden', 'sold'].includes(b.status)) return err(res, 422, 'Invalid status.');
     updates.status = b.status;
