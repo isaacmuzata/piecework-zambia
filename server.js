@@ -287,6 +287,17 @@ function setAuthCookie(res, token) {
   });
 }
 
+/** Last-seen touches, throttled in memory so the admin activity board can
+ * show when each user last opened the app without a DB write per request. */
+const lastSeenTouch = new Map();
+function touchLastSeen(userId) {
+  const now = Date.now();
+  if (now - (lastSeenTouch.get(userId) || 0) < 5 * 60 * 1000) return;
+  lastSeenTouch.set(userId, now);
+  runWrite("UPDATE users SET last_seen_at = datetime('now') WHERE id = ?", [userId])
+    .catch(() => { /* activity tracking must never break a request */ });
+}
+
 /** Auth middleware — reads httpOnly cookie, falls back to Bearer header. */
 async function auth(req, res, next) {
   const token = req.cookies?.pw_token ||
@@ -297,6 +308,7 @@ async function auth(req, res, next) {
     const user = await getOne('SELECT * FROM users WHERE id = ?', [payload.sub]);
     if (!user) return err(res, 401, 'Account no longer exists.');
     req.user = user;
+    touchLastSeen(user.id);
     next();
   } catch {
     return err(res, 401, 'Session expired. Please sign in again.');
@@ -311,6 +323,7 @@ async function maybeAuth(req, res, next) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
       req.user = (await getOne('SELECT * FROM users WHERE id = ?', [payload.sub])) || null;
+      if (req.user) touchLastSeen(req.user.id);
     } catch { /* ignore — treat as anonymous */ }
   }
   next();
@@ -1535,6 +1548,53 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
     messages: Number(msgCount.c || 0),
     open_to_work: Number(otwCount.c || 0),
     selfies_pending: Number(selfiePending.c || 0),
+  });
+}));
+
+// ---------------------------------------------------------------- admin user activity
+// Per-user activity board: when each user last opened the app (last_seen_at,
+// touched by the auth middleware) plus what they actually did, counted from
+// the applications / jobs / messages tables. Most recently active first;
+// users who have never been seen since tracking started sort by their
+// latest recorded action, then by signup. Admin only.
+app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const rows = await getAll(`
+    SELECT u.id, u.name, u.phone, u.city, u.created_at, u.last_seen_at,
+           u.orientation_accepted_at, u.selfie_status, u.open_to_work,
+      (SELECT COUNT(*) FROM applications a
+        WHERE a.worker_id = u.id AND a.status != 'withdrawn') AS applications,
+      (SELECT COUNT(*) FROM jobs j WHERE j.poster_id = u.id) AS jobs_posted,
+      (SELECT COUNT(*) FROM messages m WHERE m.sender_id = u.id) AS messages_sent,
+      (SELECT COUNT(*) FROM conversations c
+        WHERE c.poster_id = u.id OR c.worker_id = u.id) AS conversations,
+      (SELECT MAX(x.ts) FROM (
+         SELECT MAX(a2.created_at) AS ts FROM applications a2 WHERE a2.worker_id = u.id
+         UNION ALL
+         SELECT MAX(j2.created_at) FROM jobs j2 WHERE j2.poster_id = u.id
+         UNION ALL
+         SELECT MAX(m2.created_at) FROM messages m2 WHERE m2.sender_id = u.id
+       ) x) AS last_action_at
+    FROM users u
+    ORDER BY COALESCE(u.last_seen_at, last_action_at, u.created_at) DESC
+    LIMIT 300`);
+  res.json({
+    users: rows.map((r) => ({
+      id: Number(r.id),
+      name: r.name,
+      phone: r.phone,
+      city: r.city,
+      signed_up_at: r.created_at,
+      last_seen_at: r.last_seen_at || null,
+      last_action_at: r.last_action_at || null,
+      orientation_done: !!r.orientation_accepted_at,
+      selfie_status: r.selfie_status || 'pending',
+      open_to_work: !!r.open_to_work,
+      applications: Number(r.applications || 0),
+      jobs_posted: Number(r.jobs_posted || 0),
+      messages_sent: Number(r.messages_sent || 0),
+      conversations: Number(r.conversations || 0),
+    })),
   });
 }));
 

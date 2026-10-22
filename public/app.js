@@ -2750,6 +2750,7 @@ async function viewAdmin() {
     <p class="page-sub">PieceWork Zambia at a glance.</p>
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/activity">👀 User activity</a>
       <a class="btn btn-sm btn-outline" href="#/admin/jobs">📋 All jobs</a>
       <a class="btn btn-sm btn-outline" href="#/admin/verifications" id="btn-selfie-review">🪪 Selfie review</a>
       <a class="btn btn-sm btn-outline" href="#/admin/food-licenses" id="btn-food-review">🍽️ Food licenses</a>
@@ -3170,6 +3171,67 @@ async function viewAdminJobs() {
   load();
 }
 
+/** Admin user activity board — last seen per user plus what they did. */
+async function viewUserActivity() {
+  if (!requireAuth('#/admin/activity')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">User activity</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <div id="activity-body">${loadingHtml('Loading activity…')}</div>
+  </div></div>`;
+  const body = document.getElementById('activity-body');
+  const parseTs = (s) => s ? new Date(String(s).replace(' ', 'T') + 'Z') : null;
+  const fmtTs = (s) => {
+    const d = parseTs(s);
+    if (!d || isNaN(d)) return 'not recorded yet';
+    return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  };
+  try {
+    const s = await api('/api/admin/activity');
+    const users = s.users || [];
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const eff = (u) => parseTs(u.last_seen_at) || parseTs(u.last_action_at);
+    const activeToday = users.filter(u => { const d = eff(u); return d && (now - d.getTime()) < dayMs; }).length;
+    const activeWeek = users.filter(u => { const d = eff(u); return d && (now - d.getTime()) < 7 * dayMs; }).length;
+    const stat = (label, val) => `<div class="card stat-card"><div class="big">${val}</div><div class="small muted">${label}</div></div>`;
+    body.innerHTML = `
+      <div class="stat-grid">
+        ${stat('Active today', activeToday)}
+        ${stat('Active this week', activeWeek)}
+        ${stat('Users shown', users.length)}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Most recently active first</h3>
+        <p class="small muted" style="margin-top:-6px">Last opened is tracked from Oct 22, 2026. Before that, the board shows each person's last recorded action (apply, post, message).</p>
+        ${users.length ? users.map((u) => {
+          const d = eff(u);
+          const today = d && (now - d.getTime()) < dayMs;
+          return `
+          <div style="padding:9px 0;border-bottom:1px solid var(--line)">
+            <div class="split" style="align-items:flex-start">
+              <span>${today ? '🟢' : '⚪'} <b>${esc(u.name)}</b> <span class="small muted">${esc(u.city)}</span></span>
+              <span class="small muted">${esc(u.phone)}</span>
+            </div>
+            <div class="small muted" style="margin-top:3px">
+              Last active: <b>${d ? fmtTs(u.last_seen_at || u.last_action_at) : 'never'}</b>
+              ${u.last_seen_at ? '' : ' (last action, opens not tracked yet)'}<br>
+              Signed up: ${fmtTs(u.signed_up_at)} • ${u.orientation_done ? '✅ Orientation done' : '⬜ Orientation not done'} • Selfie: ${esc(u.selfie_status)}<br>
+              ${u.applications} application${u.applications === 1 ? '' : 's'} • ${u.jobs_posted} job${u.jobs_posted === 1 ? '' : 's'} posted • ${u.messages_sent} message${u.messages_sent === 1 ? '' : 's'} sent
+            </div>
+          </div>`;
+        }).join('') : '<p class="small muted">No users yet.</p>'}
+      </div>`;
+  } catch (e) {
+    body.innerHTML = emptyHtml('info', 'Could not load activity', e.message);
+  }
+}
+
 /** Admin referral monitor — signups, leaderboard, recent joins, cheats. */async function viewReferralDashboard() {
   if (!requireAuth('#/admin/referrals')) return;
   if (!currentUser.is_admin) {
@@ -3360,6 +3422,7 @@ const routes = [
   [/^#\/admin\/draw\/(\d+)$/, (m) => viewGiveawayDraw(m[1])],
   [/^#\/admin\/jobs$/, viewAdminJobs],
   [/^#\/admin\/referrals$/, viewReferralDashboard],
+  [/^#\/admin\/activity$/, viewUserActivity],
   [/^#\/admin\/verifications$/, viewVerifications],
   [/^#\/admin\/food-licenses$/, viewFoodLicenses],
   [/^#\/admin\/resets$/, viewAdminResets],

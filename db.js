@@ -195,6 +195,7 @@ const OPTIONAL_COLUMNS = [
   ['users', 'nrc_verified', 'INTEGER DEFAULT 0'],
   ['users', 'intro_video', 'TEXT'],
   ['users', 'orientation_accepted_at', 'TEXT'],
+  ['users', 'last_seen_at', 'TEXT'],
   ['users', 'food_license_image', 'TEXT'],
   ['users', 'food_license_status', "TEXT DEFAULT 'none'"],
   ['users', 'food_license_number', 'TEXT'],
