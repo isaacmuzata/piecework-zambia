@@ -68,10 +68,16 @@ app.use((req, res, next) => {
 });
 
 // ---------------------------------------------------------------- constants
+// Fix (Oct 22, 2026): this list had drifted from the app's category list
+// (18). Jobs in Carpentry, Plumbing, Electrical, Bricklaying, Welding,
+// Waiter, Bartender and Mixologist could be picked in the app but were
+// rejected here, so they could never be posted. Keep this list identical
+// to the app list until the 2.0 database-managed categories land.
 const CATEGORIES = [
   'Events Setup', 'Moving Help', 'Cleaning', 'Construction & Labor',
+  'Carpentry', 'Plumbing', 'Electrical', 'Bricklaying', 'Welding',
   'Delivery & Errands', 'Cooking & Catering', 'Gardening', 'Painting',
-  'Security & Ushering', 'Other',
+  'Security & Ushering', 'Waiter', 'Bartender', 'Mixologist', 'Other',
 ];
 const CITIES = [
   'Lusaka', 'Kitwe', 'Ndola', 'Kabwe', 'Chipata', 'Livingstone',
