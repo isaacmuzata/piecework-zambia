@@ -68,17 +68,55 @@ app.use((req, res, next) => {
 });
 
 // ---------------------------------------------------------------- constants
-// Fix (Oct 22, 2026): this list had drifted from the app's category list
-// (18). Jobs in Carpentry, Plumbing, Electrical, Bricklaying, Welding,
-// Waiter, Bartender and Mixologist could be picked in the app but were
-// rejected here, so they could never be posted. Keep this list identical
-// to the app list until the 2.0 database-managed categories land.
 const CATEGORIES = [
+  'Events Setup', 'Moving Help', 'Cleaning', 'Construction & Labor',
+  'Delivery & Errands', 'Cooking & Catering', 'Gardening', 'Painting',
+  'Security & Ushering', 'Other',
+];
+// 2.0 M0: job categories live in the database so admins can manage them
+// without a code deploy. The seed is the UNION of the old server list
+// above and the old frontend list: the two had drifted apart, which
+// silently made 8 frontend categories (Carpentry, Plumbing, Electrical,
+// Bricklaying, Welding, Waiter, Bartender, Mixologist) impossible to
+// post because the server rejected them. The in-memory set is the
+// validation source; the table is the admin-facing source of truth.
+const CATEGORY_SEED = [
   'Events Setup', 'Moving Help', 'Cleaning', 'Construction & Labor',
   'Carpentry', 'Plumbing', 'Electrical', 'Bricklaying', 'Welding',
   'Delivery & Errands', 'Cooking & Catering', 'Gardening', 'Painting',
   'Security & Ushering', 'Waiter', 'Bartender', 'Mixologist', 'Other',
 ];
+let categorySet = new Set(CATEGORY_SEED);
+async function refreshCategories() {
+  try {
+    const rows = await getAll("SELECT name FROM categories WHERE kind = 'job' AND active = 1");
+    if (rows.length) categorySet = new Set(rows.map((r) => r.name));
+  } catch { /* keep the current set */ }
+}
+const MARKET_CATEGORY_SEED = [
+  'Vehicles & Parts', 'Electronics', 'Phones & Tablets', 'Computers & IT',
+  'Home & Furniture', 'Appliances', 'Fashion & Clothing', 'Beauty & Health',
+  'Building & Hardware', 'Agriculture & Livestock', 'Food & Produce',
+  'Baby & Kids', 'Sports & Leisure', 'Books & Education', 'Property & Rentals',
+  'Other',
+];
+let marketCategorySet = new Set(MARKET_CATEGORY_SEED);
+async function refreshMarketCategories() {
+  try {
+    const rows = await getAll("SELECT name FROM categories WHERE kind = 'market' AND active = 1");
+    if (rows.length) marketCategorySet = new Set(rows.map((r) => r.name));
+  } catch { /* keep the current set */ }
+}
+async function seedCategories() {
+  for (let i = 0; i < CATEGORY_SEED.length; i++) {
+    await runWrite("INSERT OR IGNORE INTO categories (name, kind, sort) VALUES (?, 'job', ?)", [CATEGORY_SEED[i], i]);
+  }
+  for (let i = 0; i < MARKET_CATEGORY_SEED.length; i++) {
+    await runWrite("INSERT OR IGNORE INTO categories (name, kind, sort) VALUES (?, 'market', ?)", [MARKET_CATEGORY_SEED[i], i]);
+  }
+  await refreshCategories();
+  await refreshMarketCategories();
+}
 const CITIES = [
   'Lusaka', 'Kitwe', 'Ndola', 'Kabwe', 'Chipata', 'Livingstone',
   'Chingola', 'Luanshya', 'Kasama', 'Solwezi', 'Mongu', 'Choma', 'Other',
@@ -97,6 +135,23 @@ function isAdmin(user) { return !!user && ADMIN_PHONES.includes(user.phone); }
 const SUPPORT_PHONES = (process.env.SUPPORT_PHONES || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
 function isSupport(user) { return !!user && SUPPORT_PHONES.includes(user.phone); }
+
+/** 2.0 M0: record a sensitive admin action. Never breaks the request. */
+function logAdmin(req, action, targetType, targetId, detail) {
+  runWrite(
+    'INSERT INTO admin_audit (admin_id, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?)',
+    [req.user ? req.user.id : 0, action, targetType || '', targetId || null, String(detail || '').slice(0, 300)]
+  ).catch(() => { /* audit must never break admin work */ });
+}
+
+/** 2.0 M0: true when a block exists between two users in either direction. */
+async function blockExists(a, b) {
+  const row = await getOne(
+    'SELECT 1 AS x FROM blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)',
+    [a, b, b, a]
+  );
+  return !!row;
+}
 function canModerate(user) { return isAdmin(user) || isSupport(user); }
 
 // ---------------------------------------------------------------- helpers
@@ -316,6 +371,9 @@ async function auth(req, res, next) {
     const payload = jwt.verify(token, JWT_SECRET);
     const user = await getOne('SELECT * FROM users WHERE id = ?', [payload.sub]);
     if (!user) return err(res, 401, 'Account no longer exists.');
+    if (user.suspended_at && !isAdmin(user)) {
+      return err(res, 403, 'This account has been suspended. Contact PieceWork support if you believe this is a mistake.');
+    }
     req.user = user;
     touchLastSeen(user.id);
     next();
@@ -415,6 +473,9 @@ app.post('/api/auth/login', loginLimiter, ah(async (req, res) => {
   const user = await getOne('SELECT * FROM users WHERE phone = ?', [normPhone]);
   if (!user || !bcrypt.compareSync(String(password), user.password_hash)) {
     return err(res, 401, 'Wrong number or password.');
+  }
+  if (user.suspended_at && !isAdmin(user)) {
+    return err(res, 403, 'This account has been suspended. Contact PieceWork support if you believe this is a mistake.');
   }
   setAuthCookie(res, signToken(user.id));
   res.json({ user: publicUser(user) });
@@ -608,6 +669,7 @@ app.post('/api/admin/resets/:id/issue', ah(auth), ah(async (req, res) => {
      WHERE id = ?`,
     [hashResetCode(code), `+${RESET_CODE_TTL_MIN} minutes`, id]
   );
+  logAdmin(req, 'password_reset.issue', 'user', row.user_id, row.user_name);
   res.json({ code, user_name: row.user_name, user_phone: row.user_phone, expires_minutes: RESET_CODE_TTL_MIN });
 }));
 
@@ -690,13 +752,22 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
 
   const conds = ['j.status = ?'];
   const params = [status];
+  if (!mine) conds.push('j.is_draft = 0'); // drafts are private to their poster
   if (mine) { conds.push('j.poster_id = ?'); params.push(req.user.id); }
+  const payMin = parseInt(req.query.pay_min, 10);
+  if (Number.isFinite(payMin) && payMin >= 0) { conds.push('j.pay_amount >= ?'); params.push(payMin); }
+  const payMax = parseInt(req.query.pay_max, 10);
+  if (Number.isFinite(payMax) && payMax > 0) { conds.push('j.pay_amount <= ?'); params.push(payMax); }
+  if (req.query.duration && DURATIONS.includes(req.query.duration)) { conds.push('j.expected_duration = ?'); params.push(req.query.duration); }
+  if (String(req.query.urgent || '') === '1') conds.push('j.is_urgent = 1');
   if (explicitCity) { conds.push('j.city = ?'); params.push(req.query.city); }
-  if (req.query.category && CATEGORIES.includes(req.query.category)) { conds.push('j.category = ?'); params.push(req.query.category); }
+  if (req.query.category && categorySet.has(req.query.category)) { conds.push('j.category = ?'); params.push(req.query.category); }
   if (req.query.q && String(req.query.q).trim()) {
-    conds.push('(j.title LIKE ? OR j.description LIKE ? OR j.area LIKE ?)');
+    // 2.0 M2: search also matches the category and city, so "plumbing"
+    // finds Plumbing jobs even when the title never says the word.
+    conds.push('(j.title LIKE ? OR j.description LIKE ? OR j.area LIKE ? OR j.category LIKE ? OR j.city LIKE ?)');
     const q = `%${String(req.query.q).trim()}%`;
-    params.push(q, q, q);
+    params.push(q, q, q, q, q);
   }
   const where = 'WHERE ' + conds.join(' AND ');
 
@@ -708,13 +779,16 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
            u.avatar AS poster_avatar,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
-           (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count
+           (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count,
+           (SELECT COUNT(*) FROM job_photos p WHERE p.job_id = j.id) AS photo_count,
+           (SELECT p.id FROM job_photos p WHERE p.job_id = j.id ORDER BY p.sort, p.id LIMIT 1) AS cover_photo_id
     FROM jobs j JOIN users u ON u.id = j.poster_id
     ${where} ORDER BY j.created_at DESC LIMIT ?
   `, [...params, CANDIDATE_CAP]);
 
   let jobs = rows.map((r) => {
     const job = serializeJob(r);
+    delete job.instructions; // detail-only field; keep list payloads light
     job.distance_km = null;
     job.lat = null;
     job.lng = null;
@@ -760,6 +834,42 @@ app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
   });
 }));
 
+// 2.0 M1: expected-duration options (form select + filter values).
+const DURATIONS = ['A few hours', '1 day', '2-3 days', 'About a week', '2-4 weeks', '1 month or more'];
+const MAX_JOB_PHOTOS = 3;
+
+/** 2.0 M1: sanitize the optional Jobs 2.0 fields from a request body. */
+function jobExtras(b) {
+  return {
+    expected_duration: DURATIONS.includes(b.expected_duration) ? b.expected_duration : '',
+    start_time: String(b.start_time || '').trim().slice(0, 20),
+    transport_provided: b.transport_provided === true || b.transport_provided === 1 || b.transport_provided === '1' ? 1 : 0,
+    materials_provided: b.materials_provided === true || b.materials_provided === 1 || b.materials_provided === '1' ? 1 : 0,
+    is_urgent: b.is_urgent === true || b.is_urgent === 1 || b.is_urgent === '1' ? 1 : 0,
+    instructions: String(b.instructions || '').trim().slice(0, 1000),
+  };
+}
+
+/** 2.0 M1: validate + store job photos (data URIs). Returns an error string or null. */
+async function saveJobPhotos(jobId, photos) {
+  if (!Array.isArray(photos)) return 'Photos must be a list.';
+  if (photos.length > MAX_JOB_PHOTOS) return `Up to ${MAX_JOB_PHOTOS} photos per job.`;
+  for (const p of photos) {
+    if (typeof p !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(p)) return 'Each photo must be a JPG, PNG or WebP image.';
+    if (p.length > 2_000_000) return 'Each photo must be under about 1.5 MB. Use a smaller photo.';
+  }
+  await runWrite('DELETE FROM job_photos WHERE job_id = ?', [jobId]);
+  for (let i = 0; i < photos.length; i++) {
+    const mime = photos[i].slice(5, photos[i].indexOf(';'));
+    await runWrite('INSERT INTO job_photos (job_id, image, mime, sort) VALUES (?, ?, ?, ?)', [jobId, photos[i], mime, i]);
+  }
+  return null;
+}
+
+async function jobPhotoRows(jobId) {
+  return getAll('SELECT id FROM job_photos WHERE job_id = ? ORDER BY sort, id', [jobId]);
+}
+
 function serializeJob(j) {
   return {
     id: j.id, title: j.title, category: j.category, description: j.description,
@@ -767,6 +877,15 @@ function serializeJob(j) {
     pay_amount: j.pay_amount, pay_type: j.pay_type,
     workers_needed: j.workers_needed, status: j.status,
     created_at: j.created_at,
+    is_draft: !!j.is_draft,
+    expected_duration: j.expected_duration || '',
+    start_time: j.start_time || '',
+    transport_provided: !!j.transport_provided,
+    materials_provided: !!j.materials_provided,
+    is_urgent: !!j.is_urgent,
+    instructions: j.instructions || '',
+    photo_count: Number(j.photo_count || 0),
+    cover_photo: j.cover_photo_id ? `/api/jobs/${j.id}/photos/${j.cover_photo_id}` : null,
     requires_food_license: !!j.requires_food_license,
     poster: {
       id: j.poster_id, name: j.poster_name, city: j.poster_city,
@@ -778,6 +897,54 @@ function serializeJob(j) {
   };
 }
 
+// ---------------------------------------------------------------- 2.0 M1: recommendations
+// Rules-based, no machine learning: same city, skills that mention the
+// job's category, and distance when coordinates are known. Registered
+// BEFORE /api/jobs/:id so 'recommended' is not captured as an id.
+app.get('/api/jobs/recommended', ah(auth), ah(async (req, res) => {
+  const me = await getOne('SELECT city, skills, lat, lng FROM users WHERE id = ?', [req.user.id]);
+  const rows = await getAll(`
+    SELECT j.*, u.name AS poster_name, u.city AS poster_city,
+           u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
+           u.avatar AS poster_avatar,
+           (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
+           (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count,
+           (SELECT COUNT(*) FROM job_photos p WHERE p.job_id = j.id) AS photo_count,
+           (SELECT p.id FROM job_photos p WHERE p.job_id = j.id ORDER BY p.sort, p.id LIMIT 1) AS cover_photo_id
+    FROM jobs j JOIN users u ON u.id = j.poster_id
+    WHERE j.status = 'open' AND j.is_draft = 0 AND j.poster_id != ?
+    ORDER BY j.created_at DESC LIMIT 200
+  `, [req.user.id]);
+  const skillTokens = String((me && me.skills) || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
+  const myCity = String((me && me.city) || '').toLowerCase();
+  const viewer = me ? resolveCoords(me) : null;
+  const scored = [];
+  for (const r of rows) {
+    let score = 0;
+    const reasons = [];
+    if (myCity && String(r.city).toLowerCase() === myCity) { score += 3; reasons.push('In your city'); }
+    const cat = String(r.category).toLowerCase();
+    if (skillTokens.some((t) => t.includes(cat) || cat.includes(t))) { score += 2; reasons.push('Matches your skills'); }
+    let distance = null;
+    if (viewer) {
+      const jc = resolveCoords(r);
+      if (jc) {
+        distance = Math.round(haversineKm(viewer.lat, viewer.lng, jc.lat, jc.lng) * 10) / 10;
+        if (distance <= 25) { score += 1; if (!reasons.length) reasons.push('Near you'); }
+      }
+    }
+    if (score > 0) {
+      const job = serializeJob(r);
+      delete job.instructions;
+      job.distance_km = distance;
+      job.recommend_reason = reasons.length ? reasons.join(' · ') : 'Recommended for you';
+      scored.push({ score, job });
+    }
+  }
+  scored.sort((a, b) => (b.score - a.score) || b.job.created_at.localeCompare(a.job.created_at));
+  res.json({ jobs: scored.slice(0, 10).map((s) => s.job) });
+}));
+
 // ---------------------------------------------------------------- jobs: detail
 app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -787,11 +954,16 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
            u.avatar AS poster_avatar,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
-           (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count
+           (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count,
+           (SELECT COUNT(*) FROM job_photos p WHERE p.job_id = j.id) AS photo_count,
+           (SELECT p.id FROM job_photos p WHERE p.job_id = j.id ORDER BY p.sort, p.id LIMIT 1) AS cover_photo_id
     FROM jobs j JOIN users u ON u.id = j.poster_id WHERE j.id = ?
   `, [id]);
   if (!j) return err(res, 404, 'Job not found.');
+  const isOwnerEarly = req.user && req.user.id === j.poster_id;
+  if (j.is_draft && !isOwnerEarly) return err(res, 404, 'Job not found.');
   const job = serializeJob(j);
+  job.photos = (await jobPhotoRows(id)).map((p) => ({ id: Number(p.id), url: `/api/jobs/${id}/photos/${p.id}` }));
   // Distance from the viewer (explicit ?lat=&lng=, else the signed-in user's location).
   job.distance_km = null; job.lat = null; job.lng = null;
   let dv = parseLatLng(req.query);
@@ -834,7 +1006,7 @@ function validateJobInput(body) {
   const f = {};
   const b = body || {};
   if (!b.title || String(b.title).trim().length < 5) f.title = 'Give the job a clear title (5+ characters).';
-  if (!CATEGORIES.includes(b.category)) f.category = 'Choose a valid category.';
+  if (!categorySet.has(b.category)) f.category = 'Choose a valid category.';
   if (!b.description || String(b.description).trim().length < 20) f.description = 'Describe the work (20+ characters).';
   if (!CITIES.includes(b.city)) f.city = 'Choose a valid city.';
   if (b.date_needed && !/^\d{4}-\d{2}-\d{2}$/.test(b.date_needed)) f.date_needed = 'Use YYYY-MM-DD.';
@@ -860,10 +1032,56 @@ function validateJobInput(body) {
   return f;
 }
 
+// 2.0 M1: serve one job photo. Job listings are public, so photos are too;
+// the bytes never travel inside JSON payloads, which keeps lists light.
+app.get('/api/jobs/:id/photos/:photoId', ah(async (req, res) => {
+  const row = await getOne('SELECT image, mime FROM job_photos WHERE id = ? AND job_id = ?', [parseInt(req.params.photoId, 10), parseInt(req.params.id, 10)]);
+  if (!row) return err(res, 404, 'Photo not found.');
+  const comma = row.image.indexOf(',');
+  const buf = Buffer.from(row.image.slice(comma + 1), 'base64');
+  res.set('Content-Type', row.mime || 'image/jpeg');
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.send(buf);
+}));
+
 app.post('/api/jobs', ah(auth), ah(async (req, res) => {
+  const b = req.body || {};
+  const isDraft = b.draft === true || b.draft === 1 || b.draft === '1';
+  if (isDraft) {
+    // Drafts: only a recognisable title is required. Everything else is
+    // completed later; publishing runs the full validation.
+    if (!b.title || String(b.title).trim().length < 5) {
+      return err(res, 422, 'Give the draft a title first (5+ characters).', { title: 'Give the job a clear title (5+ characters).' });
+    }
+    const inDays = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const ex = jobExtras(b);
+    const info = await runWrite(`
+      INSERT INTO jobs (poster_id, title, category, description, city, area, date_needed,
+                        pay_amount, pay_type, workers_needed, whatsapp, lat, lng, requires_food_license,
+                        is_draft, expected_duration, start_time, transport_provided, materials_provided, is_urgent, instructions)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+    `, [
+      req.user.id, String(b.title).trim(),
+      categorySet.has(b.category) ? b.category : 'Other',
+      String(b.description || '').trim(),
+      CITIES.includes(b.city) ? b.city : (req.user.city || 'Lusaka'),
+      String(b.area || '').trim(),
+      /^\d{4}-\d{2}-\d{2}$/.test(b.date_needed || '') ? b.date_needed : inDays,
+      Number.isInteger(parseInt(b.pay_amount, 10)) ? parseInt(b.pay_amount, 10) : 0,
+      PAY_TYPES.includes(b.pay_type) ? b.pay_type : 'per_job',
+      Number.isInteger(parseInt(b.workers_needed, 10)) ? Math.min(50, Math.max(1, parseInt(b.workers_needed, 10))) : 1,
+      '', null, null, 0,
+      ex.expected_duration, ex.start_time, ex.transport_provided, ex.materials_provided, ex.is_urgent, ex.instructions,
+    ]);
+    const newId = insertId(info);
+    if (Array.isArray(b.photos) && b.photos.length) {
+      const photoErr = await saveJobPhotos(newId, b.photos);
+      if (photoErr) return err(res, 422, photoErr);
+    }
+    return res.status(201).json({ id: newId, draft: true });
+  }
   const fields = validateJobInput(req.body);
   if (Object.keys(fields).length) return err(res, 422, 'Please fix the highlighted fields.', fields);
-  const b = req.body;
   // Terms gate: posters must accept the Terms & Conditions (liability waiver)
   // before posting. Recorded once per account; enforced server-side so the
   // form checkbox cannot be bypassed via the API.
@@ -878,17 +1096,82 @@ app.post('/api/jobs', ah(auth), ah(async (req, res) => {
   const whatsapp = b.whatsapp ? normalizePhone(b.whatsapp) : '';
   const coords = parseLatLng(b);
   const requiresFoodLicense = b.requires_food_license === '1' || b.requires_food_license === true || b.requires_food_license === 1 ? 1 : 0;
+  const ex = jobExtras(b);
   const info = await runWrite(`
     INSERT INTO jobs (poster_id, title, category, description, city, area, date_needed,
-                      pay_amount, pay_type, workers_needed, whatsapp, lat, lng, requires_food_license)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      pay_amount, pay_type, workers_needed, whatsapp, lat, lng, requires_food_license,
+                      expected_duration, start_time, transport_provided, materials_provided, is_urgent, instructions)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     req.user.id, String(b.title).trim(), b.category, String(b.description).trim(),
     b.city, String(b.area || '').trim(), b.date_needed,
     parseInt(b.pay_amount, 10), b.pay_type, parseInt(b.workers_needed, 10), whatsapp,
     coords ? coords.lat : null, coords ? coords.lng : null, requiresFoodLicense,
+    ex.expected_duration, ex.start_time, ex.transport_provided, ex.materials_provided, ex.is_urgent, ex.instructions,
   ]);
-  res.status(201).json({ id: insertId(info) });
+  const newJobId = insertId(info);
+  if (Array.isArray(b.photos) && b.photos.length) {
+    const photoErr = await saveJobPhotos(newJobId, b.photos);
+    if (photoErr) return err(res, 422, photoErr);
+  }
+  res.status(201).json({ id: newJobId });
+}));
+
+// 2.0 M1: publish a draft. Full validation runs here, including the terms
+// gate, exactly as if the job were posted fresh.
+app.post('/api/jobs/:id/publish', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const job = await getOne('SELECT * FROM jobs WHERE id = ?', [id]);
+  if (!job) return err(res, 404, 'Job not found.');
+  if (job.poster_id !== req.user.id) return err(res, 403, 'Only the poster can publish this job.');
+  if (!job.is_draft) return err(res, 422, 'This job is already published.');
+  const fields = validateJobInput(job);
+  if (Object.keys(fields).length) return err(res, 422, 'Finish these details before publishing.', fields);
+  const termsOk = req.user.terms_accepted_at || (req.body && (req.body.terms_accepted === '1' || req.body.terms_accepted === true));
+  if (!termsOk) {
+    return err(res, 422, 'Please read and accept the Terms and Conditions before posting.',
+      { terms_accepted: 'You must accept the Terms and Conditions to post a job.' });
+  }
+  if (!req.user.terms_accepted_at) {
+    await runWrite("UPDATE users SET terms_accepted_at = datetime('now') WHERE id = ?", [req.user.id]);
+  }
+  await runWrite('UPDATE jobs SET is_draft = 0 WHERE id = ?', [id]);
+  res.json({ ok: true, id });
+}));
+
+// 2.0 M1: repost a previous job as a fresh listing with a new date.
+// Everything else (including photos) is copied from the original.
+app.post('/api/jobs/:id/repost', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const job = await getOne('SELECT * FROM jobs WHERE id = ?', [id]);
+  if (!job) return err(res, 404, 'Job not found.');
+  if (job.poster_id !== req.user.id) return err(res, 403, 'Only the poster can repost this job.');
+  if (job.is_draft) return err(res, 422, 'Publish the draft first, then repost it.');
+  const b = req.body || {};
+  const probe = { ...job, date_needed: b.date_needed };
+  const fields = validateJobInput(probe);
+  if (fields.date_needed) return err(res, 422, fields.date_needed, { date_needed: fields.date_needed });
+  const termsOk = req.user.terms_accepted_at || b.terms_accepted === '1' || b.terms_accepted === true;
+  if (!termsOk) {
+    return err(res, 422, 'Please read and accept the Terms and Conditions before posting.',
+      { terms_accepted: 'You must accept the Terms and Conditions to post a job.' });
+  }
+  const info = await runWrite(`
+    INSERT INTO jobs (poster_id, title, category, description, city, area, date_needed,
+                      pay_amount, pay_type, workers_needed, whatsapp, lat, lng, requires_food_license,
+                      expected_duration, start_time, transport_provided, materials_provided, is_urgent, instructions)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    job.poster_id, job.title, job.category, job.description, job.city, job.area || '', b.date_needed,
+    job.pay_amount, job.pay_type, job.workers_needed, job.whatsapp || '', job.lat, job.lng, job.requires_food_license ? 1 : 0,
+    job.expected_duration || '', job.start_time || '', job.transport_provided ? 1 : 0, job.materials_provided ? 1 : 0, job.is_urgent ? 1 : 0, job.instructions || '',
+  ]);
+  const newId = insertId(info);
+  const photos = await getAll('SELECT image, mime, sort FROM job_photos WHERE job_id = ? ORDER BY sort, id', [id]);
+  for (const p of photos) {
+    await runWrite('INSERT INTO job_photos (job_id, image, mime, sort) VALUES (?, ?, ?, ?)', [newId, p.image, p.mime, p.sort]);
+  }
+  res.status(201).json({ id: newId });
 }));
 
 // ---------------------------------------------------------------- jobs: update
@@ -915,7 +1198,7 @@ app.patch('/api/jobs/:id', ah(auth), ah(async (req, res) => {
   if (['completed', 'cancelled'].includes(job.status)) {
     return err(res, 422, 'This job is closed and can no longer be edited.');
   }
-  const editable = ['title', 'description', 'category', 'city', 'area', 'date_needed', 'pay_amount', 'pay_type', 'workers_needed', 'whatsapp', 'requires_food_license'];
+  const editable = ['title', 'description', 'category', 'city', 'area', 'date_needed', 'pay_amount', 'pay_type', 'workers_needed', 'whatsapp', 'requires_food_license', 'expected_duration', 'start_time', 'instructions'];
   const merged = { ...job, ...b };
   const fields = validateJobInput(merged);
   // Only surface errors for fields the poster actually tried to change.
@@ -944,6 +1227,21 @@ app.patch('/api/jobs/:id', ah(auth), ah(async (req, res) => {
     const v = b.requires_food_license === '1' || b.requires_food_license === true || b.requires_food_license === 1 ? 1 : 0;
     updates.push('requires_food_license = ?'); params.push(v);
   }
+  // 2.0 M1 boolean extras follow the same pattern.
+  for (const k of ['transport_provided', 'materials_provided', 'is_urgent']) {
+    if (k in b) {
+      const v = b[k] === '1' || b[k] === true || b[k] === 1 ? 1 : 0;
+      updates.push(`${k} = ?`); params.push(v);
+    }
+  }
+  if ('expected_duration' in b && b.expected_duration && !DURATIONS.includes(b.expected_duration)) {
+    return err(res, 422, 'Choose a valid expected duration.', { expected_duration: 'Choose a valid expected duration.' });
+  }
+  if ('photos' in b) {
+    const photoErr = await saveJobPhotos(id, Array.isArray(b.photos) ? b.photos : []);
+    if (photoErr) return err(res, 422, photoErr);
+    if (!updates.length) return res.json({ ok: true }); // photos-only update
+  }
   // Job location: precise GPS coords, or cleared (falls back to the city centre).
   if ('lat' in b || 'lng' in b) {
     const c = parseLatLng(b);
@@ -962,8 +1260,12 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const job = await getOne('SELECT * FROM jobs WHERE id = ?', [id]);
   if (!job) return err(res, 404, 'Job not found.');
+  if (job.is_draft) return err(res, 422, 'This job is not open for applications yet.');
   if (job.status !== 'open') return err(res, 422, 'This job is no longer open for applications.');
   if (job.poster_id === req.user.id) return err(res, 403, 'You cannot apply to your own job.');
+  if (await blockExists(job.poster_id, req.user.id)) {
+    return err(res, 403, 'You cannot apply to this job.');
+  }
   // Orientation gate: workers must accept the Code of Conduct before applying.
   const me = await getOne('SELECT orientation_accepted_at, food_license_status, food_license_expires_at FROM users WHERE id = ?', [req.user.id]);
   if (!me || !me.orientation_accepted_at) {
@@ -1055,9 +1357,17 @@ app.patch('/api/applications/:id', ah(auth), ah(async (req, res) => {
     return res.json({ ok: true });
   }
 
-  if (!isPoster) return err(res, 403, 'Only the poster can accept or decline.');
-  if (!['accepted', 'declined'].includes(status)) return err(res, 422, 'Status must be accepted or declined.');
-  if (appRow.status !== 'pending') return err(res, 422, `This application is already ${appRow.status}.`);
+  if (!isPoster) return err(res, 403, 'Only the poster can change this application.');
+  // 2.0 M1: shortlisting. Posters can shortlist a pending application and
+  // accept or decline from either pending or shortlisted.
+  if (status === 'shortlisted' || status === 'pending') {
+    const from = status === 'shortlisted' ? 'pending' : 'shortlisted';
+    if (appRow.status !== from) return err(res, 422, `This application is already ${appRow.status}.`);
+    await runWrite('UPDATE applications SET status = ? WHERE id = ?', [status, id]);
+    return res.json({ ok: true });
+  }
+  if (!['accepted', 'declined'].includes(status)) return err(res, 422, 'Status must be accepted, declined, shortlisted or pending.');
+  if (!['pending', 'shortlisted'].includes(appRow.status)) return err(res, 422, `This application is already ${appRow.status}.`);
 
   if (status === 'accepted') {
     if (job.status !== 'open') return err(res, 422, 'This job is no longer hiring.');
@@ -1297,6 +1607,7 @@ app.post('/api/admin/verifications/:userId', ah(auth), ah(async (req, res) => {
   const user = await getOne('SELECT id FROM users WHERE id = ?', [userId]);
   if (!user) return err(res, 404, 'User not found.');
   await runWrite('UPDATE users SET selfie_status = ? WHERE id = ?', [status, userId]);
+  logAdmin(req, 'verification.decision', 'user', userId, `selfie ${status}`);
   res.json({ ok: true });
 }));
 
@@ -1326,6 +1637,7 @@ app.post('/api/admin/food-licenses/:userId', ah(auth), ah(async (req, res) => {
   const user = await getOne('SELECT id FROM users WHERE id = ?', [userId]);
   if (!user) return err(res, 404, 'User not found.');
   await runWrite('UPDATE users SET food_license_status = ? WHERE id = ?', [status, userId]);
+  logAdmin(req, 'food_license.decision', 'user', userId, `food license ${status}`);
   res.json({ ok: true });
 }));
 
@@ -1359,9 +1671,15 @@ app.get('/api/workers', ah(async (req, res) => {
   const city = (req.query.city || '').trim();
   const where = city ? 'WHERE open_to_work = 1 AND city = ?' : 'WHERE open_to_work = 1';
   const params = city ? [city] : [];
-  const rows = await getAll(
+  let rows = await getAll(
     `SELECT * FROM users ${where} ORDER BY created_at DESC LIMIT 100`, params
   );
+  // 2.0 M2: global search filters people by name, skills, bio, or city.
+  const q = (req.query.q || '').trim().toLowerCase();
+  if (q) {
+    rows = rows.filter(r => [r.name, r.skills, r.bio, r.city]
+      .map(v => String(v || '').toLowerCase()).join(' ').includes(q));
+  }
   const vcRows = await getAll('SELECT vouchee_id, COUNT(*) AS c FROM vouches GROUP BY vouchee_id');
   const vcMap = Object.fromEntries(vcRows.map(r => [r.vouchee_id, Number(r.c)]));
   res.json({ workers: rows.map(r => {
@@ -1560,6 +1878,192 @@ app.get('/api/admin/nrc-views', ah(auth), ah(async (req, res) => {
   });
 }));
 
+// ---------------------------------------------------------------- 2.0 M0: categories (public + admin)
+app.get('/api/categories', ah(async (req, res) => {
+  const kind = req.query.kind === 'market' ? 'market' : 'job';
+  const rows = await getAll('SELECT id, name FROM categories WHERE kind = ? AND active = 1 ORDER BY sort, name', [kind]);
+  res.json({ categories: rows.map((r) => ({ id: Number(r.id), name: r.name })) });
+}));
+
+app.get('/api/admin/categories', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const rows = await getAll('SELECT id, name, kind, active, sort FROM categories ORDER BY kind, sort, name');
+  res.json({ categories: rows.map((r) => ({ id: Number(r.id), name: r.name, kind: r.kind, active: !!r.active, sort: Number(r.sort) })) });
+}));
+
+app.post('/api/admin/categories', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const name = String((req.body && req.body.name) || '').trim();
+  if (name.length < 2 || name.length > 60) return err(res, 422, 'Category name must be 2 to 60 characters.');
+  const kind = req.body && req.body.kind === 'market' ? 'market' : 'job';
+  try {
+    const info = await runWrite('INSERT INTO categories (name, kind, sort) VALUES (?, ?, 99)', [name, kind]);
+    await refreshCategories();
+    await refreshMarketCategories();
+    logAdmin(req, 'category.create', 'category', insertId(info), name);
+    res.status(201).json({ id: insertId(info), name });
+  } catch {
+    return err(res, 409, 'That category already exists.');
+  }
+}));
+
+app.patch('/api/admin/categories/:id', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT * FROM categories WHERE id = ?', [id]);
+  if (!row) return err(res, 404, 'Category not found.');
+  const active = req.body && req.body.active ? 1 : 0;
+  await runWrite('UPDATE categories SET active = ? WHERE id = ?', [active, id]);
+  await refreshCategories();
+  await refreshMarketCategories();
+  logAdmin(req, 'category.toggle', 'category', id, `${row.name} -> ${active ? 'active' : 'inactive'}`);
+  res.json({ ok: true, id, active: !!active });
+}));
+
+// ---------------------------------------------------------------- 2.0 M0: abuse reports
+const REPORT_TYPES = ['job', 'user', 'product', 'business', 'delivery'];
+app.post('/api/reports', ah(auth), ah(async (req, res) => {
+  const b = req.body || {};
+  const type = String(b.target_type || '');
+  const targetId = parseInt(b.target_id, 10);
+  const reason = String(b.reason || '').trim();
+  if (!REPORT_TYPES.includes(type)) return err(res, 422, 'Choose what you are reporting.');
+  if (!Number.isFinite(targetId)) return err(res, 422, 'Missing report target.');
+  if (reason.length < 3 || reason.length > 500) return err(res, 422, 'Give a short reason (3 to 500 characters).');
+  if (type === 'user') {
+    if (targetId === req.user.id) return err(res, 422, 'You cannot report yourself.');
+    const u = await getOne('SELECT id FROM users WHERE id = ?', [targetId]);
+    if (!u) return err(res, 404, 'User not found.');
+  }
+  if (type === 'job') {
+    const j = await getOne('SELECT id, poster_id FROM jobs WHERE id = ?', [targetId]);
+    if (!j) return err(res, 404, 'Job not found.');
+    if (j.poster_id === req.user.id) return err(res, 422, 'You cannot report your own job.');
+  }
+  const existing = await getOne(
+    "SELECT id FROM reports WHERE reporter_id = ? AND target_type = ? AND target_id = ? AND status = 'open'",
+    [req.user.id, type, targetId]
+  );
+  if (existing) return res.json({ id: Number(existing.id), duplicate: true });
+  const info = await runWrite(
+    'INSERT INTO reports (reporter_id, target_type, target_id, reason) VALUES (?, ?, ?, ?)',
+    [req.user.id, type, targetId, reason]
+  );
+  res.status(201).json({ id: insertId(info) });
+}));
+
+app.get('/api/admin/reports', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const status = String(req.query.status || '');
+  const rows = await getAll(`
+    SELECT r.*, ru.name AS reporter_name,
+           j.title AS job_title, tu.name AS target_user_name
+    FROM reports r
+    JOIN users ru ON ru.id = r.reporter_id
+    LEFT JOIN jobs j ON r.target_type = 'job' AND j.id = r.target_id
+    LEFT JOIN users tu ON r.target_type = 'user' AND tu.id = r.target_id
+    ${status ? 'WHERE r.status = ?' : ''}
+    ORDER BY r.created_at DESC, r.id DESC LIMIT 100`, status ? [status] : []);
+  res.json({
+    reports: rows.map((r) => ({
+      id: Number(r.id),
+      reporter_id: Number(r.reporter_id),
+      reporter_name: r.reporter_name,
+      target_type: r.target_type,
+      target_id: Number(r.target_id),
+      target_label: r.job_title || r.target_user_name || '',
+      reason: r.reason,
+      status: r.status,
+      admin_note: r.admin_note || '',
+      created_at: r.created_at,
+      resolved_at: r.resolved_at || null,
+    })),
+  });
+}));
+
+app.patch('/api/admin/reports/:id', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT * FROM reports WHERE id = ?', [id]);
+  if (!row) return err(res, 404, 'Report not found.');
+  const status = String((req.body && req.body.status) || '');
+  if (!['open', 'resolved', 'dismissed'].includes(status)) return err(res, 422, 'Status must be open, resolved, or dismissed.');
+  const note = String((req.body && req.body.note) || '').slice(0, 300);
+  if (status === 'open') {
+    await runWrite("UPDATE reports SET status = 'open', admin_note = ?, resolved_by = NULL, resolved_at = NULL WHERE id = ?", [note, id]);
+  } else {
+    await runWrite("UPDATE reports SET status = ?, admin_note = ?, resolved_by = ?, resolved_at = datetime('now') WHERE id = ?", [status, note, req.user.id, id]);
+    logAdmin(req, status === 'resolved' ? 'report.resolve' : 'report.dismiss', 'report', id, `${row.target_type} #${row.target_id}: ${note || status}`);
+  }
+  res.json({ ok: true, id, status });
+}));
+
+// ---------------------------------------------------------------- 2.0 M0: blocking
+app.post('/api/blocks/:userId', ah(auth), ah(async (req, res) => {
+  const targetId = parseInt(req.params.userId, 10);
+  if (!Number.isFinite(targetId)) return err(res, 400, 'Bad user id.');
+  if (targetId === req.user.id) return err(res, 422, 'You cannot block yourself.');
+  const u = await getOne('SELECT id FROM users WHERE id = ?', [targetId]);
+  if (!u) return err(res, 404, 'User not found.');
+  await runWrite('INSERT OR IGNORE INTO blocks (blocker_id, blocked_id) VALUES (?, ?)', [req.user.id, targetId]);
+  res.status(201).json({ ok: true, blocked_id: targetId });
+}));
+
+app.delete('/api/blocks/:userId', ah(auth), ah(async (req, res) => {
+  const targetId = parseInt(req.params.userId, 10);
+  await runWrite('DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?', [req.user.id, targetId]);
+  res.json({ ok: true });
+}));
+
+app.get('/api/blocks', ah(auth), ah(async (req, res) => {
+  const rows = await getAll(
+    'SELECT u.id, u.name FROM blocks b JOIN users u ON u.id = b.blocked_id WHERE b.blocker_id = ? ORDER BY u.name',
+    [req.user.id]
+  );
+  res.json({ blocked: rows.map((r) => ({ id: Number(r.id), name: r.name })) });
+}));
+
+// ---------------------------------------------------------------- 2.0 M0: suspension
+app.patch('/api/admin/users/:id/suspend', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const id = parseInt(req.params.id, 10);
+  const target = await getOne('SELECT * FROM users WHERE id = ?', [id]);
+  if (!target) return err(res, 404, 'User not found.');
+  if (isAdmin(target)) return err(res, 422, 'Admin accounts cannot be suspended.');
+  if (id === req.user.id) return err(res, 422, 'You cannot suspend yourself.');
+  const reinstate = req.body && req.body.suspended === false;
+  if (reinstate) {
+    await runWrite('UPDATE users SET suspended_at = NULL, suspension_reason = NULL WHERE id = ?', [id]);
+    logAdmin(req, 'user.reinstate', 'user', id, target.name);
+    return res.json({ ok: true, id, suspended: false });
+  }
+  const reason = String((req.body && req.body.reason) || '').slice(0, 200);
+  await runWrite("UPDATE users SET suspended_at = datetime('now'), suspension_reason = ? WHERE id = ?", [reason, id]);
+  logAdmin(req, 'user.suspend', 'user', id, `${target.name}: ${reason}`);
+  res.json({ ok: true, id, suspended: true });
+}));
+
+// ---------------------------------------------------------------- 2.0 M0: admin audit log
+app.get('/api/admin/audit', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const rows = await getAll(`
+    SELECT a.*, u.name AS admin_name
+    FROM admin_audit a LEFT JOIN users u ON u.id = a.admin_id
+    ORDER BY a.created_at DESC, a.id DESC LIMIT 100`);
+  res.json({
+    entries: rows.map((r) => ({
+      id: Number(r.id),
+      admin_id: Number(r.admin_id),
+      admin_name: r.admin_name || '',
+      action: r.action,
+      target_type: r.target_type || '',
+      target_id: r.target_id === null ? null : Number(r.target_id),
+      detail: r.detail || '',
+      created_at: r.created_at,
+    })),
+  });
+}));
+
 // ---------------------------------------------------------------- admin stats
 // Simple self-serve dashboard for Zac: signups, applications, jobs, messages.
 // Locked to ADMIN_PHONES.
@@ -1603,7 +2107,7 @@ app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
   if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
   const rows = await getAll(`
     SELECT u.id, u.name, u.phone, u.city, u.created_at, u.last_seen_at,
-           u.orientation_accepted_at, u.selfie_status, u.open_to_work, u.is_tester,
+           u.orientation_accepted_at, u.selfie_status, u.open_to_work, u.is_tester, u.suspended_at,
       (SELECT COUNT(*) FROM applications a
         WHERE a.worker_id = u.id AND a.status != 'withdrawn') AS applications,
       (SELECT COUNT(*) FROM jobs j WHERE j.poster_id = u.id) AS jobs_posted,
@@ -1633,6 +2137,7 @@ app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
       selfie_status: r.selfie_status || 'pending',
       open_to_work: !!r.open_to_work,
       is_tester: !!r.is_tester,
+      suspended: !!r.suspended_at,
       applications: Number(r.applications || 0),
       jobs_posted: Number(r.jobs_posted || 0),
       messages_sent: Number(r.messages_sent || 0),
@@ -1653,6 +2158,7 @@ app.patch('/api/admin/users/:id/tester', ah(auth), ah(async (req, res) => {
   if (!Number.isFinite(id)) return err(res, 400, 'Bad user id.');
   const flag = req.body && req.body.is_tester ? 1 : 0;
   await runWrite('UPDATE users SET is_tester = ? WHERE id = ?', [flag, id]);
+  logAdmin(req, 'user.tester_flag', 'user', id, flag ? 'flagged as tester' : 'tester flag removed');
   res.json({ ok: true, id, is_tester: !!flag });
 }));
 
@@ -1825,6 +2331,7 @@ app.post('/api/admin/giveaways', ah(auth), ah(async (req, res) => {
     `INSERT INTO giveaways (title, prize_kwacha, starts_at, ends_at) VALUES (?, ?, ?, ?)`,
     [String(title).trim(), prize, starts_at, ends_at]
   );
+  logAdmin(req, 'giveaway.create', 'giveaway', insertId(info), `${String(title).trim()} K${prize}`);
   res.status(201).json({ id: Number(insertId(info)) });
 }));
 
@@ -1872,6 +2379,7 @@ app.post('/api/admin/giveaways/:id/draw', ah(auth), ah(async (req, res) => {
      drawn_by = ? WHERE id = ?`,
     [entry.user_id, req.user.phone, g.id]
   );
+  logAdmin(req, 'giveaway.draw', 'giveaway', Number(g.id), `winner ${entry.name}, ${total} entries`);
   res.json({
     winner: { name: entry.name, phone: entry.phone, city: entry.city },
     entries: entry.entries, total_entries: total,
@@ -1885,9 +2393,617 @@ app.post('/api/admin/giveaways/:id/draw', ah(auth), ah(async (req, res) => {
 // contact out.
 const msgLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true });
 
-// Presence (Oct 22, 2026, shipped at the testers' request): last_seen_at
-// is touched on signed-in activity (throttled to 5 minutes), so "online"
-// means seen within the last 6 minutes.
+// ---------------------------------------------------------------- businesses (2.0 M4)
+// Storefronts for formal businesses. Application plus admin approval
+// makes a shop public. The Verified badge is separate: the owner
+// uploads registration documents (PACRA, TPIN, trading licence) and
+// an admin verifies them. Unverified shops stay public, labelled
+// Unverified (decision recorded in the M4 milestone notes).
+const businessLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true });
+function slugifyName(name) {
+  return String(name || '').toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'business';
+}
+
+function serializeBusiness(b, viewer) {
+  const isOwner = !!viewer && viewer.id === b.owner_id;
+  const isAdm = !!viewer && isAdmin(viewer);
+  return {
+    id: b.id, owner_id: b.owner_id, owner_name: b.owner_name || '',
+    name: b.name, slug: b.slug, tagline: b.tagline || '', description: b.description || '',
+    logo: b.logo || null, cover: b.cover || null,
+    category: b.category, city: b.city, area: b.area || '', address: b.address || '',
+    phone: b.phone || '', whatsapp: b.whatsapp || '', email: b.email || '',
+    hours_text: b.hours_text || '',
+    status: b.status, verified: b.verification_status === 'verified',
+    verification_status: b.verification_status,
+    verification_note: (isOwner || isAdm) ? (b.verification_note || '') : '',
+    product_count: b.product_count != null ? Number(b.product_count) : undefined,
+    owner_rating: b.owner_rating != null ? Number(b.owner_rating) : null,
+    owner_reviews: b.owner_reviews != null ? Number(b.owner_reviews) : 0,
+    created_at: b.created_at,
+  };
+}
+
+const BUSINESS_SELECT = `
+  SELECT bz.*, u.name AS owner_name,
+    (SELECT COUNT(*) FROM products p WHERE p.business_id = bz.id AND p.status = 'active') AS product_count,
+    (SELECT AVG(r.rating) FROM reviews r WHERE r.reviewee_id = bz.owner_id) AS owner_rating,
+    (SELECT COUNT(*) FROM reviews r WHERE r.reviewee_id = bz.owner_id) AS owner_reviews
+  FROM businesses bz JOIN users u ON u.id = bz.owner_id`;
+
+function validateBusinessInput(b) {
+  const f = {};
+  if (!b.name || String(b.name).trim().length < 3) f.name = 'Give the business a name (3+ characters).';
+  if (b.category && !marketCategorySet.has(b.category)) f.category = 'Choose a valid category.';
+  if (!CITIES.includes(b.city)) f.city = 'Choose a valid town.';
+  if (!b.description || String(b.description).trim().length < 10) f.description = 'Describe the business (10+ characters).';
+  for (const key of ['logo', 'cover']) {
+    const v = b[key];
+    if (v !== undefined && v !== null && v !== '') {
+      if (typeof v !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(v)) f[key] = 'Use a JPG, PNG or WebP image.';
+      else if (v.length > 2_000_000) f[key] = 'Image must be under about 1.5 MB.';
+    }
+  }
+  return f;
+}
+
+app.post('/api/businesses', ah(auth), businessLimiter, ah(async (req, res) => {
+  const b = req.body || {};
+  const f = validateBusinessInput(b);
+  if (Object.keys(f).length) return err(res, 422, Object.values(f)[0], f);
+  const owned = await getOne('SELECT COUNT(*) AS c FROM businesses WHERE owner_id = ?', [req.user.id]);
+  if (Number(owned.c || 0) >= 3) return err(res, 422, 'You can run up to 3 business storefronts.');
+  const coords = parseLatLng(b);
+  if (coords && coords.error) return err(res, 422, coords.error);
+  const info = await runWrite(`
+    INSERT INTO businesses (owner_id, name, slug, tagline, description, logo, cover, category,
+      city, area, address, phone, whatsapp, email, hours_text, lat, lng)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    req.user.id, String(b.name).trim(), 'tmp-' + Date.now(),
+    String(b.tagline || '').trim().slice(0, 120), String(b.description).trim(),
+    b.logo || null, b.cover || null, b.category || 'Other',
+    b.city, String(b.area || '').trim().slice(0, 80), String(b.address || '').trim().slice(0, 200),
+    String(b.phone || '').trim().slice(0, 30), String(b.whatsapp || '').trim().slice(0, 30),
+    String(b.email || '').trim().slice(0, 120), String(b.hours_text || '').trim().slice(0, 200),
+    coords ? coords.lat : null, coords ? coords.lng : null,
+  ]);
+  const id = insertId(info);
+  const slug = slugifyName(b.name) + '-' + id;
+  await runWrite('UPDATE businesses SET slug = ? WHERE id = ?', [slug, id]);
+  res.status(201).json({ id, slug, status: 'pending' });
+}));
+
+app.get('/api/businesses/mine', ah(auth), ah(async (req, res) => {
+  const rows = await getAll(`${BUSINESS_SELECT} WHERE bz.owner_id = ? ORDER BY bz.created_at DESC`, [req.user.id]);
+  res.json({ businesses: rows.map((r) => serializeBusiness(r, req.user)) });
+}));
+
+app.get('/api/businesses', ah(maybeAuth), ah(async (req, res) => {
+  const conds = ["bz.status = 'active'"];
+  const params = [];
+  if (req.query.category && marketCategorySet.has(req.query.category)) { conds.push('bz.category = ?'); params.push(req.query.category); }
+  if (req.query.city && CITIES.includes(req.query.city)) { conds.push('bz.city = ?'); params.push(req.query.city); }
+  if (req.query.q && String(req.query.q).trim()) {
+    conds.push('(bz.name LIKE ? OR bz.description LIKE ? OR bz.tagline LIKE ?)');
+    const q = `%${String(req.query.q).trim()}%`;
+    params.push(q, q, q);
+  }
+  const rows = await getAll(`${BUSINESS_SELECT} WHERE ${conds.join(' AND ')} ORDER BY bz.verification_status = 'verified' DESC, bz.created_at DESC LIMIT 100`, params);
+  res.json({ businesses: rows.map((r) => serializeBusiness(r, req.user)) });
+}));
+
+app.get('/api/businesses/:slug', ah(maybeAuth), ah(async (req, res) => {
+  const row = await getOne(`${BUSINESS_SELECT} WHERE bz.slug = ?`, [String(req.params.slug)]);
+  if (!row) return err(res, 404, 'Business not found.');
+  const isOwner = !!req.user && req.user.id === row.owner_id;
+  if (row.status !== 'active' && !isOwner && !(req.user && isAdmin(req.user))) {
+    return err(res, 404, 'Business not found.');
+  }
+  const business = serializeBusiness(row, req.user);
+  const products = await getAll(
+    `${PRODUCT_SELECT} WHERE p.business_id = ? AND p.status = 'active' ORDER BY p.created_at DESC LIMIT 50`, [row.id]
+  );
+  const jobs = await getAll(
+    "SELECT * FROM jobs WHERE poster_id = ? AND status = 'open' AND is_draft = 0 ORDER BY created_at DESC LIMIT 20", [row.owner_id]
+  );
+  res.json({
+    business,
+    products: products.map(serializeProduct),
+    jobs: jobs.map(serializeJob),
+  });
+}));
+
+app.patch('/api/businesses/:id', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT * FROM businesses WHERE id = ?', [id]);
+  if (!row) return err(res, 404, 'Business not found.');
+  if (row.owner_id !== req.user.id) return err(res, 403, 'This is not your business.');
+  const b = req.body || {};
+  const updates = {};
+  for (const k of ['name', 'tagline', 'description', 'category', 'city', 'area', 'address', 'phone', 'whatsapp', 'email', 'hours_text']) {
+    if (b[k] !== undefined) updates[k] = typeof b[k] === 'string' ? b[k].trim() : b[k];
+  }
+  if (b.logo !== undefined) updates.logo = b.logo || null;
+  if (b.cover !== undefined) updates.cover = b.cover || null;
+  const coords = parseLatLng(b);
+  if (coords) { updates.lat = coords.lat; updates.lng = coords.lng; }
+  if (Object.keys(updates).length) {
+    const probe = { ...row, ...updates };
+    const f = validateBusinessInput(probe);
+    if (Object.keys(f).length) return err(res, 422, Object.values(f)[0], f);
+    const sets = Object.keys(updates).map((k) => `${k} = ?`).join(', ');
+    await runWrite(`UPDATE businesses SET ${sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [...Object.values(updates), id]);
+  }
+  res.json({ ok: true, id });
+}));
+
+app.post('/api/businesses/:id/documents', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT * FROM businesses WHERE id = ?', [id]);
+  if (!row) return err(res, 404, 'Business not found.');
+  if (row.owner_id !== req.user.id) return err(res, 403, 'This is not your business.');
+  const b = req.body || {};
+  const kind = ['pacra', 'tpin', 'licence', 'other'].includes(b.kind) ? b.kind : 'other';
+  if (typeof b.image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(b.image)) {
+    return err(res, 422, 'Upload a photo or scan of the document (JPG, PNG or WebP).');
+  }
+  if (b.image.length > 2_500_000) return err(res, 422, 'Document image must be under about 2 MB.');
+  const info = await runWrite(
+    'INSERT INTO business_documents (business_id, kind, image) VALUES (?, ?, ?)', [id, kind, b.image]
+  );
+  if (row.verification_status === 'unverified' || row.verification_status === 'rejected') {
+    await runWrite("UPDATE businesses SET verification_status = 'pending', verification_note = '' WHERE id = ?", [id]);
+  }
+  res.status(201).json({ id: insertId(info) });
+}));
+
+app.get('/api/businesses/:id/documents', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT * FROM businesses WHERE id = ?', [id]);
+  if (!row) return err(res, 404, 'Business not found.');
+  if (row.owner_id !== req.user.id && !isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const docs = await getAll('SELECT id, kind, created_at FROM business_documents WHERE business_id = ? ORDER BY id', [id]);
+  res.json({ documents: docs });
+}));
+
+app.get('/api/admin/businesses', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const status = String(req.query.status || '');
+  const where = ['pending', 'active', 'rejected', 'suspended'].includes(status) ? 'WHERE bz.status = ?' : '';
+  const rows = await getAll(
+    `${BUSINESS_SELECT} ${where} ORDER BY bz.created_at DESC LIMIT 200`,
+    where ? [status] : []);
+  const withDocs = [];
+  for (const r of rows) {
+    const d = await getOne('SELECT COUNT(*) AS c FROM business_documents WHERE business_id = ?', [r.id]);
+    withDocs.push({ ...serializeBusiness(r, req.user), doc_count: Number(d.c || 0) });
+  }
+  res.json({ businesses: withDocs });
+}));
+
+app.get('/api/admin/businesses/:id/documents', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const id = parseInt(req.params.id, 10);
+  const docs = await getAll('SELECT id, kind, image, created_at FROM business_documents WHERE business_id = ? ORDER BY id', [id]);
+  res.json({ documents: docs });
+}));
+
+app.patch('/api/admin/businesses/:id', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT * FROM businesses WHERE id = ?', [id]);
+  if (!row) return err(res, 404, 'Business not found.');
+  const status = String((req.body || {}).status || '');
+  if (!['active', 'rejected', 'suspended', 'pending'].includes(status)) return err(res, 422, 'Invalid status.');
+  await runWrite('UPDATE businesses SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [status, id]);
+  logAdmin(req, 'business.status', 'business', id, `${row.name}: ${row.status} -> ${status}`);
+  res.json({ ok: true, id, status });
+}));
+
+app.patch('/api/admin/businesses/:id/verification', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT * FROM businesses WHERE id = ?', [id]);
+  if (!row) return err(res, 404, 'Business not found.');
+  const decision = String((req.body || {}).decision || '');
+  if (!['verified', 'rejected'].includes(decision)) return err(res, 422, 'Decision must be verified or rejected.');
+  const note = String((req.body || {}).note || '').trim().slice(0, 300);
+  await runWrite('UPDATE businesses SET verification_status = ?, verification_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [decision, note, id]);
+  logAdmin(req, 'business.verification', 'business', id, `${row.name}: ${decision}${note ? ' (' + note + ')' : ''}`);
+  res.json({ ok: true, id, verification_status: decision });
+}));
+
+// ---------------------------------------------------------------- marketplace (2.0 M3)
+// Peer-to-peer listings. PieceWork never touches the money: buyers and
+// sellers agree and pay each other directly, exactly like jobs.
+const PRODUCT_CONDITIONS = ['New', 'Like new', 'Good', 'Fair'];
+const MAX_PRODUCT_PHOTOS = 5;
+const MAX_ACTIVE_LISTINGS = 30;
+const productLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 40, standardHeaders: true });
+
+function serializeProduct(p) {
+  return {
+    id: p.id, seller_id: p.seller_id,
+    seller_name: p.seller_name || '', seller_avatar: p.seller_avatar || '',
+    seller_city: p.seller_city || '', seller_verified: p.seller_selfie_status === 'approved',
+    seller_since: p.seller_created_at || null,
+    title: p.title, description: p.description || '',
+    price: Number(p.price || 0), category: p.category, condition: p.condition,
+    city: p.city, area: p.area || '', status: p.status,
+    view_count: Number(p.view_count || 0),
+    business: p.business_name ? {
+      id: p.business_id, name: p.business_name, slug: p.business_slug,
+      verified: p.business_verification === 'verified',
+    } : null,
+    created_at: p.created_at, updated_at: p.updated_at,
+    photo_count: Number(p.photo_count || 0),
+    cover_photo: p.cover_photo_id ? `/api/products/${p.id}/photos/${p.cover_photo_id}` : null,
+  };
+}
+
+async function saveProductPhotos(productId, photos) {
+  if (!Array.isArray(photos)) return 'Photos must be a list.';
+  if (photos.length > MAX_PRODUCT_PHOTOS) return `Up to ${MAX_PRODUCT_PHOTOS} photos per item.`;
+  for (const p of photos) {
+    if (typeof p !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(p)) return 'Each photo must be a JPG, PNG or WebP image.';
+    if (p.length > 2_000_000) return 'Each photo must be under about 1.5 MB. Use a smaller photo.';
+  }
+  await runWrite('DELETE FROM product_photos WHERE product_id = ?', [productId]);
+  for (let i = 0; i < photos.length; i++) {
+    const mime = photos[i].slice(5, photos[i].indexOf(';'));
+    await runWrite('INSERT INTO product_photos (product_id, image, mime, sort) VALUES (?, ?, ?, ?)', [productId, photos[i], mime, i]);
+  }
+  return null;
+}
+
+function validateProductInput(b) {
+  const f = {};
+  if (!b.title || String(b.title).trim().length < 4) f.title = 'Give the item a clear title (4+ characters).';
+  if (!marketCategorySet.has(b.category)) f.category = 'Choose a valid category.';
+  if (!b.description || String(b.description).trim().length < 10) f.description = 'Describe the item (10+ characters).';
+  if (!CITIES.includes(b.city)) f.city = 'Choose a valid city.';
+  const price = Number(b.price);
+  if (!Number.isInteger(price) || price < 1 || price > 10000000) f.price = 'Set a price in Kwacha (whole numbers).';
+  if (b.condition && !PRODUCT_CONDITIONS.includes(b.condition)) f.condition = 'Choose the item condition.';
+  return f;
+}
+
+const PRODUCT_SELECT = `
+  SELECT p.*, u.name AS seller_name, u.avatar AS seller_avatar, u.city AS seller_city,
+         u.selfie_status AS seller_selfie_status, u.created_at AS seller_created_at,
+         bz.name AS business_name, bz.slug AS business_slug,
+         bz.verification_status AS business_verification,
+         (SELECT COUNT(*) FROM product_photos ph WHERE ph.product_id = p.id) AS photo_count,
+         (SELECT ph.id FROM product_photos ph WHERE ph.product_id = p.id ORDER BY ph.sort, ph.id LIMIT 1) AS cover_photo_id
+  FROM products p JOIN users u ON u.id = p.seller_id
+  LEFT JOIN businesses bz ON bz.id = p.business_id AND bz.status = 'active'`;
+
+app.get('/api/products', ah(maybeAuth), ah(async (req, res) => {
+  const mine = req.query.mine === '1' && req.user;
+  const conds = [];
+  const params = [];
+  if (mine) {
+    conds.push('p.seller_id = ?'); params.push(req.user.id);
+    conds.push("p.status != 'removed'");
+  } else {
+    conds.push("p.status = 'active'");
+    if (req.query.seller) { conds.push('p.seller_id = ?'); params.push(parseInt(req.query.seller, 10) || 0); }
+  }
+  if (req.query.category && marketCategorySet.has(req.query.category)) { conds.push('p.category = ?'); params.push(req.query.category); }
+  if (req.query.city && CITIES.includes(req.query.city)) { conds.push('p.city = ?'); params.push(req.query.city); }
+  if (req.query.condition && PRODUCT_CONDITIONS.includes(req.query.condition)) { conds.push('p.condition = ?'); params.push(req.query.condition); }
+  const pmin = parseInt(req.query.price_min, 10);
+  if (Number.isInteger(pmin) && pmin >= 0) { conds.push('p.price >= ?'); params.push(pmin); }
+  const pmax = parseInt(req.query.price_max, 10);
+  if (Number.isInteger(pmax) && pmax > 0) { conds.push('p.price <= ?'); params.push(pmax); }
+  if (req.query.q && String(req.query.q).trim()) {
+    conds.push('(p.title LIKE ? OR p.description LIKE ? OR p.category LIKE ? OR p.city LIKE ?)');
+    const q = `%${String(req.query.q).trim()}%`;
+    params.push(q, q, q, q);
+  }
+  const sort = String(req.query.sort || 'newest');
+  const order = sort === 'price_low' ? 'p.price ASC, p.id DESC'
+    : sort === 'price_high' ? 'p.price DESC, p.id DESC' : 'p.created_at DESC, p.id DESC';
+  const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1);
+  const limit = 24;
+  const rows = await getAll(`${PRODUCT_SELECT} WHERE ${conds.join(' AND ')} ORDER BY ${order} LIMIT 500`, params);
+  let out = rows.map(serializeProduct);
+  // Nearby: when the viewer shares a location, compute distances and
+  // optionally sort nearest-first (products carry optional coordinates).
+  const viewer = req.user ? resolveCoords(req.user) : null;
+  if (viewer) {
+    const rawById = Object.fromEntries(rows.map((r) => [r.id, r]));
+    for (const prod of out) {
+      const pc = resolveCoords(rawById[prod.id]);
+      if (pc) prod.distance_km = Math.round(haversineKm(viewer.lat, viewer.lng, pc.lat, pc.lng) * 10) / 10;
+    }
+    if (sort === 'nearby') out.sort((a, b) => (a.distance_km ?? 1e9) - (b.distance_km ?? 1e9));
+  }
+  const total = out.length;
+  const slice = out.slice((page - 1) * limit, page * limit);
+  res.json({ products: slice, total, page, totalPages: Math.max(1, Math.ceil(total / limit)) });
+}));
+
+app.post('/api/products', ah(auth), productLimiter, ah(async (req, res) => {
+  const b = req.body || {};
+  const f = validateProductInput(b);
+  if (Object.keys(f).length) return err(res, 422, Object.values(f)[0], f);
+  // Spam guards: a per-seller active cap and an exact-duplicate block.
+  const active = await getOne("SELECT COUNT(*) AS c FROM products WHERE seller_id = ? AND status = 'active'", [req.user.id]);
+  if (Number(active.c || 0) >= MAX_ACTIVE_LISTINGS) {
+    return err(res, 422, `You already have ${MAX_ACTIVE_LISTINGS} active listings. Mark something sold or remove it first.`);
+  }
+  const title = String(b.title).trim();
+  const dup = await getOne(
+    "SELECT id FROM products WHERE seller_id = ? AND status != 'removed' AND LOWER(title) = LOWER(?)",
+    [req.user.id, title]
+  );
+  if (dup) return err(res, 409, 'You already have a listing with this title. Edit that one instead.');
+  const coords = parseLatLng(b);
+  if (coords && coords.error) return err(res, 422, coords.error);
+  let businessId = null;
+  if (b.business_id) {
+    const biz = await getOne('SELECT id FROM businesses WHERE id = ? AND owner_id = ? AND status = ?',
+      [parseInt(b.business_id, 10) || 0, req.user.id, 'active']);
+    if (!biz) return err(res, 422, 'That business is not yours or is not live yet.');
+    businessId = biz.id;
+  }
+  const info = await runWrite(`
+    INSERT INTO products (seller_id, title, description, price, category, condition, city, area, lat, lng, business_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    req.user.id, title, String(b.description).trim(), Number(b.price), b.category,
+    b.condition || 'Good', b.city, String(b.area || '').trim().slice(0, 80),
+    coords ? coords.lat : null, coords ? coords.lng : null, businessId,
+  ]);
+  const id = insertId(info);
+  if (Array.isArray(b.photos) && b.photos.length) {
+    const photoErr = await saveProductPhotos(id, b.photos);
+    if (photoErr) return err(res, 422, photoErr, { photos: photoErr });
+  }
+  res.status(201).json({ id });
+}));
+
+app.get('/api/products/:id/photos/:photoId', ah(async (req, res) => {
+  const pid = parseInt(req.params.id, 10);
+  const phid = parseInt(req.params.photoId, 10);
+  if (!pid || !phid) return err(res, 404, 'Photo not found.');
+  const row = await getOne('SELECT image, mime FROM product_photos WHERE id = ? AND product_id = ?', [phid, pid]);
+  if (!row) return err(res, 404, 'Photo not found.');
+  const comma = String(row.image).indexOf(',');
+  const buf = Buffer.from(String(row.image).slice(comma + 1), 'base64');
+  res.set('Content-Type', row.mime || 'image/jpeg');
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.send(buf);
+}));
+
+app.get('/api/products/:id', ah(maybeAuth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return err(res, 404, 'Item not found.');
+  const row = await getOne(`${PRODUCT_SELECT} WHERE p.id = ?`, [id]);
+  if (!row || row.status === 'removed') return err(res, 404, 'Item not found.');
+  const isOwner = !!req.user && req.user.id === row.seller_id;
+  if (row.status === 'hidden' && !isOwner && !(req.user && isAdmin(req.user))) {
+    return err(res, 404, 'Item not found.');
+  }
+  if (!isOwner) runWrite('UPDATE products SET view_count = view_count + 1 WHERE id = ?', [id]).catch(() => {});
+  const product = serializeProduct(row);
+  const photos = await getAll('SELECT id FROM product_photos WHERE product_id = ? ORDER BY sort, id', [id]);
+  product.photos = photos.map((ph) => ({ id: ph.id, url: `/api/products/${id}/photos/${ph.id}` }));
+  let myOffer = null;
+  let offers = undefined;
+  if (req.user && !isOwner) {
+    const o = await getOne(
+      'SELECT id, amount, message, status, created_at FROM offers WHERE product_id = ? AND buyer_id = ? ORDER BY id DESC LIMIT 1',
+      [id, req.user.id]
+    );
+    if (o) myOffer = { id: o.id, amount: Number(o.amount), message: o.message || '', status: o.status, created_at: o.created_at };
+  }
+  if (isOwner) {
+    const rows = await getAll(`
+      SELECT o.*, u.name AS buyer_name, u.avatar AS buyer_avatar, u.city AS buyer_city
+      FROM offers o JOIN users u ON u.id = o.buyer_id
+      WHERE o.product_id = ? ORDER BY o.created_at DESC, o.id DESC LIMIT 50
+    `, [id]);
+    offers = rows.map((o) => ({
+      id: o.id, buyer_id: o.buyer_id, buyer_name: o.buyer_name, buyer_avatar: o.buyer_avatar,
+      buyer_city: o.buyer_city, amount: Number(o.amount), message: o.message || '',
+      status: o.status, created_at: o.created_at,
+    }));
+  }
+  res.json({ product, my_offer: myOffer, ...(offers ? { offers } : {}) });
+}));
+
+app.patch('/api/products/:id', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT * FROM products WHERE id = ?', [id]);
+  if (!row || row.status === 'removed') return err(res, 404, 'Item not found.');
+  if (row.seller_id !== req.user.id) return err(res, 403, 'This is not your listing.');
+  const b = req.body || {};
+  const updates = {};
+  if (b.title !== undefined) updates.title = String(b.title).trim();
+  if (b.description !== undefined) updates.description = String(b.description).trim();
+  if (b.price !== undefined) updates.price = Number(b.price);
+  if (b.category !== undefined) updates.category = b.category;
+  if (b.condition !== undefined) updates.condition = b.condition;
+  if (b.city !== undefined) updates.city = b.city;
+  if (b.area !== undefined) updates.area = String(b.area).trim().slice(0, 80);
+  if (b.status !== undefined) {
+    if (!['active', 'hidden', 'sold'].includes(b.status)) return err(res, 422, 'Invalid status.');
+    updates.status = b.status;
+  }
+  if (b.business_id !== undefined) {
+    if (!b.business_id) {
+      updates.business_id = null;
+    } else {
+      const biz = await getOne('SELECT id FROM businesses WHERE id = ? AND owner_id = ? AND status = ?',
+        [parseInt(b.business_id, 10) || 0, req.user.id, 'active']);
+      if (!biz) return err(res, 422, 'That business is not yours or is not live yet.');
+      updates.business_id = biz.id;
+    }
+  }
+  if (Object.keys(updates).length) {
+    const probe = { ...row, ...updates };
+    const f = validateProductInput(probe);
+    if (Object.keys(f).length) return err(res, 422, Object.values(f)[0], f);
+    const sets = Object.keys(updates).map((k) => `${k} = ?`).join(', ');
+    await runWrite(`UPDATE products SET ${sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [...Object.values(updates), id]);
+  }
+  if (b.photos !== undefined) {
+    const photoErr = await saveProductPhotos(id, Array.isArray(b.photos) ? b.photos : []);
+    if (photoErr) return err(res, 422, photoErr, { photos: photoErr });
+  }
+  res.json({ ok: true, id });
+}));
+
+app.delete('/api/products/:id', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const row = await getOne('SELECT * FROM products WHERE id = ?', [id]);
+  if (!row || row.status === 'removed') return err(res, 404, 'Item not found.');
+  const isOwner = row.seller_id === req.user.id;
+  if (!isOwner && !isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  await runWrite("UPDATE products SET status = 'removed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
+  if (!isOwner) logAdmin(req, 'product.remove', 'product', id, row.title);
+  res.json({ ok: true, id });
+}));
+
+app.post('/api/products/:id/offers', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const product = await getOne('SELECT * FROM products WHERE id = ?', [id]);
+  if (!product || product.status === 'removed') return err(res, 404, 'Item not found.');
+  if (product.status !== 'active') return err(res, 422, 'This item is not on sale right now.');
+  if (product.seller_id === req.user.id) return err(res, 422, 'You cannot make an offer on your own item.');
+  if (await blockExists(req.user.id, product.seller_id)) return err(res, 403, 'You cannot contact this seller.');
+  const amount = Number((req.body || {}).amount);
+  if (!Number.isInteger(amount) || amount < 1 || amount > 10000000) {
+    return err(res, 422, 'Enter an offer amount in Kwacha (whole numbers).');
+  }
+  const message = String((req.body || {}).message || '').trim().slice(0, 500);
+  // One live offer per buyer per item: a new offer updates the pending one.
+  const existing = await getOne(
+    "SELECT id FROM offers WHERE product_id = ? AND buyer_id = ? AND status = 'pending'",
+    [id, req.user.id]
+  );
+  if (existing) {
+    await runWrite('UPDATE offers SET amount = ?, message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [amount, message, existing.id]);
+    return res.json({ ok: true, id: existing.id, updated: true });
+  }
+  const info = await runWrite(
+    'INSERT INTO offers (product_id, buyer_id, seller_id, amount, message) VALUES (?, ?, ?, ?, ?)',
+    [id, req.user.id, product.seller_id, amount, message]
+  );
+  res.status(201).json({ id: insertId(info) });
+}));
+
+app.get('/api/products/:id/offers', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const product = await getOne('SELECT * FROM products WHERE id = ?', [id]);
+  if (!product) return err(res, 404, 'Item not found.');
+  if (product.seller_id === req.user.id) {
+    const rows = await getAll(`
+      SELECT o.*, u.name AS buyer_name, u.avatar AS buyer_avatar, u.city AS buyer_city
+      FROM offers o JOIN users u ON u.id = o.buyer_id
+      WHERE o.product_id = ? ORDER BY o.created_at DESC, o.id DESC LIMIT 50
+    `, [id]);
+    return res.json({ offers: rows.map((o) => ({
+      id: o.id, buyer_id: o.buyer_id, buyer_name: o.buyer_name, buyer_avatar: o.buyer_avatar,
+      buyer_city: o.buyer_city, amount: Number(o.amount), message: o.message || '',
+      status: o.status, created_at: o.created_at,
+    })) });
+  }
+  const rows = await getAll(
+    'SELECT id, amount, message, status, created_at FROM offers WHERE product_id = ? AND buyer_id = ? ORDER BY id DESC LIMIT 10',
+    [id, req.user.id]
+  );
+  res.json({ offers: rows.map((o) => ({ id: o.id, amount: Number(o.amount), message: o.message || '', status: o.status, created_at: o.created_at })) });
+}));
+
+app.patch('/api/offers/:id', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const offer = await getOne('SELECT * FROM offers WHERE id = ?', [id]);
+  if (!offer) return err(res, 404, 'Offer not found.');
+  const status = String((req.body || {}).status || '');
+  if (offer.seller_id === req.user.id && ['accepted', 'declined'].includes(status)) {
+    if (offer.status !== 'pending') return err(res, 422, 'This offer is no longer pending.');
+    await runWrite('UPDATE offers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [status, id]);
+    return res.json({ ok: true, id, status });
+  }
+  if (offer.buyer_id === req.user.id && status === 'withdrawn') {
+    if (!['pending', 'accepted'].includes(offer.status)) return err(res, 422, 'This offer cannot be withdrawn now.');
+    await runWrite("UPDATE offers SET status = 'withdrawn', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
+    return res.json({ ok: true, id, status });
+  }
+  return err(res, 403, 'Not your offer to change.');
+}));
+
+app.get('/api/selling/summary', ah(auth), ah(async (req, res) => {
+  const me = req.user.id;
+  const counts = await getOne(`
+    SELECT
+      (SELECT COUNT(*) FROM products WHERE seller_id = ? AND status = 'active') AS active,
+      (SELECT COUNT(*) FROM products WHERE seller_id = ? AND status = 'sold') AS sold,
+      (SELECT COUNT(*) FROM products WHERE seller_id = ? AND status = 'hidden') AS hidden,
+      (SELECT COUNT(*) FROM offers WHERE seller_id = ? AND status = 'pending') AS offers_pending,
+      (SELECT COUNT(*) FROM offers WHERE buyer_id = ? AND status = 'pending') AS my_offers_pending
+  `, [me, me, me, me, me]);
+  res.json({
+    active: Number(counts.active || 0), sold: Number(counts.sold || 0),
+    hidden: Number(counts.hidden || 0), offers_pending: Number(counts.offers_pending || 0),
+    my_offers_pending: Number(counts.my_offers_pending || 0),
+  });
+}));
+
+app.get('/api/selling/offers', ah(auth), ah(async (req, res) => {
+  const me = req.user.id;
+  const received = await getAll(`
+    SELECT o.*, p.title AS product_title, u.name AS buyer_name, u.avatar AS buyer_avatar
+    FROM offers o JOIN products p ON p.id = o.product_id JOIN users u ON u.id = o.buyer_id
+    WHERE o.seller_id = ? ORDER BY o.created_at DESC, o.id DESC LIMIT 50
+  `, [me]);
+  const made = await getAll(`
+    SELECT o.*, p.title AS product_title, p.status AS product_status, u.name AS seller_name
+    FROM offers o JOIN products p ON p.id = o.product_id JOIN users u ON u.id = o.seller_id
+    WHERE o.buyer_id = ? ORDER BY o.created_at DESC, o.id DESC LIMIT 50
+  `, [me]);
+  const mapR = (o) => ({
+    id: o.id, product_id: o.product_id, product_title: o.product_title,
+    amount: Number(o.amount), message: o.message || '', status: o.status, created_at: o.created_at,
+  });
+  res.json({
+    received: received.map((o) => ({ ...mapR(o), buyer_id: o.buyer_id, buyer_name: o.buyer_name, buyer_avatar: o.buyer_avatar })),
+    made: made.map((o) => ({ ...mapR(o), seller_id: o.seller_id, seller_name: o.seller_name, product_status: o.product_status })),
+  });
+}));
+
+app.post('/api/conversations/product', ah(auth), ah(async (req, res) => {
+  const me = req.user.id;
+  const pid = parseInt((req.body || {}).product_id, 10);
+  if (!pid) return err(res, 422, 'Item is required.');
+  const product = await getOne('SELECT id, seller_id, status FROM products WHERE id = ?', [pid]);
+  if (!product || product.status === 'removed') return err(res, 404, 'Item not found.');
+  if (product.seller_id === me) return err(res, 422, 'This is your own item.');
+  if (await blockExists(me, product.seller_id)) return err(res, 403, 'You cannot contact this seller.');
+  let conv = await getOne('SELECT id FROM conversations WHERE product_id = ? AND worker_id = ?', [pid, me]);
+  if (!conv) {
+    const info = await runWrite(
+      'INSERT INTO conversations (product_id, poster_id, worker_id) VALUES (?, ?, ?)',
+      [pid, product.seller_id, me]
+    );
+    conv = { id: insertId(info) };
+  }
+  res.status(201).json({ conversation_id: conv.id });
+}));
+
+// Presence: ported from production v52 (Oct 22, 2026) so the 2.0 line
+// keeps the feature testers asked for. last_seen_at is touched on
+// signed-in activity (throttled to 5 minutes), so "online" means seen
+// within the last 6 minutes.
 function presenceOf(ts) {
   if (!ts) return { other_last_seen_at: null, other_online: false };
   const t = new Date(String(ts).replace(' ', 'T') + 'Z').getTime();
@@ -1900,7 +3016,9 @@ function presenceOf(ts) {
 function convSummary(c, meId) {
   const otherIsPoster = c.poster_id === meId;
   return {
-    id: c.id, job_id: c.job_id, job_title: c.job_title,
+    id: c.id, job_id: c.job_id || null, product_id: c.product_id || null,
+    kind: c.product_id ? 'product' : 'job',
+    job_title: c.job_title || c.product_title || '',
     other_id: otherIsPoster ? c.worker_id : c.poster_id,
     other_name: otherIsPoster ? c.worker_name : c.poster_name,
     other_avatar: otherIsPoster ? c.worker_avatar : c.poster_avatar,
@@ -1917,7 +3035,7 @@ function convSummary(c, meId) {
 app.get('/api/conversations', ah(auth), ah(async (req, res) => {
   const me = req.user.id;
   const rows = await getAll(`
-    SELECT c.*, j.title AS job_title,
+    SELECT c.*, j.title AS job_title, pr.title AS product_title,
       p.name AS poster_name, p.avatar AS poster_avatar, p.last_seen_at AS poster_last_seen,
       w.name AS worker_name, w.avatar AS worker_avatar, w.last_seen_at AS worker_last_seen,
       (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body,
@@ -1925,7 +3043,8 @@ app.get('/api/conversations', ah(auth), ah(async (req, res) => {
       (SELECT sender_id FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_sender,
       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_id != ? AND m.read_at IS NULL) AS unread
     FROM conversations c
-    JOIN jobs j ON j.id = c.job_id
+    LEFT JOIN jobs j ON j.id = c.job_id
+    LEFT JOIN products pr ON pr.id = c.product_id
     JOIN users p ON p.id = c.poster_id
     JOIN users w ON w.id = c.worker_id
     WHERE c.poster_id = ? OR c.worker_id = ?
@@ -1963,6 +3082,9 @@ app.post('/api/conversations', ah(auth), ah(async (req, res) => {
     [jid, wid, 'withdrawn']
   );
   if (!appRow) return err(res, 403, 'You can only message about an active application.');
+  if (await blockExists(job.poster_id, wid)) {
+    return err(res, 403, 'Messaging is not available between you and this user.');
+  }
   let conv = await getOne('SELECT id FROM conversations WHERE job_id = ? AND worker_id = ?', [jid, wid]);
   if (!conv) {
     const info = await runWrite(
@@ -1979,22 +3101,33 @@ app.get('/api/conversations/:id', ah(auth), ah(async (req, res) => {
   const me = req.user.id;
   const cid = parseInt(req.params.id, 10);
   const conv = await getOne(`
-    SELECT c.*, j.title AS job_title,
+    SELECT c.*, j.title AS job_title, pr.title AS product_title,
       p.name AS poster_name, p.avatar AS poster_avatar, p.last_seen_at AS poster_last_seen,
       w.name AS worker_name, w.avatar AS worker_avatar, w.last_seen_at AS worker_last_seen,
-      CASE WHEN EXISTS (SELECT 1 FROM applications a
+      CASE WHEN c.product_id IS NOT NULL THEN
+             CASE WHEN EXISTS (SELECT 1 FROM offers o
+                               WHERE o.product_id = c.product_id AND o.buyer_id = c.worker_id
+                                 AND o.seller_id = c.poster_id AND o.status = 'accepted')
+                  THEN CASE WHEN c.poster_id = ? THEN w.phone ELSE p.phone END
+                  ELSE NULL END
+           WHEN EXISTS (SELECT 1 FROM applications a
                         WHERE a.job_id = c.job_id AND a.worker_id = c.worker_id
                           AND a.status = 'accepted')
            THEN CASE WHEN c.poster_id = ? THEN w.phone ELSE p.phone END
            ELSE NULL END AS other_phone
     FROM conversations c
-    JOIN jobs j ON j.id = c.job_id
+    LEFT JOIN jobs j ON j.id = c.job_id
+    LEFT JOIN products pr ON pr.id = c.product_id
     JOIN users p ON p.id = c.poster_id
     JOIN users w ON w.id = c.worker_id
     WHERE c.id = ?
-  `, [me, cid]);
+  `, [me, me, cid]);
   if (!conv) return err(res, 404, 'Conversation not found.');
   if (conv.poster_id !== me && conv.worker_id !== me) return err(res, 403, 'Not your conversation.');
+  const otherParty = conv.poster_id === me ? conv.worker_id : conv.poster_id;
+  if (await blockExists(me, otherParty)) {
+    return err(res, 403, 'Messaging is not available between you and this user.');
+  }
   const messages = await getAll(
     'SELECT id, sender_id, body, created_at FROM messages WHERE conversation_id = ? ORDER BY id ASC LIMIT 300',
     [cid]
@@ -2016,6 +3149,10 @@ app.post('/api/conversations/:id/messages', ah(auth), msgLimiter, ah(async (req,
   const conv = await getOne('SELECT id, poster_id, worker_id FROM conversations WHERE id = ?', [cid]);
   if (!conv) return err(res, 404, 'Conversation not found.');
   if (conv.poster_id !== me && conv.worker_id !== me) return err(res, 403, 'Not your conversation.');
+  const otherParty = conv.poster_id === me ? conv.worker_id : conv.poster_id;
+  if (await blockExists(me, otherParty)) {
+    return err(res, 403, 'Messaging is not available between you and this user.');
+  }
   const info = await runWrite(
     'INSERT INTO messages (conversation_id, sender_id, body) VALUES (?, ?, ?)',
     [cid, me, body]
@@ -2076,7 +3213,8 @@ app.use((e, req, res, next) => {
 
 // Initialise the schema (idempotent) before accepting traffic.
 init()
-  .then(() => {
+  .then(async () => {
+    await seedCategories();
     app.listen(PORT, () => {
       console.log(`PieceWork Zambia running on http://localhost:${PORT}`);
     });

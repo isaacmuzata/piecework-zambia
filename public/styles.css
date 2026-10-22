@@ -17,6 +17,17 @@
   --shadow:0 6px 24px rgba(16,22,19,.08);
   --shadow-sm:0 2px 10px rgba(16,22,19,.06);
   --font:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  /* 2.0 M2 design tokens: spacing, type, radius, motion, layers */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+  --fs-xs:12px; --fs-sm:13.5px; --fs-md:15px; --fs-lg:18px; --fs-xl:22px; --fs-2xl:28px;
+  --r-sm:10px; --r-md:14px; --r-lg:18px; --r-xl:24px; --r-pill:999px;
+  --tap:44px;
+  --dur:.18s; --ease:cubic-bezier(.2,.7,.3,1);
+  --z-topbar:40; --z-tabbar:50; --z-drawer:58; --z-modal:80; --z-toast:90;
+}
+:focus-visible{outline:3px solid rgba(14,107,58,.5);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
@@ -622,6 +633,100 @@ img.avatar{display:block}
 #theme-btn{margin-left:auto;font-size:17px}
 .topbar-auth{margin-left:0}
 
-/* Presence (Oct 22, 2026) */
+/* Jobs 2.0 (M1): cover photos, badges, gallery */
+.job-cover{width:60px;height:60px;border-radius:16px;flex:0 0 60px;object-fit:cover}
+.badge-urgent{background:#fef2f2;color:#b91c1c}
+.badge-draft{background:#f3f4f6;color:#4b5563}
+.badge-app-shortlisted{background:#eef2ff;color:#4338ca}
+.job-gallery{display:flex;gap:8px;overflow-x:auto;padding:4px 0 2px}
+.job-gallery img{width:180px;height:130px;object-fit:cover;border-radius:14px;flex:0 0 auto}
+[data-theme="dark"] .badge-urgent{background:#2B1518;color:#F08A8A}
+[data-theme="dark"] .badge-draft{background:#1E2422;color:#9BA79E}
+[data-theme="dark"] .badge-app-shortlisted{background:#1A2036;color:#A5B4FC}
+
+/* ================= 2.0 M2: redesign layer ================= */
+/* Marketplace tab (lights up at M3) */
+.tabbar{grid-template-columns:repeat(5,1fr)}
+.tabbar .tab-soon{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--gray-soft);font-size:10.5px;font-weight:700;padding-top:2px;position:relative;opacity:.75;cursor:default}
+.tabbar .tab-soon svg{width:23px;height:23px}
+.soon-pill{position:absolute;top:-4px;right:calc(50% - 24px);background:var(--amber);color:#3a2a00;font-size:8.5px;font-weight:800;padding:1px 5px;border-radius:999px;letter-spacing:.04em}
+.dnav-soon{padding:9px 14px;border-radius:999px;font-weight:700;font-size:14px;color:var(--gray-soft);white-space:nowrap;cursor:default}
+.dnav-soon .soon-pill{position:static;margin-left:6px;vertical-align:2px}
+.drawer .drawer-soon{display:flex;align-items:center;gap:12px;padding:12px 14px;color:var(--gray-soft);font-weight:600}
+.drawer .drawer-soon .soon-pill{position:static;margin-left:auto}
+
+/* Home hero additions: town line, quick actions */
+.home-town{display:flex;align-items:center;gap:5px;font-size:13px;opacity:.92;margin:-6px 0 12px;position:relative;z-index:1}
+.home-town svg{width:15px;height:15px;flex:0 0 15px}
+.hero-actions{display:flex;gap:8px;margin-top:12px;position:relative;z-index:1}
+.hero-actions a{flex:1;text-align:center;padding:10px 8px;border-radius:999px;font-weight:700;font-size:13.5px;background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.35)}
+.hero-actions a.primary{background:#fff;color:var(--green-700);border-color:#fff}
+
+/* Category strip: full live list, horizontal scroll */
+.cat-strip{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 10px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
+.cat-strip .cat-card{flex:0 0 86px;scroll-snap-align:start}
+.cat-strip::-webkit-scrollbar{display:none}
+
+/* Safety strip */
+.safety-card{display:flex;gap:12px;align-items:flex-start}
+.safety-card .safety-ico{width:42px;height:42px;border-radius:13px;flex:0 0 42px;background:var(--green-tint);color:var(--green);display:flex;align-items:center;justify-content:center}
+.safety-card .safety-ico svg{width:22px;height:22px}
+.safety-card ul{margin:6px 0 0 16px;font-size:13.5px;color:var(--gray)}
+.safety-card li{margin:2px 0}
+
+/* Skeletons */
+.skel-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;margin-bottom:12px;overflow:hidden;position:relative}
+.skel{display:block;background:linear-gradient(100deg,#eee9db 40%,#f7f3e8 50%,#eee9db 60%);background-size:200% 100%;animation:skelShimmer 1.2s infinite;border-radius:8px}
+@keyframes skelShimmer{from{background-position:180% 0}to{background-position:-20% 0}}
+[data-theme="dark"] .skel{background:linear-gradient(100deg,#22302a 40%,#2b3d34 50%,#22302a 60%);background-size:200% 100%}
+
+/* Recommended items inside card grids */
+.reco-item .reco-reason{margin:2px 2px 6px}
+
+/* Search view */
+.search-again{display:flex;gap:8px;margin-bottom:6px}
+.search-again .searchbar{flex:1}
+
+/* Tablet: 641-899px, wider shell, 2-column card grids */
+@media(min-width:641px) and (max-width:899px){
+  .app{max-width:720px}
+  .topbar{max-width:720px}
+  .tabbar{max-width:720px}
+  #home-jobs,#results,#wk-results,.card-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;align-items:start}
+  #home-jobs .job-card,#results .job-card,#wk-results .job-card,.card-grid .job-card{margin-bottom:0}
+  #home-jobs .empty,#results .empty,#wk-results .empty,.card-grid .empty{grid-column:1/-1}
+  .cat-strip .cat-card{flex-basis:96px}
+}
+/* Desktop: card grids at 3 columns (extends the existing desktop block) */
+@media(min-width:900px){
+  .card-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:start}
+  .card-grid .job-card{margin-bottom:0;height:100%}
+  .card-grid .empty{grid-column:1/-1}
+}
+.icon-btn{width:44px;height:44px}
+
+/* ================= 2.0 M3: marketplace ================= */
 .presence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af;margin-right:5px;vertical-align:1px}
 .presence-dot.online{background:#22c55e}
+.product-cover{width:76px;height:76px;border-radius:16px;flex:0 0 76px;object-fit:cover}
+.product-thumb{background:linear-gradient(135deg,#0b5a30,#062B1C)}
+.product-price{color:var(--green);font-weight:800;font-size:17px;letter-spacing:-.01em}
+[data-theme="dark"] .product-price{color:#8FE3B0}
+.badge-cond{background:#eef2ff;color:#4338ca}
+[data-theme="dark"] .badge-cond{background:#1A2036;color:#A5B4FC}
+.offer-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.offer-row:first-of-type{border-top:none}
+
+/* ================= 2.0 M4: businesses ================= */
+.biz-cover{width:100%;height:170px;object-fit:cover;border-radius:22px;display:block}
+.biz-logo{width:64px;height:64px;border-radius:18px;object-fit:cover;flex:0 0 64px}
+.biz-logo-fallback{background:linear-gradient(135deg,#0b5a30,#062B1C);color:#fff;display:flex;align-items:center;justify-content:center}
+.biz-logo-fallback svg{width:26px;height:26px}
+a.biz-card{display:flex;gap:12px;align-items:center;color:var(--ink);margin-bottom:10px;text-decoration:none}
+.biz-card .biz-logo{width:52px;height:52px;flex-basis:52px;border-radius:15px}
+.badge-verified{background:#dcfce7;color:#15803d}
+[data-theme="dark"] .badge-verified{background:#052e16;color:#4ade80}
+.badge-unverified{background:#f3f4f6;color:#6b7280}
+[data-theme="dark"] .badge-unverified{background:#1f2937;color:#9ca3af}
+.icon-line{display:inline-flex;align-items:center;gap:6px}
+.icon-line svg{width:14px;height:14px;flex:0 0 14px}

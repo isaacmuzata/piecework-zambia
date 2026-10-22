@@ -92,7 +92,7 @@ const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
 const topbarAuth = document.getElementById('topbar-auth');
 let currentUser = null;
-let browseState = { q: '', city: '', category: '', page: 1, maxKm: 50 };
+let browseState = { q: '', city: '', category: '', page: 1, maxKm: 50, payMin: '', payMax: '', duration: '', urgent: false };
 let chatTimer = null;
 let deliveryWatchId = null;
 
@@ -135,6 +135,35 @@ function startDeliverySharing(jobId, onUpdate) {
   // Send one reading immediately so the poster isn't staring at a blank map.
   navigator.geolocation.getCurrentPosition(sendPos, () => {}, { enableHighAccuracy: true, timeout: 15000 });
   return true;
+}
+
+/* ---------------- marketplace categories (2.0 M3) ---------------- */
+const MARKET_CATEGORIES = [
+  'Vehicles & Parts', 'Electronics', 'Phones & Tablets', 'Computers & IT',
+  'Home & Furniture', 'Appliances', 'Fashion & Clothing', 'Beauty & Health',
+  'Building & Hardware', 'Agriculture & Livestock', 'Food & Produce',
+  'Baby & Kids', 'Sports & Leisure', 'Books & Education', 'Property & Rentals',
+  'Other',
+];
+
+/* ---------------- saved products (on this device, 2.0 M3) ---------------- */
+function getSavedProducts() {
+  try {
+    const v = JSON.parse(localStorage.getItem('pw_saved_products') || '[]');
+    return Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : [];
+  } catch { return []; }
+}
+function isSavedProduct(id) { return getSavedProducts().includes(Number(id)); }
+function toggleSaveProduct(id) {
+  id = Number(id);
+  let s = getSavedProducts();
+  if (s.includes(id)) { s = s.filter(x => x !== id); toast('Removed from saved items.'); }
+  else { s.push(id); toast('Item saved on this device.'); }
+  localStorage.setItem('pw_saved_products', JSON.stringify(s));
+  document.querySelectorAll(`[data-psave="${id}"]`).forEach(b => {
+    b.classList.toggle('saved', s.includes(id));
+    b.setAttribute('aria-pressed', s.includes(id) ? 'true' : 'false');
+  });
 }
 
 /* ---------------- saved jobs (on this device) ---------------- */
@@ -268,8 +297,8 @@ function fmtDateTime(iso) {
   if (isNaN(d)) return '';
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
-/** Presence (Oct 22, 2026): green dot + Active now, or Last seen, from
- * the other person's last_seen_at (shipped at the testers' request). */
+/** Presence: ported from production v52 (Oct 22, 2026). Green dot +
+ * Active now, or Last seen, from the other person's last_seen_at. */
 function presenceHtml(c) {
   if (!c) return '';
   if (c.other_online) return '<span class="presence-dot online"></span>Active now';
@@ -453,10 +482,12 @@ function renderChrome() {
   const nav = document.getElementById('drawer-nav');
   const items = [
     ['#/', 'home', 'Home'],
-    ['#/jobs', 'briefcase', 'Find Jobs'],
+    ['#/jobs', 'briefcase', 'Find Work'],
     ['#/workers', 'users', 'Looking for Work'],
     ['#/post', 'plus', 'Hire Workers'],
     ['#/categories', 'grid', 'Categories'],
+    ['#/market', 'tag', 'Marketplace'],
+    ['#/businesses', 'grid', 'Businesses'],
     ['#/messages', 'message', 'Messages'],
   ];
   if (currentUser) {
@@ -480,14 +511,16 @@ function renderChrome() {
       if (href === '#/') return h === '#/' || h === '';
       if (href === '#/jobs') return h === '#/jobs' || h.startsWith('#/job/') || h.startsWith('#/categories') || h.startsWith('#/saved');
       if (href === '#/messages') return h.startsWith('#/messages') || h.startsWith('#/chat/');
+      if (href === '#/market') return h.startsWith('#/market') || h.startsWith('#/product/') || h.startsWith('#/sell') || h.startsWith('#/selling');
       if (href === '#/profile') return h.startsWith('#/profile') || h.startsWith('#/user/') || h.startsWith('#/dashboard') || h.startsWith('#/login') || h.startsWith('#/register');
       return h.startsWith(href);
     };
     const ditems = [
       ['#/', 'Home'],
-      ['#/jobs', 'Find Jobs'],
+      ['#/jobs', 'Find Work'],
       ['#/workers', 'Looking for Work'],
       ['#/post', 'Hire Workers'],
+      ['#/market', 'Marketplace'],
       ['#/messages', 'Messages'],
     ];
     if (currentUser) {
@@ -503,19 +536,21 @@ function renderChrome() {
     if (dlo) dlo.addEventListener('click', logout);
   }
 
+  // Tab bar: Home, Find Work, Marketplace (live since 2.0 M3),
+  // Messages, Profile. Posting lives in the drawer, the desktop nav,
+  // and the home hero quick actions.
   const tabs = [
     { href: '#/', label: 'Home', ic: 'home', match: (hh) => hh === '#/' || hh === '' },
-    { href: '#/jobs', label: 'Jobs', ic: 'briefcase', match: (hh) => hh === '#/jobs' || hh.startsWith('#/job/') || hh.startsWith('#/categories') || hh.startsWith('#/saved') },
-    { href: '#/post', label: 'Hire', fab: true, match: (hh) => hh.startsWith('#/post') },
+    { href: '#/jobs', label: 'Find Work', ic: 'briefcase', match: (hh) => hh === '#/jobs' || hh.startsWith('#/job/') || hh.startsWith('#/categories') || hh.startsWith('#/saved') || hh.startsWith('#/search') },
+    { href: '#/market', label: 'Marketplace', ic: 'tag', match: (hh) => hh.startsWith('#/market') || hh.startsWith('#/product/') || hh.startsWith('#/sell') || hh.startsWith('#/selling') },
     { href: '#/messages', label: 'Messages', ic: 'message', match: (hh) => hh.startsWith('#/messages') || hh.startsWith('#/chat/') },
     {
       href: currentUser ? '#/profile' : '#/login', label: currentUser ? 'Profile' : 'Sign in', ic: 'user',
       match: (hh) => hh.startsWith('#/profile') || hh.startsWith('#/user/') || hh.startsWith('#/login') || hh.startsWith('#/register') || hh.startsWith('#/dashboard'),
     },
   ];
-  tabbar.innerHTML = tabs.map(t => t.fab
-    ? `<a href="${t.href}" class="tab-post ${t.match(h) ? 'active' : ''}" aria-label="Hire workers"><span class="post-fab">${icon('plus')}</span><span>${t.label}</span></a>`
-    : `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}">${icon(t.ic)}<span>${t.label}</span>${t.href === '#/messages' ? '<span class="tab-badge" id="msg-badge" hidden></span>' : ''}</a>`
+  tabbar.innerHTML = tabs.map(t =>
+    `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}">${icon(t.ic)}<span>${t.label}</span>${t.href === '#/messages' ? '<span class="tab-badge" id="msg-badge" hidden></span>' : ''}</a>`
   ).join('');
   if (currentUser) {
     api('/api/messages/unread').then(({ unread }) => {
@@ -556,18 +591,21 @@ function dedupeJobs(jobs) {
 function jobCard(job) {
   const saved = isSaved(job.id);  const area = job.area && job.area.toLowerCase() !== String(job.city || '').toLowerCase() ? job.area : '';
   const statusBadge = job.status === 'open' ? `<span class="badge badge-status-open">Open</span>` : '';
+  const urgentBadge = job.is_urgent ? `<span class="badge badge-urgent">🔥 Urgent</span>` : '';
+  const draftBadge = job.is_draft ? `<span class="badge badge-draft">Draft</span>` : '';
   return `
   <article class="job-card" data-job="${job.id}" tabindex="0" role="link" aria-label="${esc(job.title)}">
-    ${jobThumb(job.category)}
+    ${job.cover_photo ? `<img class="job-cover" src="${esc(job.cover_photo)}" alt="" loading="lazy">` : jobThumb(job.category)}
     <div class="job-body">
       <h3>${esc(job.title)}</h3>
-      <div class="pay">${kwacha(job.pay_amount)}<small style="font-weight:600;color:var(--gray)"> ${esc(PAY_LABEL[job.pay_type] || '')}</small> ${statusBadge}</div>
+      <div class="pay">${kwacha(job.pay_amount)}<small style="font-weight:600;color:var(--gray)"> ${esc(PAY_LABEL[job.pay_type] || '')}</small> ${statusBadge} ${urgentBadge} ${draftBadge}</div>
       <div class="job-meta">
         <span>${icon('pin')}<b>${esc(job.city)}</b>${area ? ' · ' + esc(area) : ''}${job.distance_km != null ? ` · <b>${esc(fmtKm(job.distance_km))}</b> away` : ''}</span>
       </div>
       <div class="job-meta">
         <span>${icon('tag')}${esc(job.category)}</span>
         <span>${icon('calendar')}${esc(fmtDate(job.date_needed))}</span>
+        ${job.expected_duration ? `<span>${icon('clock')}${esc(job.expected_duration)}</span>` : ''}
       </div>
     </div>
     <button class="job-share" data-share="${job.id}" data-title="${esc(job.title)}" aria-label="Share this job">${icon('share')}</button>
@@ -581,6 +619,15 @@ function loadingHtml(msg) {
 function emptyHtml(icn, title, sub, cta) {
   return `<div class="empty"><div class="empty-ico">${icon(icn)}</div><h3>${esc(title)}</h3><p>${esc(sub)}</p>${cta || ''}</div>`;
 }
+/** 2.0 M2: skeleton placeholder cards while a list loads. */
+function skeletonCards(n) {
+  const card = `<div class="skel-card" aria-hidden="true"><span class="skel" style="width:55%;height:16px"></span><span class="skel" style="width:85%;height:12px;margin-top:10px"></span><span class="skel" style="width:40%;height:12px;margin-top:8px"></span></div>`;
+  return `<div role="status" aria-label="Loading">${card.repeat(n || 3)}</div>`;
+}
+/** 2.0 M2: standard error state with a working retry (re-runs the route). */
+function errorHtml(msg) {
+  return `<div class="empty"><div class="empty-ico">${icon('info')}</div><h3>Something went wrong</h3><p>${esc(msg || 'Please try again.')}</p><button class="btn btn-sm btn-primary" data-retry-view>Try again</button></div>`;
+}
 function momoNoteHtml() {
   return `<div class="momo-note"><b>How payment works:</b> PieceWork Zambia connects you —
     payment happens directly between you and the other person, usually via
@@ -593,18 +640,19 @@ function momoNoteHtml() {
 /** Signed-in home: greeting, search, categories, promo, fresh jobs. */
 async function viewHome() {
   const first = currentUser.name.split(' ')[0];
-  const tiles = ['Cleaning', 'Construction & Labor', 'Events Setup', 'Delivery & Errands'];
   app.innerHTML = `
   <div class="view">
     <div class="home-hero">
       <div class="hello">${daypart()}, ${esc(first)}</div>
       <h1>Let's get to work</h1>
-      <div class="searchbar">${icon('search')}<input id="home-q" type="search" placeholder="Search for jobs, skills or people" aria-label="Search jobs"></div>
+      <div class="home-town">${icon('pin')}<span>${esc(currentUser.city || 'Zambia')}</span></div>
+      <div class="searchbar">${icon('search')}<input id="home-q" type="search" placeholder="Search jobs, skills or people" aria-label="Search jobs and people"></div>
+      <div class="hero-actions"><a class="primary" href="#/post">Post a job</a><a href="#/dashboard">My Gigs</a></div>
     </div>
     <div class="page" style="padding-top:16px">
       <div class="section-title" style="margin-top:0"><span>Browse categories</span><a href="#/categories">View all</a></div>
-      <div class="cat-grid" style="grid-template-columns:repeat(4,1fr)">
-        ${tiles.map(c => {
+      <div class="cat-strip">
+        ${CATEGORIES.map(c => {
           const [ic, bg] = catStyle(c);
           return `<div class="cat-card" data-cat-link="${esc(c)}" tabindex="0" role="link" aria-label="Browse ${esc(c)} jobs"><div class="cat-ico" style="background:${bg}">${icon(ic)}</div><b>${esc(c)}</b></div>`;
         }).join('')}
@@ -614,8 +662,21 @@ async function viewHome() {
         <div class="promo-text"><h3>Skilled People, Stronger Communities</h3><p>Real jobs from real neighbours, matched by distance.</p></div>
       </a>
       <div id="gw-promo"></div>
-      <div class="section-title"><span>Fresh opportunities</span><a href="#/jobs">View all</a></div>
-      <div id="home-jobs">${loadingHtml('Finding jobs…')}</div>
+      <div id="home-reco"></div>
+      <div class="section-title"><span>${getLoc() ? 'Near you' : 'Fresh opportunities'}</span><a href="#/jobs">View all</a></div>
+      <div id="home-jobs">${skeletonCards(3)}</div>
+      <div class="card safety-card" style="margin-top:18px">
+        <div class="safety-ico">${icon('shield')}</div>
+        <div>
+          <b>Stay safe on PieceWork</b>
+          <ul>
+            <li>Meet in a public or familiar place first</li>
+            <li>Agree the pay before any work starts</li>
+            <li>Never send money in advance to a stranger</li>
+          </ul>
+          <a class="small" href="#/how">Help and safety</a>
+        </div>
+      </div>
     </div>
   </div>`;
 
@@ -632,8 +693,8 @@ async function viewHome() {
   }).catch(() => {});
   q.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-      browseState.q = q.value.trim(); browseState.page = 1; browseState.category = ''; browseState.city = '';
-      location.hash = '#/jobs';
+      const v = q.value.trim();
+      if (v) location.hash = '#/search?q=' + encodeURIComponent(v);
     }
   });
   document.querySelectorAll('[data-cat-link]').forEach(el => {
@@ -645,6 +706,14 @@ async function viewHome() {
     el.addEventListener('click', go);
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
   });
+  // 2.0 M1: rules-based recommendations (city, skills, distance).
+  api('/api/jobs/recommended').then((d) => {
+    const slot = document.getElementById('home-reco');
+    if (!slot || !d.jobs || !d.jobs.length) return;
+    slot.innerHTML = `
+      <div class="section-title"><span>Recommended for you</span></div>
+      <div class="card-grid">${d.jobs.slice(0, 3).map(j => `<div class="reco-item"><div class="small reco-reason">⭐ ${esc(j.recommend_reason || 'Recommended for you')}</div>${jobCard(j)}</div>`).join('')}</div>`;
+  }).catch(() => {});
   try {
     const loc = getLoc();
     const params = new URLSearchParams({ status: 'open', page: '1' });
@@ -657,8 +726,60 @@ async function viewHome() {
       : emptyHtml('briefcase', 'No open jobs right now', 'Check back soon — or hire workers yourself.', `<a class="btn btn-sm btn-primary" href="#/post">Hire workers</a>`);
   } catch (e) {
     const box = document.getElementById('home-jobs');
-    if (box) box.innerHTML = emptyHtml('briefcase', 'Could not load jobs', e.message);
+    if (box) box.innerHTML = errorHtml(e.message);
   }
+}
+
+/** 2.0 M2: global search across jobs and people (marketplace joins at M3). */
+async function viewSearch() {
+  const q = (new URLSearchParams((location.hash.split('?')[1] || '')).get('q') || '').trim();
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Search</h1>
+    <p class="page-sub">${q ? `Results for "${esc(q)}"` : 'Search jobs and people.'}</p>
+    <form class="search-again" id="search-form">
+      <div class="searchbar">${icon('search')}<input id="search-q" type="search" value="${esc(q)}" placeholder="Search jobs, skills or people" aria-label="Search again"></div>
+      <button class="btn btn-primary" type="submit">Search</button>
+    </form>
+    <div class="section-title"><span>Jobs</span></div>
+    <div id="search-jobs">${skeletonCards(2)}</div>
+    <div class="section-title"><span>Items for sale</span></div>
+    <div id="search-products">${skeletonCards(2)}</div>
+    <div class="section-title"><span>People looking for work</span></div>
+    <div id="search-people">${skeletonCards(2)}</div>
+  </div></div>`;
+  document.getElementById('search-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = document.getElementById('search-q').value.trim();
+    if (v) location.hash = '#/search?q=' + encodeURIComponent(v);
+  });
+  const jobsBox = document.getElementById('search-jobs');
+  const prodBox = document.getElementById('search-products');
+  const pplBox = document.getElementById('search-people');
+  if (!q) { jobsBox.innerHTML = ''; prodBox.innerHTML = ''; pplBox.innerHTML = ''; return; }
+  api('/api/products?q=' + encodeURIComponent(q)).then((data) => {
+    if (!document.getElementById('search-products')) return;
+    prodBox.innerHTML = data.products.length
+      ? `<div class="card-grid">${data.products.map(productCard).join('')}</div>`
+      : emptyHtml('tag', 'No items match', 'Nothing for sale matches that search yet.');
+  }).catch((e) => { if (document.getElementById('search-products')) prodBox.innerHTML = errorHtml(e.message); });
+  api('/api/jobs?q=' + encodeURIComponent(q) + '&page=1').then((data) => {
+    if (!document.getElementById('search-jobs')) return;
+    jobsBox.innerHTML = data.jobs.length
+      ? `<div class="card-grid">${data.jobs.map(jobCard).join('')}</div>`
+      : emptyHtml('briefcase', 'No jobs match', 'Try different words, or browse everything.', `<a class="btn btn-sm btn-primary" href="#/jobs">Browse jobs</a>`);
+  }).catch((e) => { if (document.getElementById('search-jobs')) jobsBox.innerHTML = errorHtml(e.message); });
+  api('/api/workers?q=' + encodeURIComponent(q)).then((data) => {
+    if (!document.getElementById('search-people')) return;
+    pplBox.innerHTML = data.workers.length
+      ? `<div class="card-grid">${data.workers.map(workerCard).join('')}</div>`
+      : emptyHtml('users', 'No people match', 'Nobody looking for work matches that search yet.');
+    pplBox.querySelectorAll('[data-worker]').forEach(el => {
+      const go = (ev) => { if (ev.target.closest('a')) return; location.hash = '#/user/' + el.dataset.worker; };
+      el.addEventListener('click', go);
+      el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') go(ev); });
+    });
+  }).catch((e) => { if (document.getElementById('search-people')) pplBox.innerHTML = errorHtml(e.message); });
 }
 
 /** Find Jobs — search, city, distance, category chips, real result count. */
@@ -683,8 +804,17 @@ async function viewBrowse() {
       <button class="chip ${!browseState.category ? 'active' : ''}" data-cat="">All</button>
       ${CATEGORIES.map(c => `<button class="chip ${browseState.category === c ? 'active' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
     </div>
+    <div class="filters" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
+      <input id="f-paymin" type="number" min="0" inputmode="numeric" placeholder="Min K" value="${esc(browseState.payMin)}" aria-label="Minimum pay" style="width:92px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
+      <input id="f-paymax" type="number" min="0" inputmode="numeric" placeholder="Max K" value="${esc(browseState.payMax)}" aria-label="Maximum pay" style="width:92px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
+      <select id="f-duration" aria-label="Filter by expected duration" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
+        <option value="">Any duration</option>
+        ${JOB_DURATIONS.map(d => `<option ${browseState.duration === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+      </select>
+      <button class="chip ${browseState.urgent ? 'active' : ''}" id="f-urgent" aria-pressed="${browseState.urgent ? 'true' : 'false'}">🔥 Urgent only</button>
+    </div>
     <div class="split" style="margin:6px 2px 10px"><span class="small muted" id="res-count"></span><span class="small muted" id="res-order"></span></div>
-    <div id="results">${loadingHtml('Finding jobs…')}</div>
+    <div id="results">${skeletonCards(3)}</div>
     <div id="more-wrap" style="text-align:center;margin:8px 0 16px"></div>
     <div style="text-align:center;margin:18px 0 8px"><a class="link-btn" href="#/how">How PieceWork works</a></div>
   </div></div>`;
@@ -697,6 +827,24 @@ async function viewBrowse() {
   });
   document.getElementById('f-city').addEventListener('change', (e) => {
     browseState.city = e.target.value; browseState.page = 1; loadJobs(true);
+  });
+  const payDebounce = (key, el) => {
+    let t;
+    el.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(() => { browseState[key] = el.value.trim(); browseState.page = 1; loadJobs(true); }, 400);
+    });
+  };
+  payDebounce('payMin', document.getElementById('f-paymin'));
+  payDebounce('payMax', document.getElementById('f-paymax'));
+  document.getElementById('f-duration').addEventListener('change', (e) => {
+    browseState.duration = e.target.value; browseState.page = 1; loadJobs(true);
+  });
+  document.getElementById('f-urgent').addEventListener('click', (e) => {
+    browseState.urgent = !browseState.urgent; browseState.page = 1;
+    e.currentTarget.classList.toggle('active', browseState.urgent);
+    e.currentTarget.setAttribute('aria-pressed', browseState.urgent ? 'true' : 'false');
+    loadJobs(true);
   });
   function renderLocBar() {
     const slot = document.getElementById('locslot');
@@ -757,6 +905,10 @@ async function viewBrowse() {
     if (browseState.q) params.set('q', browseState.q);
     if (browseState.city) params.set('city', browseState.city);
     if (browseState.category) params.set('category', browseState.category);
+    if (browseState.payMin) params.set('pay_min', browseState.payMin);
+    if (browseState.payMax) params.set('pay_max', browseState.payMax);
+    if (browseState.duration) params.set('duration', browseState.duration);
+    if (browseState.urgent) params.set('urgent', '1');
     const loc = getLoc();
     if (loc) {
       params.set('lat', loc.lat);
@@ -781,7 +933,7 @@ async function viewBrowse() {
       if (moreWrap) moreWrap.innerHTML =
         data.page < data.totalPages ? `<button id="load-more" class="btn btn-ghost btn-sm">Load more (${data.total - data.page * data.limit} remaining)</button>` : '';
     } catch (e) {
-      results.innerHTML = emptyHtml('info', 'Could not load jobs', e.message);
+      results.innerHTML = errorHtml(e.message);
     }
   }
 }
@@ -811,12 +963,12 @@ async function viewWorkers() {
     <div class="field" style="max-width:320px">
       <select id="wk-city" aria-label="Filter by city"><option value="">All cities</option>${CITIES.map(c => `<option>${esc(c)}</option>`).join('')}</select>
     </div>
-    <div id="wk-results" class="job-list">${loadingHtml('Loading workers…')}</div>
+    <div id="wk-results" class="job-list">${skeletonCards(3)}</div>
   </div></div>`;
   const results = document.getElementById('wk-results');
   const sel = document.getElementById('wk-city');
   async function load() {
-    results.innerHTML = loadingHtml('Loading workers…');
+    results.innerHTML = skeletonCards(3);
     try {
       const q = sel.value ? '?city=' + encodeURIComponent(sel.value) : '';
       const data = await api('/api/workers' + q);
@@ -833,11 +985,809 @@ async function viewWorkers() {
         el.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(e); });
       });
     } catch (e) {
-      results.innerHTML = emptyHtml('info', 'Could not load workers', e.message);
+      results.innerHTML = errorHtml(e.message);
     }
   }
   sel.addEventListener('change', load);
   load();
+}
+
+/* ================= Marketplace (2.0 M3) ================= */
+
+let marketState = { q: '', category: '', city: '', condition: '', sort: 'newest', page: 1 };
+
+function fmtK(n) { return 'K' + Number(n || 0).toLocaleString('en-ZM'); }
+
+function productCard(p) {
+  const savedP = isSavedProduct(p.id);
+  return `
+  <article class="job-card product-card" data-product="${p.id}">
+    ${p.cover_photo
+      ? `<img class="product-cover" src="${esc(p.cover_photo)}" alt="${esc(p.title)}" loading="lazy">`
+      : `<div class="job-thumb product-thumb">${icon('tag')}</div>`}
+    <div class="job-body">
+      <h3>${esc(p.title)}</h3>
+      <div class="product-price">${fmtK(p.price)}</div>
+      <div class="job-meta">
+        <span>${icon('pin')} ${esc(p.city)}${p.area ? ' · ' + esc(p.area) : ''}</span>
+        ${p.distance_km != null ? `<span>${p.distance_km} km away</span>` : ''}
+      </div>
+      <div class="job-meta">
+        <span class="badge badge-cond">${esc(p.condition)}</span>
+        <span>${esc(p.category)}</span>
+        ${p.status !== 'active' ? `<span class="badge badge-status-${p.status === 'sold' ? 'completed' : 'cancelled'}">${esc(p.status)}</span>` : ''}
+      </div>
+      ${p.business ? `<div class="small muted">by ${esc(p.business.name)}${p.business.verified ? ' ✓' : ''}</div>` : ''}
+    </div>
+    <button class="job-save ${savedP ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${savedP ? 'true' : 'false'}">${icon('bookmark')}</button>
+  </article>`;
+}
+
+async function viewMarket() {
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Marketplace</h1>
+    <p class="page-sub">Buy and sell with people near you. You pay the seller directly, PieceWork never handles the money.</p>
+    ${currentUser ? `<a class="btn btn-primary" href="#/sell" style="margin-bottom:12px">${icon('plus')} Sell an item</a>
+    <a class="btn btn-outline" href="#/selling" style="margin-bottom:12px">My selling</a>` : ''}
+    <a class="btn btn-outline" href="#/businesses" style="margin-bottom:12px">Browse businesses</a>
+    <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="m-q" type="search" placeholder="Search items" value="${esc(marketState.q)}" aria-label="Search items"></div>
+    <div class="chips" id="m-chips">
+      <button class="chip ${!marketState.category ? 'active' : ''}" data-mcat="">All</button>
+      ${MARKET_CATEGORIES.map(c => `<button class="chip ${marketState.category === c ? 'active' : ''}" data-mcat="${esc(c)}">${esc(c)}</button>`).join('')}
+    </div>
+    <div class="filters" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 4px">
+      <select id="m-city" aria-label="Filter by town" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
+        <option value="">All towns</option>
+        ${CITIES.map(c => `<option ${marketState.city === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+      </select>
+      <select id="m-cond" aria-label="Filter by condition" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
+        <option value="">Any condition</option>
+        ${['New', 'Like new', 'Good', 'Fair'].map(c => `<option ${marketState.condition === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+      </select>
+      <select id="m-sort" aria-label="Sort items" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
+        <option value="newest" ${marketState.sort === 'newest' ? 'selected' : ''}>Newest first</option>
+        <option value="price_low" ${marketState.sort === 'price_low' ? 'selected' : ''}>Price: low to high</option>
+        <option value="price_high" ${marketState.sort === 'price_high' ? 'selected' : ''}>Price: high to low</option>
+        <option value="nearby" ${marketState.sort === 'nearby' ? 'selected' : ''}>Nearest first</option>
+      </select>
+    </div>
+    <div id="m-results">${skeletonCards(3)}</div>
+    <div id="m-more" style="text-align:center;margin-top:10px"></div>
+  </div></div>`;
+
+  const results = document.getElementById('m-results');
+  const more = document.getElementById('m-more');
+  async function load(reset) {
+    if (reset) { marketState.page = 1; results.innerHTML = skeletonCards(3); more.innerHTML = ''; }
+    try {
+      const params = new URLSearchParams({ page: String(marketState.page), sort: marketState.sort });
+      if (marketState.q) params.set('q', marketState.q);
+      if (marketState.category) params.set('category', marketState.category);
+      if (marketState.city) params.set('city', marketState.city);
+      if (marketState.condition) params.set('condition', marketState.condition);
+      const data = await api('/api/products?' + params.toString());
+      const html = data.products.map(productCard).join('');
+      if (reset) {
+        results.innerHTML = data.products.length
+          ? `<div class="card-grid">${html}</div>`
+          : emptyHtml('tag', 'Nothing for sale here yet', 'Try another category or town, or be the first to sell.', currentUser ? `<a class="btn btn-sm btn-primary" href="#/sell">Sell an item</a>` : `<a class="btn btn-sm btn-primary" href="#/register">Join free</a>`);
+      } else {
+        const grid = results.querySelector('.card-grid');
+        if (grid) grid.insertAdjacentHTML('beforeend', html);
+      }
+      more.innerHTML = data.page < data.totalPages
+        ? `<button class="btn btn-outline" id="m-loadmore">Load more (${data.total - marketState.page * 24 > 0 ? data.total - marketState.page * 24 : 0} more)</button>`
+        : '';
+      const lm = document.getElementById('m-loadmore');
+      if (lm) lm.addEventListener('click', () => { marketState.page++; load(false); });
+    } catch (e) {
+      if (reset) results.innerHTML = errorHtml(e.message);
+    }
+  }
+  let qt;
+  document.getElementById('m-q').addEventListener('input', (e) => {
+    clearTimeout(qt);
+    qt = setTimeout(() => { marketState.q = e.target.value.trim(); load(true); }, 400);
+  });
+  document.getElementById('m-chips').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-mcat]');
+    if (!chip) return;
+    marketState.category = chip.dataset.mcat;
+    document.querySelectorAll('#m-chips .chip').forEach(c => c.classList.toggle('active', c === chip));
+    load(true);
+  });
+  document.getElementById('m-city').addEventListener('change', (e) => { marketState.city = e.target.value; load(true); });
+  document.getElementById('m-cond').addEventListener('change', (e) => { marketState.condition = e.target.value; load(true); });
+  document.getElementById('m-sort').addEventListener('change', (e) => { marketState.sort = e.target.value; load(true); });
+  load(true);
+}
+
+async function viewProduct(id) {
+  if (!requireAuth('#/product/' + id)) return;
+  app.innerHTML = `<div class="view"><div class="page"><div id="product-box">${skeletonCards(2)}</div></div></div>`;
+  const box = document.getElementById('product-box');
+  try {
+    const { product: p, my_offer, offers } = await api('/api/products/' + id);
+    const isOwner = currentUser && currentUser.id === p.seller_id;
+    box.innerHTML = `
+      <a class="small" href="#/market">← Back to Marketplace</a>
+      ${p.photos && p.photos.length ? `<div class="job-gallery" style="margin-top:10px">${p.photos.map(ph => `<img src="${esc(ph.url)}" alt="${esc(p.title)}" loading="lazy">`).join('')}</div>` : ''}
+      <div class="card" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+          <h1 class="page-title" style="font-size:22px;margin:0">${esc(p.title)}</h1>
+          <button class="icon-btn ${isSavedProduct(p.id) ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${isSavedProduct(p.id) ? 'true' : 'false'}">${icon('bookmark')}</button>
+        </div>
+        <div class="product-price" style="font-size:24px">${fmtK(p.price)}</div>
+        <div class="job-meta" style="margin-top:6px">
+          <span class="badge badge-cond">${esc(p.condition)}</span>
+          <span>${esc(p.category)}</span>
+          <span>${icon('pin')} ${esc(p.city)}${p.area ? ' · ' + esc(p.area) : ''}</span>
+          ${p.status !== 'active' ? `<span class="badge badge-status-completed">${esc(p.status)}</span>` : ''}
+        </div>
+        <p style="margin-top:12px;white-space:pre-wrap">${esc(p.description)}</p>
+        <p class="small muted" style="margin-top:8px"><span class="job-meta" style="display:inline-flex;align-items:center;gap:4px">${icon('eye')} ${p.view_count} views</span></p>
+      </div>
+      ${p.business ? `<a class="card" href="#/business/${esc(p.business.slug)}" style="display:flex;align-items:center;gap:10px;color:var(--ink);margin-top:12px"><span style="flex:1">Sold by <b>${esc(p.business.name)}</b>${p.business.verified ? ' <span class="badge badge-verified">✓ Verified business</span>' : ''}</span><span class="chev">${icon('chevR')}</span></a>` : ''}
+      <div class="card">
+        <h3 style="margin-top:0">Seller</h3>
+        <a href="#/user/${p.seller_id}" style="display:flex;align-items:center;gap:10px;color:var(--ink)">
+          ${avatarHtml({ name: p.seller_name, avatar: p.seller_avatar }, 'md')}
+          <span><b>${esc(p.seller_name)}</b>
+          <span class="small muted" style="display:block">${esc(p.seller_city || '')}${p.seller_since ? ' · Member since ' + esc(String(p.seller_since).slice(0, 4)) : ''}</span>
+          ${p.seller_verified ? '<span class="badge badge-status-open">ID verified</span>' : '<span class="small muted">ID not verified yet</span>'}</span>
+        </a>
+        ${!isOwner ? `
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-primary" id="btn-msg-seller">${icon('message')} Message seller</button>
+          <button class="btn btn-outline" id="btn-report-product">${icon('shield')} Report</button>
+        </div>
+        ${p.status === 'active' ? `
+        <div style="margin-top:14px">
+          <h4 style="margin:0 0 6px">Make an offer</h4>
+          ${my_offer ? `<p class="small">Your offer: <b>${fmtK(my_offer.amount)}</b> · ${esc(my_offer.status)}${my_offer.status === 'pending' ? ` · <a href="#" id="lnk-withdraw-offer">Withdraw</a>` : ''}</p>` : ''}
+          <form id="offer-form" style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="of-amount" type="number" min="1" inputmode="numeric" placeholder="Your price (K)" required style="flex:1;min-width:130px;padding:11px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
+            <input id="of-message" type="text" maxlength="500" placeholder="Message (optional)" style="flex:2;min-width:160px;padding:11px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
+            <button class="btn btn-primary" type="submit">Send offer</button>
+          </form>
+          <p class="small muted" style="margin-top:6px">An offer is a proposal, not a payment. You pay the seller directly when you meet.</p>
+        </div>` : '<p class="small muted" style="margin-top:10px">This item is not on sale right now.</p>'}
+        ` : `
+        <div class="btn-row" style="margin-top:12px">
+          <a class="btn btn-outline" href="#/product/${p.id}/edit">${icon('edit')} Edit listing</a>
+          ${p.status === 'active' ? `<button class="btn btn-outline" id="btn-mark-sold">Mark as sold</button><button class="btn btn-outline" id="btn-hide">Hide</button>` : ''}
+          ${p.status === 'hidden' ? `<button class="btn btn-outline" id="btn-unhide">Show again</button>` : ''}
+          <button class="btn btn-outline" id="btn-delete-product">Remove</button>
+        </div>
+        <div style="margin-top:14px">
+          <h4 style="margin:0 0 6px">Offers received (${(offers || []).length})</h4>
+          ${(offers && offers.length) ? offers.map(o => `
+            <div class="offer-row">
+              <span><b>${fmtK(o.amount)}</b> from ${esc(o.buyer_name)} <span class="small muted">(${esc(o.buyer_city || '')})</span>
+              ${o.message ? `<span class="small" style="display:block">${esc(o.message)}</span>` : ''}
+              <span class="small muted" style="display:block">${esc(relTime(o.created_at))}</span></span>
+              ${o.status === 'pending'
+                ? `<span class="btn-row"><button class="btn btn-sm btn-primary" data-offer-accept="${o.id}">Accept</button><button class="btn btn-sm btn-outline" data-offer-decline="${o.id}">Decline</button></span>`
+                : `<span class="badge badge-app-${o.status === 'accepted' ? 'accepted' : 'declined'}">${esc(o.status)}</span>`}
+            </div>`).join('') : '<p class="small muted">No offers yet.</p>'}
+        </div>`}
+      </div>`;
+    const msgBtn = document.getElementById('btn-msg-seller');
+    if (msgBtn) msgBtn.addEventListener('click', async () => {
+      msgBtn.disabled = true;
+      try {
+        const { conversation_id } = await api('/api/conversations/product', { method: 'POST', body: JSON.stringify({ product_id: p.id }) });
+        location.hash = '#/chat/' + conversation_id;
+      } catch (e) { toast(e.message, true); msgBtn.disabled = false; }
+    });
+    const repBtn = document.getElementById('btn-report-product');
+    if (repBtn) repBtn.addEventListener('click', async () => {
+      const reason = prompt('Why are you reporting this item?');
+      if (!reason || !reason.trim()) return;
+      try {
+        await api('/api/reports', { method: 'POST', body: JSON.stringify({ target_type: 'product', target_id: p.id, reason: reason.trim() }) });
+        toast('Reported. Our team will take a look.');
+      } catch (e) { toast(e.message, true); }
+    });
+    const offerForm = document.getElementById('offer-form');
+    if (offerForm) offerForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api(`/api/products/${p.id}/offers`, { method: 'POST', body: JSON.stringify({ amount: Number(document.getElementById('of-amount').value), message: document.getElementById('of-message').value.trim() }) });
+        toast('Offer sent to the seller.');
+        viewProduct(id);
+      } catch (e2) { toast(e2.message, true); }
+    });
+    const withdraw = document.getElementById('lnk-withdraw-offer');
+    if (withdraw && my_offer) withdraw.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/offers/' + my_offer.id, { method: 'PATCH', body: JSON.stringify({ status: 'withdrawn' }) });
+        toast('Offer withdrawn.');
+        viewProduct(id);
+      } catch (e2) { toast(e2.message, true); }
+    });
+    box.querySelectorAll('[data-offer-accept]').forEach(b => b.addEventListener('click', async () => {
+      try { await api('/api/offers/' + b.dataset.offerAccept, { method: 'PATCH', body: JSON.stringify({ status: 'accepted' }) }); toast('Offer accepted. Message the buyer to arrange meeting and payment.'); viewProduct(id); }
+      catch (e2) { toast(e2.message, true); }
+    }));
+    box.querySelectorAll('[data-offer-decline]').forEach(b => b.addEventListener('click', async () => {
+      try { await api('/api/offers/' + b.dataset.offerDecline, { method: 'PATCH', body: JSON.stringify({ status: 'declined' }) }); viewProduct(id); }
+      catch (e2) { toast(e2.message, true); }
+    }));
+    const patchStatus = async (status, msg) => {
+      try { await api('/api/products/' + p.id, { method: 'PATCH', body: JSON.stringify({ status }) }); toast(msg); viewProduct(id); }
+      catch (e2) { toast(e2.message, true); }
+    };
+    const soldBtn = document.getElementById('btn-mark-sold');
+    if (soldBtn) soldBtn.addEventListener('click', () => patchStatus('sold', 'Marked as sold.'));
+    const hideBtn = document.getElementById('btn-hide');
+    if (hideBtn) hideBtn.addEventListener('click', () => patchStatus('hidden', 'Listing hidden from the marketplace.'));
+    const unhideBtn = document.getElementById('btn-unhide');
+    if (unhideBtn) unhideBtn.addEventListener('click', () => patchStatus('active', 'Listing is live again.'));
+    const delBtn = document.getElementById('btn-delete-product');
+    if (delBtn) delBtn.addEventListener('click', async () => {
+      if (!confirm('Remove this listing for good?')) return;
+      try { await api('/api/products/' + p.id, { method: 'DELETE' }); toast('Listing removed.'); location.hash = '#/selling'; }
+      catch (e2) { toast(e2.message, true); }
+    });
+  } catch (e) {
+    box.innerHTML = errorHtml(e.message);
+  }
+}
+
+function productFormHtml(prefill, isEdit) {
+  const p = prefill || {};
+  return `
+  <form id="product-form" class="card" style="padding:20px">
+    <div class="field"><label for="pf-title">What are you selling? *</label>
+      <input id="pf-title" maxlength="120" required value="${esc(p.title || '')}" placeholder="e.g. Samsung Galaxy A15, 128GB"></div>
+    <div class="field"><label for="pf-photos">Photos (up to 5)</label>
+      <input id="pf-photos" type="file" accept="image/*" multiple>
+      <div id="pf-photo-previews" class="job-gallery" style="margin-top:6px"></div>
+      ${isEdit && p.photos && p.photos.length ? `<button type="button" class="btn btn-sm btn-outline" id="pf-remove-photos">Remove all photos</button>` : ''}
+      <div class="hint">Clear photos sell faster. The first photo is the cover.</div></div>
+    <div class="form-2col">
+      <div class="field"><label for="pf-category">Category *</label>
+        <select id="pf-category" required>${MARKET_CATEGORIES.map(c => `<option ${p.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      <div class="field"><label for="pf-condition">Condition</label>
+        <select id="pf-condition">${['New', 'Like new', 'Good', 'Fair'].map(c => `<option ${p.condition === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label for="pf-price">Price (Kwacha) *</label>
+      <input id="pf-price" type="number" min="1" inputmode="numeric" required value="${p.price || ''}" placeholder="e.g. 2500"></div>
+    <div class="field"><label for="pf-desc">Description *</label>
+      <textarea id="pf-desc" rows="4" maxlength="2000" required placeholder="Condition details, what is included, any faults, where to meet">${esc(p.description || '')}</textarea></div>
+    <div class="form-2col">
+      <div class="field"><label for="pf-city">Town *</label>
+        <select id="pf-city" required>${CITIES.map(c => `<option ${p.city === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      <div class="field"><label for="pf-area">Area</label>
+        <input id="pf-area" maxlength="80" value="${esc(p.area || '')}" placeholder="e.g. Kamwala"></div>
+    </div>
+    <div id="pf-business-slot"></div>
+    <p class="small muted">Buyers pay you directly when you meet. PieceWork never takes a cut and never handles the money.</p>
+    <button class="btn btn-primary btn-block" type="submit">${isEdit ? 'Save changes' : 'List it for sale'}</button>
+  </form>`;
+}
+
+function wireProductPhotos(form, existing) {
+  form._photos = null;
+  const input = form.querySelector('#pf-photos');
+  const previews = form.querySelector('#pf-photo-previews');
+  function renderPreviews() {
+    if (form._photos && form._photos.length) {
+      previews.innerHTML = form._photos.map(src => `<img src="${src}" alt="Item photo">`).join('');
+    } else if (form._photos) {
+      previews.innerHTML = '';
+    } else if (existing && existing.length) {
+      previews.innerHTML = existing.map(ph => `<img src="${esc(ph.url)}" alt="Item photo">`).join('')
+        + '<p class="small muted" style="align-self:center">Picking new photos replaces these.</p>';
+    }
+  }
+  renderPreviews();
+  const rm = form.querySelector('#pf-remove-photos');
+  if (rm) rm.addEventListener('click', () => { form._photos = []; renderPreviews(); rm.remove(); });
+  input.addEventListener('change', async () => {
+    const files = Array.from(input.files || []).slice(0, 5);
+    if (!files.length) return;
+    try {
+      form._photos = [];
+      for (const f of files) form._photos.push(await fileToDoc(f));
+      renderPreviews();
+    } catch (e) { toast('Could not read that photo.', true); }
+  });
+}
+
+function collectProductData(form) {
+  const data = {
+    title: document.getElementById('pf-title').value.trim(),
+    category: document.getElementById('pf-category').value,
+    condition: document.getElementById('pf-condition').value,
+    price: Number(document.getElementById('pf-price').value),
+    description: document.getElementById('pf-desc').value.trim(),
+    city: document.getElementById('pf-city').value,
+    area: document.getElementById('pf-area').value.trim(),
+  };
+  if (form._photos) data.photos = form._photos;
+  const bizSel = document.getElementById('pf-business');
+  if (bizSel) data.business_id = bizSel.value ? Number(bizSel.value) : null;
+  return data;
+}
+
+/** If the user runs a live storefront, offer listing the item under it. */
+async function mountBusinessSelect(form, currentBusinessId) {
+  try {
+    const data = await api('/api/businesses/mine');
+    const live = (data.businesses || []).filter(b => b.status === 'active');
+    const slot = form.querySelector('#pf-business-slot');
+    if (!slot || !live.length) return;
+    slot.innerHTML = `
+    <div class="field"><label for="pf-business">Sell as</label>
+      <select id="pf-business">
+        <option value="">Myself (personal listing)</option>
+        ${live.map(b => `<option value="${b.id}" ${currentBusinessId === b.id ? 'selected' : ''}>${esc(b.name)} (business)</option>`).join('')}
+      </select>
+      <div class="hint">Business listings appear in the shop catalogue too.</div></div>`;
+  } catch (e) { /* personal listing only */ }
+}
+
+async function viewSell() {
+  if (!requireAuth('#/sell')) return;
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Sell an item</h1>
+    <p class="page-sub">List it in under a minute. Buyers message you in the app and pay you directly.</p>
+    ${productFormHtml({ city: currentUser.city }, false)}
+  </div></div>`;
+  const form = document.getElementById('product-form');
+  wireProductPhotos(form, []);
+  mountBusinessSelect(form, null);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const { id } = await api('/api/products', { method: 'POST', body: JSON.stringify(collectProductData(form)) });
+      toast('Your item is live on the Marketplace.');
+      location.hash = '#/product/' + id;
+    } catch (e2) { toast(e2.message, true); }
+  });
+}
+
+async function viewProductEdit(id) {
+  if (!requireAuth('#/product/' + id + '/edit')) return;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading your listing…')}</div></div>`;
+  try {
+    const { product: p } = await api('/api/products/' + id);
+    if (!currentUser || currentUser.id !== p.seller_id) {
+      app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not your listing', 'You can only edit items you are selling.', `<a class="btn btn-sm btn-primary" href="#/market">Back to Marketplace</a>`)}</div></div>`;
+      return;
+    }
+    app.innerHTML = `
+    <div class="view"><div class="page">
+      <h1 class="page-title">Edit listing</h1>
+      <p class="page-sub">${esc(p.title)}</p>
+      ${productFormHtml(p, true)}
+    </div></div>`;
+    const form = document.getElementById('product-form');
+    wireProductPhotos(form, p.photos || []);
+    mountBusinessSelect(form, p.business ? p.business.id : null);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/products/' + id, { method: 'PATCH', body: JSON.stringify(collectProductData(form)) });
+        toast('Listing updated.');
+        location.hash = '#/product/' + id;
+      } catch (e2) { toast(e2.message, true); }
+    });
+  } catch (e) {
+    app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
+  }
+}
+
+async function viewSelling() {
+  if (!requireAuth('#/selling')) return;
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">My selling</h1>
+    <p class="page-sub">Your listings and offers, in one place.</p>
+    <div id="sell-summary">${skeletonCards(1)}</div>
+    <div class="btn-row" style="margin:10px 0"><a class="btn btn-primary" href="#/sell">${icon('plus')} Sell an item</a></div>
+    <div class="section-title"><span>My listings</span></div>
+    <div id="sell-listings">${skeletonCards(2)}</div>
+    <div class="section-title"><span>Offers received</span></div>
+    <div id="sell-offers">${skeletonCards(1)}</div>
+    <div class="section-title"><span>Offers I made</span></div>
+    <div id="sell-myoffers">${skeletonCards(1)}</div>
+  </div></div>`;
+  api('/api/selling/summary').then((s) => {
+    const el = document.getElementById('sell-summary');
+    if (el) el.innerHTML = `
+      <div class="stat-grid">
+        <div class="card stat-card"><h3>${s.active}</h3><p class="small muted">Active</p></div>
+        <div class="card stat-card"><h3>${s.sold}</h3><p class="small muted">Sold</p></div>
+        <div class="card stat-card"><h3>${s.offers_pending}</h3><p class="small muted">Offers waiting</p></div>
+        <div class="card stat-card"><h3>${s.hidden}</h3><p class="small muted">Hidden</p></div>
+      </div>`;
+  }).catch(() => {});
+  api('/api/products?mine=1').then((d) => {
+    const el = document.getElementById('sell-listings');
+    if (!el) return;
+    el.innerHTML = d.products.length
+      ? d.products.map(productCard).join('')
+      : emptyHtml('tag', 'No listings yet', 'List your first item and reach buyers near you.', `<a class="btn btn-sm btn-primary" href="#/sell">Sell an item</a>`);
+  }).catch((e) => { const el = document.getElementById('sell-listings'); if (el) el.innerHTML = errorHtml(e.message); });
+  api('/api/selling/offers').then((d) => {
+    const rEl = document.getElementById('sell-offers');
+    if (rEl) rEl.innerHTML = d.received.length ? d.received.map(o => `
+      <div class="offer-row"><span><b>${fmtK(o.amount)}</b> for <a href="#/product/${o.product_id}">${esc(o.product_title)}</a>
+        <span class="small muted" style="display:block">from ${esc(o.buyer_name)} · ${esc(relTime(o.created_at))}</span></span>
+        <span class="badge badge-app-${o.status === 'accepted' ? 'accepted' : o.status === 'pending' ? 'pending' : 'declined'}">${esc(o.status)}</span></div>`).join('')
+      : '<p class="small muted">No offers received yet.</p>';
+    const mEl = document.getElementById('sell-myoffers');
+    if (mEl) mEl.innerHTML = d.made.length ? d.made.map(o => `
+      <div class="offer-row"><span><b>${fmtK(o.amount)}</b> for <a href="#/product/${o.product_id}">${esc(o.product_title)}</a>
+        <span class="small muted" style="display:block">to ${esc(o.seller_name)} · ${esc(relTime(o.created_at))}</span></span>
+        <span class="badge badge-app-${o.status === 'accepted' ? 'accepted' : o.status === 'pending' ? 'pending' : 'declined'}">${esc(o.status)}</span></div>`).join('')
+      : '<p class="small muted">You have not made any offers yet.</p>';
+  }).catch(() => {});
+}
+
+/* ================= Businesses (2.0 M4) ================= */
+
+function bizBadge(b) {
+  return b.verified
+    ? '<span class="badge badge-verified">✓ Verified business</span>'
+    : '<span class="badge badge-unverified">Unverified</span>';
+}
+
+function businessCard(b) {
+  return `
+  <a class="card biz-card" href="#/business/${esc(b.slug)}">
+    ${b.logo ? `<img class="biz-logo" src="${b.logo}" alt="${esc(b.name)} logo">` : `<div class="biz-logo biz-logo-fallback">${icon('tag')}</div>`}
+    <span class="biz-card-body">
+      <b>${esc(b.name)}</b> ${bizBadge(b)}
+      ${b.tagline ? `<span class="small muted" style="display:block">${esc(b.tagline)}</span>` : ''}
+      <span class="small muted" style="display:block">${esc(b.category)} · ${esc(b.city)}${b.owner_rating ? ` · ⭐ ${Number(b.owner_rating).toFixed(1)} (${b.owner_reviews})` : ''}</span>
+      <span class="small" style="display:block">${b.product_count || 0} items for sale</span>
+    </span>
+  </a>`;
+}
+
+async function viewBusinesses() {
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Businesses</h1>
+    <p class="page-sub">Local shops and formal businesses on PieceWork. Verified shops have shown their registration documents.</p>
+    ${currentUser ? `<a class="btn btn-primary" href="#/business/apply" style="margin-bottom:12px">${icon('plus')} Open a business storefront</a>
+    <a class="btn btn-outline" href="#/business/mine" style="margin-bottom:12px">My businesses</a>` : ''}
+    <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="bz-q" type="search" placeholder="Search businesses" aria-label="Search businesses"></div>
+    <div class="chips" id="bz-chips">
+      <button class="chip active" data-bzcat="">All</button>
+      ${MARKET_CATEGORIES.map(c => `<button class="chip" data-bzcat="${esc(c)}">${esc(c)}</button>`).join('')}
+    </div>
+    <div id="bz-results" style="margin-top:12px">${skeletonCards(2)}</div>
+  </div></div>`;
+  const results = document.getElementById('bz-results');
+  let cat = '', q = '';
+  async function load() {
+    results.innerHTML = skeletonCards(2);
+    try {
+      const params = new URLSearchParams();
+      if (cat) params.set('category', cat);
+      if (q) params.set('q', q);
+      const data = await api('/api/businesses?' + params.toString());
+      results.innerHTML = data.businesses.length
+        ? data.businesses.map(businessCard).join('')
+        : emptyHtml('tag', 'No businesses found', 'Try another search, or open the first storefront in this category.', currentUser ? `<a class="btn btn-sm btn-primary" href="#/business/apply">Open a storefront</a>` : '');
+    } catch (e) { results.innerHTML = errorHtml(e.message); }
+  }
+  let qt;
+  document.getElementById('bz-q').addEventListener('input', (e) => {
+    clearTimeout(qt);
+    qt = setTimeout(() => { q = e.target.value.trim(); load(); }, 400);
+  });
+  document.getElementById('bz-chips').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-bzcat]');
+    if (!chip) return;
+    cat = chip.dataset.bzcat;
+    document.querySelectorAll('#bz-chips .chip').forEach(c => c.classList.toggle('active', c === chip));
+    load();
+  });
+  load();
+}
+
+async function viewBusiness(slug) {
+  app.innerHTML = `<div class="view"><div class="page"><div id="biz-box">${skeletonCards(2)}</div></div></div>`;
+  const box = document.getElementById('biz-box');
+  try {
+    const { business: b, products, jobs } = await api('/api/businesses/' + encodeURIComponent(slug));
+    const isOwner = currentUser && currentUser.id === b.owner_id;
+    box.innerHTML = `
+      ${b.cover ? `<img class="biz-cover" src="${b.cover}" alt="${esc(b.name)}">` : ''}
+      <div class="card" style="margin-top:${b.cover ? '12px' : '0'}">
+        <div style="display:flex;gap:12px;align-items:flex-start">
+          ${b.logo ? `<img class="biz-logo" src="${b.logo}" alt="${esc(b.name)} logo">` : `<div class="biz-logo biz-logo-fallback">${icon('tag')}</div>`}
+          <div style="flex:1;min-width:0">
+            <h1 class="page-title" style="font-size:22px;margin:0">${esc(b.name)}</h1>
+            <div style="margin:4px 0">${bizBadge(b)}</div>
+            ${b.tagline ? `<p class="muted" style="margin:2px 0">${esc(b.tagline)}</p>` : ''}
+            <p class="small muted" style="margin:2px 0">${esc(b.category)} · ${esc(b.city)}${b.area ? ' · ' + esc(b.area) : ''}${b.owner_rating ? ` · ⭐ ${Number(b.owner_rating).toFixed(1)} from ${b.owner_reviews} reviews` : ''}</p>
+          </div>
+        </div>
+        ${b.description ? `<p style="margin-top:12px;white-space:pre-wrap">${esc(b.description)}</p>` : ''}
+        ${isOwner ? `<div class="btn-row" style="margin-top:12px"><a class="btn btn-outline" href="#/business/${b.id}/manage">${icon('edit')} Manage storefront</a></div>` : ''}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Contact and hours</h3>
+        ${b.address ? `<p class="small icon-line">${icon('pin')} ${esc(b.address)}, ${esc(b.city)}</p>` : ''}
+        ${b.hours_text ? `<p class="small icon-line">${icon('clock')} ${esc(b.hours_text)}</p>` : ''}
+        ${b.phone ? `<p class="small icon-line">${icon('phone')} <a href="tel:${esc(b.phone.replace(/\D/g, ''))}">${esc(b.phone)}</a></p>` : ''}
+        ${b.email ? `<p class="small icon-line">${icon('send')} <a href="mailto:${esc(b.email)}">${esc(b.email)}</a></p>` : ''}
+        <p class="small muted">Run by <a href="#/user/${b.owner_id}">${esc(b.owner_name)}</a></p>
+      </div>
+      <div class="section-title"><span>Items for sale (${products.length})</span></div>
+      ${products.length ? `<div class="card-grid">${products.map(productCard).join('')}</div>` : '<p class="small muted">Nothing listed right now.</p>'}
+      ${jobs.length ? `<div class="section-title"><span>Jobs from this business</span></div>${jobs.map(jobCard).join('')}` : ''}
+    `;
+  } catch (e) {
+    box.innerHTML = errorHtml(e.message);
+  }
+}
+
+function businessFormHtml(prefill, isEdit) {
+  const p = prefill || {};
+  return `
+  <form id="business-form" class="card" style="padding:20px">
+    <div class="field"><label for="bf-name">Business name *</label>
+      <input id="bf-name" maxlength="80" required value="${esc(p.name || '')}" placeholder="e.g. Kamwala Phone Repairs"></div>
+    <div class="field"><label for="bf-tagline">Tagline</label>
+      <input id="bf-tagline" maxlength="120" value="${esc(p.tagline || '')}" placeholder="One short line about the business"></div>
+    <div class="form-2col">
+      <div class="field"><label for="bf-category">Category *</label>
+        <select id="bf-category" required>${MARKET_CATEGORIES.map(c => `<option ${p.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      <div class="field"><label for="bf-city">Town *</label>
+        <select id="bf-city" required>${CITIES.map(c => `<option ${p.city === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label for="bf-desc">About the business *</label>
+      <textarea id="bf-desc" rows="4" maxlength="2000" required placeholder="What you sell or do, how long you have traded, what makes you different">${esc(p.description || '')}</textarea></div>
+    <div class="form-2col">
+      <div class="field"><label for="bf-area">Area</label>
+        <input id="bf-area" maxlength="80" value="${esc(p.area || '')}" placeholder="e.g. Kamwala"></div>
+      <div class="field"><label for="bf-address">Street address</label>
+        <input id="bf-address" maxlength="200" value="${esc(p.address || '')}" placeholder="Shop number, street"></div>
+    </div>
+    <div class="form-2col">
+      <div class="field"><label for="bf-phone">Phone</label>
+        <input id="bf-phone" maxlength="30" value="${esc(p.phone || '')}" placeholder="09..."></div>
+      <div class="field"><label for="bf-email">Email</label>
+        <input id="bf-email" type="email" maxlength="120" value="${esc(p.email || '')}" placeholder="shop@example.com"></div>
+    </div>
+    <div class="field"><label for="bf-hours">Opening hours</label>
+      <input id="bf-hours" maxlength="200" value="${esc(p.hours_text || '')}" placeholder="e.g. Mon to Sat, 8:00 to 17:30"></div>
+    <div class="form-2col">
+      <div class="field"><label for="bf-logo">Logo</label>
+        <input id="bf-logo" type="file" accept="image/*">
+        ${p.logo ? `<img src="${p.logo}" alt="Current logo" style="width:56px;height:56px;border-radius:14px;object-fit:cover;margin-top:6px">` : ''}</div>
+      <div class="field"><label for="bf-cover">Cover photo</label>
+        <input id="bf-cover" type="file" accept="image/*">
+        ${p.cover ? `<img src="${p.cover}" alt="Current cover" style="width:100%;height:56px;border-radius:14px;object-fit:cover;margin-top:6px">` : ''}</div>
+    </div>
+    <button class="btn btn-primary btn-block" type="submit">${isEdit ? 'Save changes' : 'Submit for approval'}</button>
+    ${isEdit ? '' : '<p class="small muted" style="margin-top:8px">An admin reviews every new storefront before it goes public. You can upload registration documents after applying to earn the Verified badge.</p>'}
+  </form>`;
+}
+
+async function wireBusinessForm(form, existing) {
+  form._logo = undefined;
+  form._cover = undefined;
+  const bind = (inputId, key) => {
+    const input = form.querySelector(inputId);
+    if (input) input.addEventListener('change', async () => {
+      const f = (input.files || [])[0];
+      if (!f) return;
+      try { form[key] = await fileToDoc(f); toast('Image ready.'); }
+      catch (e) { toast('Could not read that image.', true); }
+    });
+  };
+  bind('#bf-logo', '_logo');
+  bind('#bf-cover', '_cover');
+}
+
+function collectBusinessData(form) {
+  const data = {
+    name: document.getElementById('bf-name').value.trim(),
+    tagline: document.getElementById('bf-tagline').value.trim(),
+    category: document.getElementById('bf-category').value,
+    city: document.getElementById('bf-city').value,
+    description: document.getElementById('bf-desc').value.trim(),
+    area: document.getElementById('bf-area').value.trim(),
+    address: document.getElementById('bf-address').value.trim(),
+    phone: document.getElementById('bf-phone').value.trim(),
+    email: document.getElementById('bf-email').value.trim(),
+    hours_text: document.getElementById('bf-hours').value.trim(),
+  };
+  if (form._logo !== undefined) data.logo = form._logo;
+  if (form._cover !== undefined) data.cover = form._cover;
+  return data;
+}
+
+async function viewBusinessApply() {
+  if (!requireAuth('#/business/apply')) return;
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Open a business storefront</h1>
+    <p class="page-sub">Your own shop page on PieceWork: logo, hours, contact, and your catalogue in one link.</p>
+    ${businessFormHtml({ city: currentUser.city }, false)}
+  </div></div>`;
+  const form = document.getElementById('business-form');
+  wireBusinessForm(form, null);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const { id } = await api('/api/businesses', { method: 'POST', body: JSON.stringify(collectBusinessData(form)) });
+      toast('Application sent. Your storefront goes public after admin approval.');
+      location.hash = '#/business/' + id + '/manage';
+    } catch (e2) { toast(e2.message, true); }
+  });
+}
+
+async function viewMyBusinesses() {
+  if (!requireAuth('#/business/mine')) return;
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">My businesses</h1>
+    <p class="page-sub">Your storefronts and their approval state.</p>
+    <a class="btn btn-primary" href="#/business/apply" style="margin-bottom:12px">${icon('plus')} New storefront</a>
+    <div id="mybiz-list">${skeletonCards(2)}</div>
+  </div></div>`;
+  try {
+    const data = await api('/api/businesses/mine');
+    const el = document.getElementById('mybiz-list');
+    el.innerHTML = data.businesses.length ? data.businesses.map(b => `
+      <div class="card" style="display:flex;gap:12px;align-items:center">
+        ${b.logo ? `<img class="biz-logo" src="${b.logo}" alt="">` : `<div class="biz-logo biz-logo-fallback">${icon('tag')}</div>`}
+        <span style="flex:1;min-width:0"><b>${esc(b.name)}</b> ${bizBadge(b)}
+          <span class="small muted" style="display:block">Status: ${esc(b.status)} · ${esc(b.city)}</span></span>
+        <a class="btn btn-sm btn-outline" href="#/business/${b.id}/manage">Manage</a>
+        ${b.status === 'active' ? `<a class="btn btn-sm btn-outline" href="#/business/${esc(b.slug)}">View</a>` : ''}
+      </div>`).join('')
+      : emptyHtml('tag', 'No storefronts yet', 'Open a storefront to give your business its own page.', `<a class="btn btn-sm btn-primary" href="#/business/apply">Open a storefront</a>`);
+  } catch (e) {
+    document.getElementById('mybiz-list').innerHTML = errorHtml(e.message);
+  }
+}
+
+async function viewBusinessManage(id) {
+  if (!requireAuth('#/business/' + id + '/manage')) return;
+  app.innerHTML = `<div class="view"><div class="page">${skeletonCards(2)}</div></div>`;
+  try {
+    const data = await api('/api/businesses/mine');
+    const b = data.businesses.find(x => x.id === Number(id));
+    if (!b) {
+      app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Business not found', 'This storefront is not yours, or it does not exist.', `<a class="btn btn-sm btn-primary" href="#/business/mine">My businesses</a>`)}</div></div>`;
+      return;
+    }
+    const docs = await api('/api/businesses/' + b.id + '/documents').catch(() => ({ documents: [] }));
+    const verLabel = { unverified: 'Not verified yet', pending: 'Documents with the admin, under review', verified: 'Verified', rejected: 'Verification was not approved' }[b.verification_status];
+    app.innerHTML = `
+    <div class="view"><div class="page">
+      <h1 class="page-title">Manage storefront</h1>
+      <p class="page-sub">${esc(b.name)} · Status: <b>${esc(b.status)}</b>${b.status === 'pending' ? ' (waiting for admin approval)' : ''}</p>
+      <div class="card">
+        <h3 style="margin-top:0">Verified badge</h3>
+        <p class="small"><b>${esc(verLabel)}</b></p>
+        ${b.verification_note ? `<p class="small muted">Admin note: ${esc(b.verification_note)}</p>` : ''}
+        <p class="small muted">Upload a clear photo or scan of your PACRA certificate, TPIN certificate, or trading licence. Verified shops show a green badge everywhere.</p>
+        <p class="small">Documents on file: ${docs.documents.length ? docs.documents.map(d => esc(d.kind.toUpperCase())).join(', ') : 'none yet'}</p>
+        <form id="doc-form" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <select id="doc-kind" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
+            <option value="pacra">PACRA certificate</option>
+            <option value="tpin">TPIN certificate</option>
+            <option value="licence">Trading licence</option>
+            <option value="other">Other document</option>
+          </select>
+          <input id="doc-file" type="file" accept="image/*" required>
+          <button class="btn btn-primary" type="submit">Upload document</button>
+        </form>
+      </div>
+      ${businessFormHtml(b, true)}
+    </div></div>`;
+    const form = document.getElementById('business-form');
+    wireBusinessForm(form, b);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/businesses/' + b.id, { method: 'PATCH', body: JSON.stringify(collectBusinessData(form)) });
+        toast('Storefront updated.');
+        viewBusinessManage(id);
+      } catch (e2) { toast(e2.message, true); }
+    });
+    document.getElementById('doc-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = (document.getElementById('doc-file').files || [])[0];
+      if (!f) return;
+      try {
+        const image = await fileToDoc(f);
+        await api('/api/businesses/' + b.id + '/documents', { method: 'POST', body: JSON.stringify({ kind: document.getElementById('doc-kind').value, image }) });
+        toast('Document uploaded. Verification is now under review.');
+        viewBusinessManage(id);
+      } catch (e2) { toast(e2.message, true); }
+    });
+  } catch (e) {
+    app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
+  }
+}
+
+async function viewAdminBusinesses() {
+  if (!requireAuth('#/admin/businesses')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork team only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Businesses</h1>
+    <p class="page-sub">Approve storefronts and verify registration documents.</p>
+    <div class="chips" id="ab-filter">
+      <button class="chip active" data-abstatus="pending">Pending approval</button>
+      <button class="chip" data-abstatus="active">Live</button>
+      <button class="chip" data-abstatus="">All</button>
+    </div>
+    <div id="ab-list" style="margin-top:12px">${skeletonCards(2)}</div>
+  </div></div>`;
+  const list = document.getElementById('ab-list');
+  async function load(status) {
+    list.innerHTML = skeletonCards(2);
+    try {
+      const data = await api('/api/admin/businesses' + (status ? '?status=' + status : ''));
+      list.innerHTML = data.businesses.length ? data.businesses.map(b => `
+        <div class="card" style="margin-bottom:10px">
+          <b>${esc(b.name)}</b> ${bizBadge(b)}
+          <span class="small muted" style="display:block">by ${esc(b.owner_name)} · ${esc(b.category)} · ${esc(b.city)} · status ${esc(b.status)} · verification ${esc(b.verification_status)} · ${b.doc_count} documents</span>
+          <div class="btn-row" style="margin-top:8px">
+            ${b.status === 'pending' ? `<button class="btn btn-sm btn-primary" data-ab-approve="${b.id}">Approve</button><button class="btn btn-sm btn-outline" data-ab-status="rejected" data-ab-id="${b.id}">Reject</button>` : ''}
+            ${b.status === 'active' ? `<button class="btn btn-sm btn-outline" data-ab-status="suspended" data-ab-id="${b.id}">Suspend</button>` : ''}
+            ${b.status === 'suspended' ? `<button class="btn btn-sm btn-primary" data-ab-status="active" data-ab-id="${b.id}">Reinstate</button>` : ''}
+            ${b.doc_count ? `<button class="btn btn-sm btn-outline" data-ab-docs="${b.id}">View documents</button>` : ''}
+            ${b.verification_status === 'pending' ? `<button class="btn btn-sm btn-primary" data-ab-verify="${b.id}">Verify</button><button class="btn btn-sm btn-outline" data-ab-unverify="${b.id}">Refuse verification</button>` : ''}
+          </div>
+          <div id="ab-docs-${b.id}"></div>
+        </div>`).join('')
+        : emptyHtml('tag', 'Nothing here', 'No businesses in this state right now.');
+      list.querySelectorAll('[data-ab-approve]').forEach(btn => btn.addEventListener('click', async () => {
+        try { await api('/api/admin/businesses/' + btn.dataset.abApprove, { method: 'PATCH', body: JSON.stringify({ status: 'active' }) }); toast('Storefront approved and live.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+      list.querySelectorAll('[data-ab-status]').forEach(btn => btn.addEventListener('click', async () => {
+        try { await api('/api/admin/businesses/' + btn.dataset.abId, { method: 'PATCH', body: JSON.stringify({ status: btn.dataset.abStatus }) }); toast('Updated.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+      list.querySelectorAll('[data-ab-verify]').forEach(btn => btn.addEventListener('click', async () => {
+        try { await api('/api/admin/businesses/' + btn.dataset.abVerify + '/verification', { method: 'PATCH', body: JSON.stringify({ decision: 'verified' }) }); toast('Business verified.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+      list.querySelectorAll('[data-ab-unverify]').forEach(btn => btn.addEventListener('click', async () => {
+        const note = prompt('Why is verification refused? The owner sees this note.') || '';
+        try { await api('/api/admin/businesses/' + btn.dataset.abUnverify + '/verification', { method: 'PATCH', body: JSON.stringify({ decision: 'rejected', note }) }); toast('Verification refused.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+      list.querySelectorAll('[data-ab-docs]').forEach(btn => btn.addEventListener('click', async () => {
+        const slot = document.getElementById('ab-docs-' + btn.dataset.abDocs);
+        try {
+          const d = await api('/api/admin/businesses/' + btn.dataset.abDocs + '/documents');
+          slot.innerHTML = `<div class="job-gallery" style="margin-top:8px">${d.documents.map(doc => `<img src="${doc.image}" alt="${esc(doc.kind)} document">`).join('')}</div>`;
+        } catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { list.innerHTML = errorHtml(e.message); }
+  }
+  let current = 'pending';
+  document.getElementById('ab-filter').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-abstatus]');
+    if (!chip) return;
+    current = chip.dataset.abstatus;
+    document.querySelectorAll('#ab-filter .chip').forEach(c => c.classList.toggle('active', c === chip));
+    load(current);
+  });
+  load(current);
 }
 
 /** Job detail — dark header, client card, apply flow. */
@@ -872,6 +1822,7 @@ async function viewJobDetail(id) {
           <button class="btn btn-sm btn-primary" id="btn-complete">Mark completed</button>
           <button class="btn btn-sm btn-danger" id="btn-cancel">Cancel job</button>
         </div>` : `<p class="small muted" style="margin:8px 0 0">This job is ${job.status}.</p>`}
+        ${!job.is_draft ? `<div class="btn-row" style="margin-top:8px"><button class="btn btn-sm btn-outline" id="btn-repost">↻ Repost this job</button></div>` : ''}
       </div>
       <div class="card">
         <h3 style="margin-top:0">Applicants (${applicants.length})</h3>
@@ -887,7 +1838,8 @@ async function viewJobDetail(id) {
     const tracking = job.delivery_status || 'none';
     actionHtml = `<div class="card"><h3 style="margin-top:0">Your application</h3>
       <p>Status: <span class="badge badge-app-${s}">${esc(s)}</span></p>
-      ${s === 'pending' ? `<button class="link-btn" id="btn-withdraw">Withdraw application</button>` : ''}
+      ${(s === 'pending' || s === 'shortlisted') ? `<button class="link-btn" id="btn-withdraw">Withdraw application</button>` : ''}
+      ${s === 'shortlisted' ? `<p class="small muted" style="margin-bottom:0">⭐ You have been shortlisted for this job. The poster is seriously considering you, watch your <a href="#/messages" style="font-weight:700">messages</a>.</p>` : ''}
       ${s === 'accepted' ? `<p class="small muted" style="margin-bottom:0">You've been hired! The poster will message you in the app to arrange the details. Check your <a href="#/messages" style="font-weight:700">messages</a>.</p>` : ''}
     </div>`;
     if (s === 'accepted' && isDelivery) {
@@ -1002,6 +1954,16 @@ async function viewJobDetail(id) {
       </div>
     </div>
     <div class="page">
+      ${job.photos && job.photos.length ? `<div class="job-gallery">${job.photos.map(p => `<img src="${esc(p.url)}" alt="Photo of the job" loading="lazy">`).join('')}</div>` : ''}
+      ${job.is_draft && isPoster ? `
+      <div class="card" style="border:2px solid #b45309">
+        <h3 style="margin-top:0">📝 This job is a draft</h3>
+        <p class="small muted">Only you can see it. Finish any missing details, then publish it so workers can apply.</p>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btn-publish-draft">Publish this job</button>
+          <a class="btn btn-outline" href="#/job/${job.id}/edit">Edit draft</a>
+        </div>
+      </div>` : ''}
       <div class="card">
         <h3 style="margin-top:0">About this job</h3>
         <p style="margin:0">${esc(job.description).replace(/\n/g, '<br>')}</p>
@@ -1009,8 +1971,18 @@ async function viewJobDetail(id) {
           <span class="tag">${esc(job.category)}</span>
           <span class="tag">${esc(PAY_LABEL[job.pay_type] || 'Fixed price')}</span>
           <span class="tag">${job.workers_needed} ${job.workers_needed === 1 ? 'worker' : 'workers'} needed</span>
+          ${job.expected_duration ? `<span class="tag">⏱ ${esc(job.expected_duration)}</span>` : ''}
+          ${job.start_time ? `<span class="tag">Starts ${esc(job.start_time)}</span>` : ''}
+          ${job.transport_provided ? `<span class="tag">🚌 Transport provided</span>` : ''}
+          ${job.materials_provided ? `<span class="tag">🧰 Materials and tools provided</span>` : ''}
+          ${job.is_urgent ? `<span class="tag" style="background:#fef2f2;color:#b91c1c">🔥 Urgent</span>` : ''}
         </div>
       </div>
+      ${job.instructions ? `
+      <div class="card">
+        <h3 style="margin-top:0">Instructions for workers</h3>
+        <p style="margin:0">${esc(job.instructions).replace(/\n/g, '<br>')}</p>
+      </div>` : ''}
       <a class="card card-row" href="#/user/${job.poster.id}" style="text-decoration:none;color:inherit">
         ${avatarHtml(job.poster, 'md')}
         <div style="flex:1"><div class="small muted">About the client</div>
@@ -1022,10 +1994,21 @@ async function viewJobDetail(id) {
       ${actionHtml}
       ${momoNoteHtml()}
       ${reviewHtml}
+      ${currentUser && !isPoster ? `<div style="text-align:center;margin-top:6px"><button class="btn btn-sm btn-outline" id="report-job-btn">🚩 Report this job</button></div>` : ''}
     </div>
   </div>`;
 
   document.getElementById('d-back').addEventListener('click', () => { location.hash = '#/jobs'; });
+  const reportJobBtn = document.getElementById('report-job-btn');
+  if (reportJobBtn) reportJobBtn.addEventListener('click', async () => {
+    const reason = prompt('Why are you reporting this job? The PieceWork team will review.');
+    if (!reason || !reason.trim()) return;
+    reportJobBtn.disabled = true;
+    try {
+      await api('/api/reports', { method: 'POST', body: JSON.stringify({ target_type: 'job', target_id: job.id, reason: reason.trim() }) });
+      toast('Thank you. The team will review this report.');
+    } catch (e) { toast(e.message, true); reportJobBtn.disabled = false; }
+  });
   const toApply = document.getElementById('btn-to-apply');
   if (toApply) toApply.addEventListener('click', () => {
     document.getElementById('apply-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1104,8 +2087,64 @@ async function viewJobDetail(id) {
       viewJobDetail(id);
     } catch (e) { toast(e.message, true); }
   });
+  const publishBtn = document.getElementById('btn-publish-draft');
+  if (publishBtn) publishBtn.addEventListener('click', async () => {
+    publishBtn.disabled = true;
+    try {
+      await api(`/api/jobs/${id}/publish`, { method: 'POST', body: JSON.stringify({}) });
+      toast('Job published! Workers can now apply.');
+      viewJobDetail(id);
+    } catch (e) {
+      if (e.fields && e.fields.terms_accepted) {
+        if (confirm('Publishing means you accept the Terms and Conditions. Continue?')) {
+          try {
+            await api(`/api/jobs/${id}/publish`, { method: 'POST', body: JSON.stringify({ terms_accepted: '1' }) });
+            if (currentUser) currentUser.terms_accepted_at = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            toast('Job published! Workers can now apply.');
+            viewJobDetail(id);
+            return;
+          } catch (e2) { toast(e2.message, true); }
+        }
+      } else if (e.fields) {
+        toast('Some details are missing. Opening the editor so you can finish them.', true);
+        location.hash = '#/job/' + id + '/edit';
+        return;
+      } else {
+        toast(e.message, true);
+      }
+      publishBtn.disabled = false;
+    }
+  });
+  const repostBtn = document.getElementById('btn-repost');
+  if (repostBtn) repostBtn.addEventListener('click', async () => {
+    const suggested = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const date = prompt('Repost with a new date needed (YYYY-MM-DD):', suggested);
+    if (!date) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) { toast('Use the date format YYYY-MM-DD.', true); return; }
+    repostBtn.disabled = true;
+    try {
+      const r = await api(`/api/jobs/${id}/repost`, { method: 'POST', body: JSON.stringify({ date_needed: date.trim(), terms_accepted: '1' }) });
+      toast('Job reposted as a fresh listing.');
+      location.hash = '#/job/' + r.id;
+    } catch (e) { toast(e.message, true); repostBtn.disabled = false; }
+  });
   document.querySelectorAll('[data-accept]').forEach(btn => btn.addEventListener('click', () => decideApplication(btn.dataset.accept, 'accepted')));
   document.querySelectorAll('[data-decline]').forEach(btn => btn.addEventListener('click', () => decideApplication(btn.dataset.decline, 'declined')));
+  document.querySelectorAll('[data-shortlist]').forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      await api(`/api/applications/${btn.dataset.shortlist}`, { method: 'PATCH', body: JSON.stringify({ status: 'shortlisted' }) });
+      toast('Shortlisted. This worker stays at the top of your list.');
+      viewJobDetail(id);
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  }));
+  document.querySelectorAll('[data-unshortlist]').forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      await api(`/api/applications/${btn.dataset.unshortlist}`, { method: 'PATCH', body: JSON.stringify({ status: 'pending' }) });
+      viewJobDetail(id);
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  }));
   document.querySelectorAll('[data-msg]').forEach(btn => btn.addEventListener('click', () => openChat(id, btn.dataset.msg, btn)));
   document.querySelectorAll('[data-nrc]').forEach(btn => btn.addEventListener('click', () => viewNrc(btn.dataset.nrc, btn)));
   document.querySelectorAll('[data-arrival-ok]').forEach(btn => btn.addEventListener('click', () => decideArrival(btn.dataset.arrivalOk, true, btn)));
@@ -1138,11 +2177,14 @@ async function viewJobDetail(id) {
         <span class="badge badge-app-${a.status}">${esc(a.status)}</span>
       </div>
       ${a.message ? `<div class="applicant-msg">${esc(a.message)}</div>` : ''}
-      ${a.status === 'pending' ? `<div class="btn-row">
+      ${(a.status === 'pending' || a.status === 'shortlisted') ? `<div class="btn-row">
         <button class="btn btn-sm btn-primary" data-accept="${a.id}">${icon('check')}Accept</button>
+        ${a.status === 'pending'
+          ? `<button class="btn btn-sm btn-outline" data-shortlist="${a.id}">⭐ Shortlist</button>`
+          : `<button class="btn btn-sm btn-outline" data-unshortlist="${a.id}">↩ Move back to pending</button>`}
         <button class="btn btn-sm btn-danger" data-decline="${a.id}">Decline</button>
       </div>` : ''}
-      ${(a.status === 'pending' || a.status === 'accepted') ? `
+      ${(a.status === 'pending' || a.status === 'shortlisted' || a.status === 'accepted') ? `
       <div class="btn-row" style="margin-top:8px">
         <button class="btn btn-sm btn-outline" data-msg="${a.worker_id}">${icon('message')}Message</button>
         ${a.status === 'accepted' ? `<button class="btn btn-sm btn-outline" data-nrc="${a.id}">${icon('shield')}View NRC</button>` : ''}
@@ -1321,6 +2363,45 @@ async function viewTrackDelivery(id) {
 }
 
 /** Post a job. */
+const JOB_DURATIONS = ['A few hours', '1 day', '2-3 days', 'About a week', '2-4 weeks', '1 month or more'];
+
+/**
+ * 2.0 M1: photo picker wiring for the job form. Chosen files are sized
+ * with the existing image pipeline and kept on form._photos (data URIs).
+ * form._photos stays null when the picker was never touched, so edits
+ * leave existing photos alone; an empty array means "remove all".
+ */
+function wireJobPhotos(form, existing) {
+  form._photos = null;
+  const input = document.getElementById('jf-photos');
+  const box = document.getElementById('jf-photo-previews');
+  if (!input || !box) return;
+  const renderPreviews = (urls, note) => {
+    box.innerHTML = (urls.length
+      ? urls.map(u => `<img src="${u}" alt="Job photo" style="width:64px;height:64px;object-fit:cover;border-radius:10px">`).join('')
+      : '') + (note ? `<div class="hint" style="align-self:center">${note}</div>` : '');
+  };
+  if (existing && existing.length) {
+    renderPreviews(existing.map(p => p.url), 'Current photos. Picking new ones replaces all of them.');
+    const rm = document.getElementById('jf-photos-remove');
+    if (rm) rm.addEventListener('click', () => { form._photos = []; renderPreviews([], 'Photos will be removed when you save.'); rm.remove(); });
+  }
+  input.addEventListener('change', async () => {
+    const files = Array.from(input.files || []).slice(0, 3);
+    if (!files.length) return;
+    box.innerHTML = '<div class="hint">Preparing photos…</div>';
+    try {
+      const urls = [];
+      for (const f of files) urls.push(await fileToDoc(f));
+      form._photos = urls;
+      renderPreviews(urls, urls.length + ' photo' + (urls.length === 1 ? '' : 's') + ' ready.');
+    } catch (e) {
+      box.innerHTML = '<div class="hint">Could not read those photos. Try different ones.</div>';
+    }
+    input.value = '';
+  });
+}
+
 function jobFormHtml(prefill = {}, mode = 'post') {
   const today = new Date().toISOString().slice(0, 10);
   const isEdit = mode === 'edit';
@@ -1379,6 +2460,44 @@ function jobFormHtml(prefill = {}, mode = 'post') {
       </div>
     </div>
     <div class="field">
+      <label for="jf-photos">Photos <span class="hint-inline">(optional, up to 3)</span></label>
+      <input type="file" id="jf-photos" accept="image/*" multiple>
+      <div id="jf-photo-previews" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
+      ${isEdit && prefill.photos && prefill.photos.length ? '<button type="button" class="link-btn" id="jf-photos-remove">Remove all photos</button>' : ''}
+      <div class="hint">Jobs with photos get more and better applications.</div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1">
+        <label for="jf-duration">Expected duration</label>
+        <select name="expected_duration" id="jf-duration">
+          <option value="">Not sure yet</option>
+          ${JOB_DURATIONS.map(d => `<option ${prefill.expected_duration === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field" style="flex:1">
+        <label for="jf-start">Start time</label>
+        <input name="start_time" id="jf-start" maxlength="20" value="${esc(prefill.start_time || '')}" placeholder="e.g. 07:30">
+      </div>
+    </div>
+    <div class="field">
+      <label class="check-row" for="jf-transport">
+        <input type="checkbox" name="transport_provided" id="jf-transport" value="1" ${prefill.transport_provided ? 'checked' : ''}>
+        <span><b>Transport provided</b><br><span class="hint">You will transport workers to or from the job, or pay their transport.</span></span>
+      </label>
+      <label class="check-row" for="jf-materials">
+        <input type="checkbox" name="materials_provided" id="jf-materials" value="1" ${prefill.materials_provided ? 'checked' : ''}>
+        <span><b>Materials and tools provided</b><br><span class="hint">Workers do not need to bring their own materials or equipment.</span></span>
+      </label>
+      <label class="check-row" for="jf-urgent">
+        <input type="checkbox" name="is_urgent" id="jf-urgent" value="1" ${prefill.is_urgent ? 'checked' : ''}>
+        <span><b>Urgent</b><br><span class="hint">This job needs workers fast. It gets an Urgent badge.</span></span>
+      </label>
+    </div>
+    <div class="field">
+      <label for="jf-instructions">Instructions for workers <span class="hint-inline">(optional)</span></label>
+      <textarea name="instructions" id="jf-instructions" maxlength="1000" placeholder="e.g. Report to the security gate at 07:00 and ask for Mr Banda. Bring your own gloves.">${esc(prefill.instructions || '')}</textarea>
+    </div>
+    <div class="field">
       <label>Pinpoint location <span class="hint-inline">(optional)</span></label>
       <input type="hidden" name="lat" id="jf-lat" value="${esc(prefill.lat ?? '')}">
       <input type="hidden" name="lng" id="jf-lng" value="${esc(prefill.lng ?? '')}">
@@ -1402,6 +2521,7 @@ function jobFormHtml(prefill = {}, mode = 'post') {
       </label>
     </div>`)}
     <button class="btn btn-primary full" type="submit">${icon(isEdit ? 'check' : 'send')}${isEdit ? 'Save changes' : 'Post job'}</button>
+    ${isEdit ? '' : '<button class="btn btn-outline full" type="button" id="btn-save-draft" style="margin-top:8px">Save as draft instead</button>'}
   </form>`;
 }
 
@@ -1436,11 +2556,36 @@ async function viewPost() {
     btn.disabled = false;
     btn.innerHTML = `${icon('pin')}Pin my current location`;
   });
+  wireJobPhotos(form, []);
+  const collectJobData = () => {
+    const data = Object.fromEntries(new FormData(form).entries());
+    for (const k of ['transport_provided', 'materials_provided', 'is_urgent']) {
+      data[k] = form[k] && form[k].checked ? '1' : '0';
+    }
+    if (form._photos) data.photos = form._photos;
+    return data;
+  };
+  const draftBtn = document.getElementById('btn-save-draft');
+  if (draftBtn) draftBtn.addEventListener('click', async () => {
+    draftBtn.disabled = true;
+    try {
+      const data = collectJobData();
+      data.draft = true;
+      delete data.terms_accepted;
+      await api('/api/jobs', { method: 'POST', body: JSON.stringify(data) });
+      toast('Draft saved. Find it under My Gigs when you are ready.');
+      location.hash = '#/dashboard';
+    } catch (err2) {
+      showFieldErrors(form, err2.fields);
+      toast(err2.message, true);
+      draftBtn.disabled = false;
+    }
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true;
-    const data = Object.fromEntries(new FormData(form).entries());
+    const data = collectJobData();
     try {
       const { id } = await api('/api/jobs', { method: 'POST', body: JSON.stringify(data) });
       if (currentUser) currentUser.terms_accepted_at = new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -1500,6 +2645,7 @@ async function viewJobEdit(id) {
     btn.disabled = false;
     btn.innerHTML = `${icon('pin')}Pin my current location`;
   });
+  wireJobPhotos(form, job.photos || []);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = form.querySelector('button[type=submit]');
@@ -1507,6 +2653,10 @@ async function viewJobEdit(id) {
     const data = Object.fromEntries(new FormData(form).entries());
     delete data.terms_accepted;
     data.requires_food_license = form.requires_food_license && form.requires_food_license.checked ? '1' : '0';
+    for (const k of ['transport_provided', 'materials_provided', 'is_urgent']) {
+      data[k] = form[k] && form[k].checked ? '1' : '0';
+    }
+    if (form._photos) data.photos = form._photos;
     try {
       await api('/api/jobs/' + id, { method: 'PATCH', body: JSON.stringify(data) });
       toast('Job updated!');
@@ -1526,6 +2676,11 @@ async function viewDashboard() {
   <div class="view"><div class="page">
     <h1 class="page-title">My Gigs</h1>
     <p class="page-sub">Jobs you posted and jobs you applied for.</p>
+    <a class="card" href="#/selling" style="display:flex;align-items:center;gap:12px;color:var(--ink);margin-bottom:14px">
+      <div class="safety-ico" style="width:42px;height:42px;border-radius:13px;background:var(--green-tint);color:var(--green);display:flex;align-items:center;justify-content:center">${icon('tag')}</div>
+      <span style="flex:1"><b>Marketplace selling</b><span class="small muted" style="display:block" id="dash-sell-line">Your listings and offers</span></span>
+      <span class="chev">${icon('chevR')}</span>
+    </a>
     <div class="seg">
       <button id="seg-postings" class="active">My Postings</button>
       <button id="seg-gigs">Jobs I Applied To</button>
@@ -1535,6 +2690,10 @@ async function viewDashboard() {
   const body = document.getElementById('dash-body');
   const segP = document.getElementById('seg-postings');
   const segG = document.getElementById('seg-gigs');
+  api('/api/selling/summary').then((s) => {
+    const el = document.getElementById('dash-sell-line');
+    if (el) el.textContent = `${s.active} active listings · ${s.offers_pending} offers waiting · ${s.sold} sold`;
+  }).catch(() => {});
 
   // NRC banner: hired workers must upload their NRC for the poster to verify.
   try {
@@ -1613,7 +2772,13 @@ async function viewDashboard() {
       );
       const mine = lists.flatMap(l => l.jobs)
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
-      body.innerHTML = mine.length ? dedupeJobs(mine).map(jobCard).join('')
+      const drafts = mine.filter(j => j.is_draft);
+      const live = mine.filter(j => !j.is_draft);
+      const draftsHtml = drafts.length ? `
+        <div class="section-title" style="margin-top:0"><span>📝 Drafts (${drafts.length})</span></div>
+        <p class="small muted" style="margin-top:-4px">Drafts are only visible to you. Open one to finish it and publish.</p>
+        ${drafts.map(jobCard).join('')}` : '';
+      body.innerHTML = mine.length ? draftsHtml + (live.length ? dedupeJobs(live).map(jobCard).join('') : '')
         : emptyHtml('clipboard', 'No postings yet', 'Hire your first workers and find helping hands fast.', `<a class="btn btn-sm btn-primary" href="#/post">Hire workers</a>`);
     } catch (e) { body.innerHTML = emptyHtml('info', 'Could not load', e.message); }
   }
@@ -2090,6 +3255,15 @@ async function viewUser(id) {
               ? `<button class="btn btn-sm btn-primary" id="vouch-btn">${icon('users')}Vouch for ${firstName}</button>`
               : `<p class="small muted" style="margin-bottom:0">Get your own selfie verified to vouch for others.</p>`}
         </div>` : ''}
+        ${!isSelf && currentUser ? `
+        <div class="card">
+          <h3 style="margin-top:0">Safety</h3>
+          <p class="small muted" style="margin-top:0">Something wrong with this person? Report them to the PieceWork team, or block them so you cannot message or work with each other.</p>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-outline" id="report-user-btn">🚩 Report ${firstName}</button>
+            <button class="btn btn-sm btn-outline" id="block-user-btn">🚫 Block ${firstName}</button>
+          </div>
+        </div>` : ''}
         ${user.vouch_count ? `
         <div class="card">
           <h3 style="margin-top:0">Vouched by ${user.vouch_count}</h3>
@@ -2125,6 +3299,37 @@ async function viewUser(id) {
         viewUser(id);
       } catch (e) { toast(e.message, true); unvouchBtn.disabled = false; }
     });
+    const reportUserBtn = document.getElementById('report-user-btn');
+    if (reportUserBtn) reportUserBtn.addEventListener('click', async () => {
+      const reason = prompt('Why are you reporting ' + user.name + '? The PieceWork team will review.');
+      if (!reason || !reason.trim()) return;
+      reportUserBtn.disabled = true;
+      try {
+        await api('/api/reports', { method: 'POST', body: JSON.stringify({ target_type: 'user', target_id: user.id, reason: reason.trim() }) });
+        toast('Thank you. The team will review this report.');
+      } catch (e) { toast(e.message, true); reportUserBtn.disabled = false; }
+    });
+    const blockUserBtn = document.getElementById('block-user-btn');
+    if (blockUserBtn) {
+      let blockedNow = false;
+      api('/api/blocks').then((d) => {
+        blockedNow = (d.blocked || []).some((b) => b.id === user.id);
+        blockUserBtn.textContent = blockedNow ? '✅ Unblock ' + String(user.name || '').split(' ')[0] : '🚫 Block ' + String(user.name || '').split(' ')[0];
+      }).catch(() => {});
+      blockUserBtn.addEventListener('click', async () => {
+        blockUserBtn.disabled = true;
+        try {
+          if (blockedNow) {
+            await api('/api/blocks/' + user.id, { method: 'DELETE' });
+            toast('Unblocked. You can message and work with each other again.');
+          } else {
+            await api('/api/blocks/' + user.id, { method: 'POST', body: JSON.stringify({}) });
+            toast('Blocked. You will not be able to message or work with each other.');
+          }
+          viewUser(id);
+        } catch (e) { toast(e.message, true); blockUserBtn.disabled = false; }
+      });
+    }
   } catch (e) {
     app.innerHTML = `<div class="page">${emptyHtml('search', 'Profile not found', e.message)}</div>`;
   }
@@ -2180,7 +3385,7 @@ async function viewSaved() {
       ? jobs.map(jobCard).join('')
       : emptyHtml('bookmark', 'Nothing here', 'Those jobs are no longer available.', `<a class="btn btn-sm btn-primary" href="#/jobs">Browse jobs</a>`);
   } catch (e) {
-    box.innerHTML = emptyHtml('info', 'Could not load saved jobs', e.message);
+    box.innerHTML = errorHtml(e.message);
   }
 }
 
@@ -2208,14 +3413,14 @@ async function viewMessages() {
         ${avatarHtml({ name: c.other_name, avatar: c.other_avatar }, 'md')}
         <div class="conv-body">
           <div class="conv-top"><b>${esc(c.other_name)}</b><span class="small muted">${esc(relTime(c.last_at))}</span></div>
-          <div class="small muted">${esc(c.job_title)}</div>
+          <div class="small muted">${c.kind === 'product' ? '🛒 ' : ''}${esc(c.job_title)}</div>
           ${presenceHtml(c) ? `<div class="small" style="margin-top:2px">${presenceHtml(c)}</div>` : ''}
           <div class="conv-preview">${c.last_body ? esc(c.last_body) : '<span class="small muted">Say hello…</span>'}</div>
         </div>
         ${c.unread ? `<span class="conv-unread">${c.unread}</span>` : ''}
       </a>`).join('');
   } catch (e) {
-    list.innerHTML = emptyHtml('info', 'Could not load messages', e.message);
+    list.innerHTML = errorHtml(e.message);
   }
 }
 
@@ -2268,7 +3473,7 @@ async function viewChat(id) {
         <a href="#/user/${conversation.other_id}" style="display:flex;align-items:center;gap:10px;min-width:0;flex:1">
           ${avatarHtml({ name: conversation.other_name, avatar: conversation.other_avatar }, 'sm')}
           <span style="min-width:0"><b style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(conversation.other_name)}</b>
-          <span class="small muted" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(conversation.job_title)}</span>
+          <span class="small muted" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${conversation.kind === 'product' ? '🛒 ' : ''}${esc(conversation.job_title)}</span>
           ${presenceHtml(conversation) ? `<span class="small" style="display:block">${presenceHtml(conversation)}</span>` : ''}</span>
         </a>
         ${conversation.other_phone ? `<a class="icon-btn" href="tel:${esc(String(conversation.other_phone).replace(/\D/g, ''))}" aria-label="Call ${esc(conversation.other_name)}">${icon('phone')}</a>` : ''}`;
@@ -2872,12 +4077,16 @@ async function viewAdmin() {
     <p class="page-sub">PieceWork Zambia at a glance.</p>
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/businesses">🏪 Businesses</a>
       <a class="btn btn-sm btn-outline" href="#/admin/activity">👀 User activity</a>
       <a class="btn btn-sm btn-outline" href="#/admin/testers">🧪 My testers</a>
       <a class="btn btn-sm btn-outline" href="#/admin/jobs">📋 All jobs</a>
       <a class="btn btn-sm btn-outline" href="#/admin/verifications" id="btn-selfie-review">🪪 Selfie review</a>
       <a class="btn btn-sm btn-outline" href="#/admin/food-licenses" id="btn-food-review">🍽️ Food licenses</a>
       <a class="btn btn-sm btn-outline" href="#/admin/resets">🔑 Password resets</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/reports">🚩 Reports</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/categories">🗂️ Categories</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/audit">📜 Audit log</a>
     </div>
     <div id="admin-body">${loadingHtml('Loading stats…')}</div>
     <div id="nrc-views-body" style="margin-top:14px"></div>
@@ -3373,6 +4582,8 @@ async function viewUserActivity() {
               ${u.applications} application${u.applications === 1 ? '' : 's'} • ${u.jobs_posted} job${u.jobs_posted === 1 ? '' : 's'} posted • ${u.messages_sent} message${u.messages_sent === 1 ? '' : 's'} sent
             </div>
             <button class="btn btn-sm btn-outline tester-toggle" data-id="${u.id}" data-flag="${u.is_tester ? '1' : '0'}" style="margin-top:6px">${u.is_tester ? '⭐ Tester (tap to remove)' : '☆ Mark as tester'}</button>
+            ${u.id !== currentUser.id ? `<button class="btn btn-sm ${u.suspended ? 'btn-primary' : 'btn-outline'} suspend-toggle" data-id="${u.id}" data-suspended="${u.suspended ? '1' : '0'}" data-name="${esc(u.name)}" style="margin-top:6px;margin-left:6px">${u.suspended ? '✅ Reinstate account' : '🚫 Suspend account'}</button>` : ''}
+            ${u.suspended ? '<div class="small" style="color:#b3261e;margin-top:4px">This account is suspended.</div>' : ''}
           </div>`;
         }).join('') : '<p class="small muted">No users yet.</p>'}
       </div>`;
@@ -3388,9 +4599,179 @@ async function viewUserActivity() {
         } catch (e2) { btn.disabled = false; alert(e2.message); }
       });
     });
+    body.querySelectorAll('.suspend-toggle').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const suspending = btn.dataset.suspended !== '1';
+        let payload = { suspended: true };
+        if (suspending) {
+          if (!confirm('Suspend ' + btn.dataset.name + '? They will not be able to log in or use the app until reinstated.')) return;
+          const reason = prompt('Reason for suspension (optional, kept in the audit log):') || '';
+          payload = { suspended: true, reason };
+        } else {
+          if (!confirm('Reinstate ' + btn.dataset.name + '? They will be able to log in again.')) return;
+          payload = { suspended: false };
+        }
+        btn.disabled = true;
+        try {
+          await api('/api/admin/users/' + btn.dataset.id + '/suspend', {
+            method: 'PATCH',
+            body: JSON.stringify(payload),
+          });
+          viewUserActivity();
+        } catch (e2) { btn.disabled = false; alert(e2.message); }
+      });
+    });
   } catch (e) {
     body.innerHTML = emptyHtml('info', 'Could not load activity', e.message);
   }
+}
+
+/** 2.0 M0: admin abuse report queue. */
+async function viewAdminReports() {
+  if (!requireAuth('#/admin/reports')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Reports</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btn btn-sm btn-primary" id="rep-filter-open">Open</button>
+      <button class="btn btn-sm btn-outline" id="rep-filter-all">All</button>
+    </div>
+    <div id="reports-body">${loadingHtml('Loading reports…')}</div>
+  </div></div>`;
+  const body = document.getElementById('reports-body');
+  const fmtTs = (s) => s ? new Date(String(s).replace(' ', 'T') + 'Z').toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  async function load(status) {
+    try {
+      const s = await api('/api/admin/reports' + (status ? '?status=' + status : ''));
+      const rows = s.reports || [];
+      body.innerHTML = rows.length ? `<div class="card">${rows.map((r) => `
+        <div style="padding:10px 0;border-bottom:1px solid var(--line)">
+          <div class="split"><b>${esc(r.target_type === 'job' ? 'Job: ' + (r.target_label || '#' + r.target_id) : 'User: ' + (r.target_label || '#' + r.target_id))}</b>
+          <span class="small muted">${esc(r.status)}</span></div>
+          <div class="small muted" style="margin-top:3px">Reported by ${esc(r.reporter_name)} • ${fmtTs(r.created_at)}</div>
+          <div style="margin-top:4px">${esc(r.reason)}</div>
+          ${r.admin_note ? `<div class="small muted" style="margin-top:4px">Admin note: ${esc(r.admin_note)}</div>` : ''}
+          ${r.status === 'open' ? `<div style="margin-top:6px;display:flex;gap:6px">
+            <button class="btn btn-sm btn-primary rep-resolve" data-id="${r.id}">Resolve</button>
+            <button class="btn btn-sm btn-outline rep-dismiss" data-id="${r.id}">Dismiss</button>
+          </div>` : ''}
+        </div>`).join('')}</div>`
+        : emptyHtml('check', 'No reports', status ? 'Nothing waiting in this queue.' : 'No reports have been filed yet.');
+      body.querySelectorAll('.rep-resolve, .rep-dismiss').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const note = prompt('Admin note (optional):') || '';
+          btn.disabled = true;
+          try {
+            await api('/api/admin/reports/' + btn.dataset.id, {
+              method: 'PATCH',
+              body: JSON.stringify({ status: btn.classList.contains('rep-resolve') ? 'resolved' : 'dismissed', note }),
+            });
+            load('open');
+          } catch (e2) { btn.disabled = false; alert(e2.message); }
+        });
+      });
+    } catch (e) {
+      body.innerHTML = emptyHtml('info', 'Could not load reports', e.message);
+    }
+  }
+  document.getElementById('rep-filter-open').addEventListener('click', () => load('open'));
+  document.getElementById('rep-filter-all').addEventListener('click', () => load(''));
+  load('open');
+}
+
+/** 2.0 M0: admin audit log viewer. */
+async function viewAdminAudit() {
+  if (!requireAuth('#/admin/audit')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Audit log</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <p class="page-sub">Every sensitive admin action, newest first. Verification decisions, suspensions, password resets, giveaway draws, category changes.</p>
+    <div id="audit-body">${loadingHtml('Loading audit log…')}</div>
+  </div></div>`;
+  const body = document.getElementById('audit-body');
+  const fmtTs = (s) => s ? new Date(String(s).replace(' ', 'T') + 'Z').toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  try {
+    const s = await api('/api/admin/audit');
+    const rows = s.entries || [];
+    body.innerHTML = rows.length ? `<div class="card">${rows.map((e) => `
+      <div style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <div class="split"><b>${esc(e.action)}</b><span class="small muted">${fmtTs(e.created_at)}</span></div>
+        <div class="small muted">By ${esc(e.admin_name || 'admin')}${e.target_type ? ' • ' + esc(e.target_type) + (e.target_id ? ' #' + e.target_id : '') : ''}${e.detail ? ' • ' + esc(e.detail) : ''}</div>
+      </div>`).join('')}</div>`
+      : emptyHtml('info', 'Nothing logged yet', 'Admin actions will appear here as they happen.');
+  } catch (e) {
+    body.innerHTML = emptyHtml('info', 'Could not load audit log', e.message);
+  }
+}
+
+/** 2.0 M0: admin-managed job categories. */
+async function viewAdminCategories() {
+  if (!requireAuth('#/admin/categories')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Categories</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <p class="page-sub">Job categories users can pick. Turning one off hides it from new posts; jobs already posted keep theirs.</p>
+    <div class="card">
+      <h3 style="margin-top:0">Add a category</h3>
+      <div style="display:flex;gap:8px">
+        <input id="cat-new-name" type="text" maxlength="60" placeholder="e.g. Solar Installation" style="flex:1">
+        <button class="btn btn-primary" id="cat-add">Add</button>
+      </div>
+    </div>
+    <div id="categories-body" style="margin-top:14px">${loadingHtml('Loading categories…')}</div>
+  </div></div>`;
+  const body = document.getElementById('categories-body');
+  async function load() {
+    try {
+      const s = await api('/api/admin/categories');
+      const rows = s.categories || [];
+      body.innerHTML = `<div class="card">${rows.map((c) => `
+        <div class="split" style="padding:8px 0;border-bottom:1px solid var(--line)">
+          <span>${esc(c.name)} ${c.active ? '' : '<span class="small muted">(off)</span>'}</span>
+          <button class="btn btn-sm btn-outline cat-toggle" data-id="${c.id}" data-active="${c.active ? '1' : '0'}">${c.active ? 'Turn off' : 'Turn on'}</button>
+        </div>`).join('')}</div>`;
+      body.querySelectorAll('.cat-toggle').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            await api('/api/admin/categories/' + btn.dataset.id, {
+              method: 'PATCH',
+              body: JSON.stringify({ active: btn.dataset.active !== '1' }),
+            });
+            load();
+          } catch (e2) { btn.disabled = false; alert(e2.message); }
+        });
+      });
+    } catch (e) {
+      body.innerHTML = emptyHtml('info', 'Could not load categories', e.message);
+    }
+  }
+  document.getElementById('cat-add').addEventListener('click', async () => {
+    const input = document.getElementById('cat-new-name');
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      await api('/api/admin/categories', { method: 'POST', body: JSON.stringify({ name }) });
+      input.value = '';
+      load();
+    } catch (e) { alert(e.message); }
+  });
+  load();
 }
 
 /** Admin tester tracker — Zac's flagged testers, day by day. */
@@ -3669,6 +5050,18 @@ async function viewGiveawayDraw(id) {
 const routes = [
   [/^#\/?$/, () => (currentUser ? viewHome() : viewLanding())],
   [/^#\/jobs$/, viewBrowse],
+  [/^#\/search/, viewSearch],
+  [/^#\/market$/, viewMarket],
+  [/^#\/sell$/, viewSell],
+  [/^#\/selling$/, viewSelling],
+  [/^#\/product\/(\d+)\/edit$/, (m) => viewProductEdit(m[1])],
+  [/^#\/product\/(\d+)$/, (m) => viewProduct(m[1])],
+  [/^#\/businesses$/, viewBusinesses],
+  [/^#\/business\/apply$/, viewBusinessApply],
+  [/^#\/business\/mine$/, viewMyBusinesses],
+  [/^#\/business\/(\d+)\/manage$/, (m) => viewBusinessManage(m[1])],
+  [/^#\/business\/([a-z0-9-]+)$/, (m) => viewBusiness(m[1])],
+  [/^#\/admin\/businesses$/, viewAdminBusinesses],
   [/^#\/job\/(\d+)\/edit$/, (m) => viewJobEdit(m[1])],
   [/^#\/job\/(\d+)\/track$/, (m) => viewTrackDelivery(m[1])],
   [/^#\/job\/(\d+)$/, (m) => viewJobDetail(m[1])],
@@ -3691,6 +5084,9 @@ const routes = [
   [/^#\/admin\/verifications$/, viewVerifications],
   [/^#\/admin\/food-licenses$/, viewFoodLicenses],
   [/^#\/admin\/resets$/, viewAdminResets],
+  [/^#\/admin\/reports$/, viewAdminReports],
+  [/^#\/admin\/audit$/, viewAdminAudit],
+  [/^#\/admin\/categories$/, viewAdminCategories],
   [/^#\/categories$/, viewCategories],
   [/^#\/messages$/, viewMessages],
   [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],
@@ -3736,6 +5132,18 @@ document.addEventListener('click', (e) => {
     toggleSave(saveBtn.dataset.save);
     return;
   }
+  if (e.target.closest('[data-retry-view]')) { router(); return; }
+  const psaveBtn = e.target.closest('[data-psave]');
+  if (psaveBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSaveProduct(psaveBtn.dataset.psave);
+    return;
+  }
+  const pcard = e.target.closest('.product-card[data-product]');
+  if (pcard && !e.target.closest('a') && !e.target.closest('button')) {
+    location.hash = '#/product/' + pcard.dataset.product;
+  }
   const card = e.target.closest('.job-card[data-job], [data-cat-link]');
   if (card && card.dataset.job && !e.target.closest('a') && !e.target.closest('button')) {
     location.hash = '#/job/' + card.dataset.job;
@@ -3779,6 +5187,23 @@ function shareText(link, prize) {
     if (ev.target.closest('a')) closeDrawer();
   });
   await refreshMe();
+  // 2.0 M0: categories are admin-managed on the server now. Load the live
+  // list over the built-in fallback so new categories appear without an
+  // app update. Failure keeps the built-ins, so this can never break boot.
+  try {
+    const d = await api('/api/categories');
+    if (d && Array.isArray(d.categories) && d.categories.length) {
+      CATEGORIES.length = 0;
+      d.categories.forEach((c) => CATEGORIES.push(c.name));
+    }
+  } catch (e) { /* built-in list stays */ }
+  try {
+    const d = await api('/api/categories?kind=market');
+    if (d && Array.isArray(d.categories) && d.categories.length) {
+      MARKET_CATEGORIES.length = 0;
+      d.categories.forEach((c) => MARKET_CATEGORIES.push(c.name));
+    }
+  } catch (e) { /* built-in list stays */ }
   if (!location.hash) location.hash = '#/';
   router();
 })();

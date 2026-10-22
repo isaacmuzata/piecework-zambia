@@ -60,7 +60,7 @@ const SCHEMA = [
     worker_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     message    TEXT DEFAULT '',
     status     TEXT NOT NULL DEFAULT 'pending'
-               CHECK (status IN ('pending', 'accepted', 'declined', 'withdrawn')),
+               CHECK (status IN ('pending', 'shortlisted', 'accepted', 'declined', 'withdrawn')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (job_id, worker_id)
   )`,
@@ -83,12 +83,14 @@ const SCHEMA = [
   // Messaging between posters and workers, scoped to a job application.
   `CREATE TABLE IF NOT EXISTS conversations (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    job_id     INTEGER REFERENCES jobs(id) ON DELETE CASCADE,
+    product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
     poster_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     worker_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (job_id, worker_id)
+    UNIQUE (job_id, worker_id),
+    UNIQUE (product_id, worker_id)
   )`,
   `CREATE TABLE IF NOT EXISTS messages (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,6 +140,135 @@ const SCHEMA = [
     image          TEXT NOT NULL,
     uploaded_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at     TEXT NOT NULL
+  )`,
+  // 2.0 M0 foundations: moderation, blocking, audit, managed categories.
+  `CREATE TABLE IF NOT EXISTS reports (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_type TEXT NOT NULL,
+    target_id   INTEGER NOT NULL,
+    reason      TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'open',
+    admin_note  TEXT DEFAULT '',
+    resolved_by INTEGER,
+    resolved_at TEXT,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS blocks (
+    blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (blocker_id, blocked_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS admin_audit (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_id    INTEGER NOT NULL,
+    action      TEXT NOT NULL,
+    target_type TEXT DEFAULT '',
+    target_id   INTEGER,
+    detail      TEXT DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'job',
+    active     INTEGER NOT NULL DEFAULT 1,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (name, kind)
+  )`,
+  // 2.0 M1: job photos. Stored as data URIs like the other images, but
+  // served through a dedicated endpoint so list payloads stay light.
+  `CREATE TABLE IF NOT EXISTS job_photos (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    image      TEXT NOT NULL,
+    mime       TEXT NOT NULL DEFAULT 'image/jpeg',
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  // 2.0 M3: marketplace. Products are sold peer to peer; PieceWork never
+  // handles the money. Photos mirror job_photos (data URIs, served via a
+  // dedicated endpoint). Offers are proposals, not payments.
+  `CREATE TABLE IF NOT EXISTS products (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    price       INTEGER NOT NULL DEFAULT 0,
+    category    TEXT NOT NULL,
+    condition   TEXT NOT NULL DEFAULT 'Good'
+                CHECK (condition IN ('New', 'Like new', 'Good', 'Fair')),
+    city        TEXT NOT NULL,
+    area        TEXT DEFAULT '',
+    lat         REAL,
+    lng         REAL,
+    status      TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'sold', 'hidden', 'removed')),
+    view_count  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS product_photos (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    image      TEXT NOT NULL,
+    mime       TEXT NOT NULL DEFAULT 'image/jpeg',
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS offers (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    buyer_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    seller_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount     INTEGER NOT NULL,
+    message    TEXT DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'pending'
+               CHECK (status IN ('pending', 'accepted', 'declined', 'withdrawn')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  // 2.0 M4: business storefronts. A business applies, an admin
+  // approves it live, and the Verified badge is earned separately by
+  // uploading registration documents (PACRA, TPIN, trading licence)
+  // that an admin reviews. Until then the storefront is labelled
+  // Unverified, it is never hidden for lacking documents.
+  `CREATE TABLE IF NOT EXISTS businesses (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    slug                TEXT NOT NULL UNIQUE,
+    tagline             TEXT DEFAULT '',
+    description         TEXT DEFAULT '',
+    logo                TEXT,
+    cover               TEXT,
+    category            TEXT NOT NULL DEFAULT 'Other',
+    city                TEXT NOT NULL,
+    area                TEXT DEFAULT '',
+    address             TEXT DEFAULT '',
+    phone               TEXT DEFAULT '',
+    whatsapp            TEXT DEFAULT '',
+    email               TEXT DEFAULT '',
+    hours_text          TEXT DEFAULT '',
+    lat                 REAL,
+    lng                 REAL,
+    status              TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'active', 'rejected', 'suspended')),
+    verification_status TEXT NOT NULL DEFAULT 'unverified'
+                        CHECK (verification_status IN ('unverified', 'pending', 'verified', 'rejected')),
+    verification_note   TEXT DEFAULT '',
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS business_documents (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL DEFAULT 'other'
+                CHECK (kind IN ('pacra', 'tpin', 'licence', 'other')),
+    image       TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
   // NRC access log: every successful view of an NRC photo is recorded.
   // No foreign keys on purpose: the log must survive the document itself,
@@ -212,11 +343,21 @@ const OPTIONAL_COLUMNS = [
   ['users', 'orientation_accepted_at', 'TEXT'],
   ['users', 'last_seen_at', 'TEXT'],
   ['users', 'is_tester', 'INTEGER DEFAULT 0'],
+  ['users', 'suspended_at', 'TEXT'],
+  ['users', 'suspension_reason', 'TEXT'],
   ['users', 'food_license_image', 'TEXT'],
   ['users', 'food_license_status', "TEXT DEFAULT 'none'"],
   ['users', 'food_license_number', 'TEXT'],
   ['users', 'food_license_expires_at', 'TEXT'],
   ['jobs', 'requires_food_license', 'INTEGER DEFAULT 0'],
+  ['products', 'business_id', 'INTEGER'],
+  ['jobs', 'is_draft', 'INTEGER DEFAULT 0'],
+  ['jobs', 'expected_duration', "TEXT DEFAULT ''"],
+  ['jobs', 'start_time', "TEXT DEFAULT ''"],
+  ['jobs', 'transport_provided', 'INTEGER DEFAULT 0'],
+  ['jobs', 'materials_provided', 'INTEGER DEFAULT 0'],
+  ['jobs', 'instructions', "TEXT DEFAULT ''"],
+  ['jobs', 'is_urgent', 'INTEGER DEFAULT 0'],
   ['nrc_docs', 'nrc_number', 'TEXT'],
 ];
 
@@ -272,6 +413,102 @@ async function init() {
         `CREATE INDEX IF NOT EXISTS idx_jobs_city ON jobs(city)`,
         `CREATE INDEX IF NOT EXISTS idx_jobs_category ON jobs(category)`,
       ]) await client.execute(idx);
+    } finally {
+      await client.execute('PRAGMA foreign_keys = ON');
+    }
+  }
+  // Migration (2.0 M3, 2026-10-22): categories uniqueness becomes
+  // per-kind, so a name like "Other" can exist for both jobs and the
+  // marketplace. Nothing references categories by id, so the rebuild
+  // is safe. Idempotent: skipped once the composite constraint exists.
+  const catSql = (await client.execute(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'categories'`
+  )).rows[0]?.sql || '';
+  if (catSql && !catSql.includes('UNIQUE (name, kind)')) {
+    await client.execute('DROP TABLE IF EXISTS categories_new');
+    await client.execute('PRAGMA foreign_keys = OFF');
+    try {
+      await client.execute(`CREATE TABLE categories_new (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL,
+        kind       TEXT NOT NULL DEFAULT 'job',
+        active     INTEGER NOT NULL DEFAULT 1,
+        sort       INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (name, kind)
+      )`);
+      await client.execute(`INSERT OR IGNORE INTO categories_new
+        (id, name, kind, active, sort, created_at)
+        SELECT id, name, kind, active, sort, created_at FROM categories`);
+      await client.execute('DROP TABLE categories');
+      await client.execute('ALTER TABLE categories_new RENAME TO categories');
+    } finally {
+      await client.execute('PRAGMA foreign_keys = ON');
+    }
+  }
+  // Migration (2.0 M3, 2026-10-22): conversations gain product threads.
+  // job_id becomes nullable and product_id is added, so one chat stack
+  // serves job chats and marketplace chats. Same rebuild pattern as the
+  // applications migration below. Idempotent: skipped once product_id
+  // exists in the table definition.
+  const convSql = (await client.execute(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversations'`
+  )).rows[0]?.sql || '';
+  if (convSql && !convSql.includes('product_id')) {
+    await client.execute('DROP TABLE IF EXISTS conversations_new');
+    await client.execute('PRAGMA foreign_keys = OFF');
+    try {
+      await client.execute(`CREATE TABLE conversations_new (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id     INTEGER REFERENCES jobs(id) ON DELETE CASCADE,
+        product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+        poster_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        worker_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (job_id, worker_id),
+        UNIQUE (product_id, worker_id)
+      )`);
+      await client.execute(`INSERT INTO conversations_new
+        (id, job_id, poster_id, worker_id, created_at, updated_at)
+        SELECT id, job_id, poster_id, worker_id, created_at, updated_at
+        FROM conversations`);
+      await client.execute('DROP TABLE conversations');
+      await client.execute('ALTER TABLE conversations_new RENAME TO conversations');
+    } finally {
+      await client.execute('PRAGMA foreign_keys = ON');
+    }
+  }
+  // Migration (2.0 M1, 2026-10-22): allow applications.status='shortlisted'.
+  // Same table-rebuild pattern as the jobs pay_type migration above:
+  // SQLite cannot ALTER a CHECK constraint. Idempotent: skipped once the
+  // new constraint exists. Includes the OPTIONAL_COLUMNS added earlier in
+  // init (arrived_at, arrival_confirmed_at) so no data is lost.
+  const appsSql = (await client.execute(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'applications'`
+  )).rows[0]?.sql || '';
+  if (appsSql && !appsSql.includes("'shortlisted'")) {
+    await client.execute('DROP TABLE IF EXISTS applications_new');
+    await client.execute('PRAGMA foreign_keys = OFF');
+    try {
+      await client.execute(`CREATE TABLE applications_new (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        worker_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        message    TEXT DEFAULT '',
+        status     TEXT NOT NULL DEFAULT 'pending'
+                   CHECK (status IN ('pending', 'shortlisted', 'accepted', 'declined', 'withdrawn')),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        arrived_at TEXT,
+        arrival_confirmed_at TEXT,
+        UNIQUE (job_id, worker_id)
+      )`);
+      await client.execute(`INSERT INTO applications_new
+        (id, job_id, worker_id, message, status, created_at, arrived_at, arrival_confirmed_at)
+        SELECT id, job_id, worker_id, message, status, created_at, arrived_at, arrival_confirmed_at
+        FROM applications`);
+      await client.execute('DROP TABLE applications');
+      await client.execute('ALTER TABLE applications_new RENAME TO applications');
     } finally {
       await client.execute('PRAGMA foreign_keys = ON');
     }
