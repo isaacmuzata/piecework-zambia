@@ -101,6 +101,11 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_conv_poster ON conversations(poster_id, updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_conv_worker ON conversations(worker_id, updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS activity_days (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day     TEXT NOT NULL,
+    PRIMARY KEY (user_id, day)
+  )`,
   `CREATE TABLE IF NOT EXISTS giveaways (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     title         TEXT NOT NULL,
@@ -196,6 +201,7 @@ const OPTIONAL_COLUMNS = [
   ['users', 'intro_video', 'TEXT'],
   ['users', 'orientation_accepted_at', 'TEXT'],
   ['users', 'last_seen_at', 'TEXT'],
+  ['users', 'is_tester', 'INTEGER DEFAULT 0'],
   ['users', 'food_license_image', 'TEXT'],
   ['users', 'food_license_status', "TEXT DEFAULT 'none'"],
   ['users', 'food_license_number', 'TEXT'],

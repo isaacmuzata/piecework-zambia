@@ -409,6 +409,18 @@ async function logout() {
   toast('Signed out.');
 }
 
+/** Dark mode: <html data-theme> is set early in index.html; this keeps the
+ * topbar toggle in sync and persists the choice on the device. */
+function currentTheme() {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('pwz-theme', t); } catch { /* private mode */ }
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.textContent = t === 'dark' ? '☀️' : '🌙';
+}
+
 function renderChrome() {
   const menuBtn = document.getElementById('menu-btn');
   if (menuBtn && !menuBtn.dataset.wired) {
@@ -416,6 +428,12 @@ function renderChrome() {
     menuBtn.dataset.wired = '1';
     menuBtn.addEventListener('click', openDrawer);
   }
+  const themeBtn = document.getElementById('theme-btn');
+  if (themeBtn && !themeBtn.dataset.wired) {
+    themeBtn.dataset.wired = '1';
+    themeBtn.addEventListener('click', () => setTheme(currentTheme() === 'dark' ? 'light' : 'dark'));
+  }
+  if (themeBtn) themeBtn.textContent = currentTheme() === 'dark' ? '☀️' : '🌙';
   if (currentUser) {
     topbarAuth.innerHTML =
       `<a href="#/profile" style="display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:700;font-size:14px">${avatarHtml(currentUser, 'sm')}<span>${esc(currentUser.name.split(' ')[0])}</span></a>`;
@@ -2751,6 +2769,7 @@ async function viewAdmin() {
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <a class="btn btn-sm btn-outline" href="#/admin/referrals">📊 Referral monitor</a>
       <a class="btn btn-sm btn-outline" href="#/admin/activity">👀 User activity</a>
+      <a class="btn btn-sm btn-outline" href="#/admin/testers">🧪 My testers</a>
       <a class="btn btn-sm btn-outline" href="#/admin/jobs">📋 All jobs</a>
       <a class="btn btn-sm btn-outline" href="#/admin/verifications" id="btn-selfie-review">🪪 Selfie review</a>
       <a class="btn btn-sm btn-outline" href="#/admin/food-licenses" id="btn-food-review">🍽️ Food licenses</a>
@@ -3224,11 +3243,127 @@ async function viewUserActivity() {
               Signed up: ${fmtTs(u.signed_up_at)} • ${u.orientation_done ? '✅ Orientation done' : '⬜ Orientation not done'} • Selfie: ${esc(u.selfie_status)}<br>
               ${u.applications} application${u.applications === 1 ? '' : 's'} • ${u.jobs_posted} job${u.jobs_posted === 1 ? '' : 's'} posted • ${u.messages_sent} message${u.messages_sent === 1 ? '' : 's'} sent
             </div>
+            <button class="btn btn-sm btn-outline tester-toggle" data-id="${u.id}" data-flag="${u.is_tester ? '1' : '0'}" style="margin-top:6px">${u.is_tester ? '⭐ Tester (tap to remove)' : '☆ Mark as tester'}</button>
           </div>`;
         }).join('') : '<p class="small muted">No users yet.</p>'}
       </div>`;
+    body.querySelectorAll('.tester-toggle').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await api('/api/admin/users/' + btn.dataset.id + '/tester', {
+            method: 'PATCH',
+            body: JSON.stringify({ is_tester: btn.dataset.flag !== '1' }),
+          });
+          viewUserActivity();
+        } catch (e2) { btn.disabled = false; alert(e2.message); }
+      });
+    });
   } catch (e) {
     body.innerHTML = emptyHtml('info', 'Could not load activity', e.message);
+  }
+}
+
+/** Admin tester tracker — Zac's flagged testers, day by day. */
+async function viewTesters() {
+  if (!requireAuth('#/admin/testers')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">My testers</h1>
+    <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <div id="testers-body">${loadingHtml('Loading testers…')}</div>
+  </div></div>`;
+  const body = document.getElementById('testers-body');
+  const parseTs = (s) => s ? new Date(String(s).replace(' ', 'T') + 'Z') : null;
+  const fmtTs = (s) => {
+    const d = parseTs(s);
+    if (!d || isNaN(d)) return 'not recorded yet';
+    return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  };
+  try {
+    const s = await api('/api/admin/testers');
+    const testers = s.testers || [];
+    // Last 14 Zambia days, ending today (server-supplied).
+    const days = [];
+    const base = new Date(s.today + 'T00:00:00Z');
+    for (let i = 13; i >= 0; i--) days.push(new Date(base.getTime() - i * 86400000).toISOString().slice(0, 10));
+    const activeToday = testers.filter(t => t.active_days.includes(s.today)).length;
+    const stat = (label, val) => `<div class="card stat-card"><div class="big">${val}</div><div class="small muted">${label}</div></div>`;
+    const strip = (t) => days.map((d) => {
+      const on = t.active_days.includes(d);
+      const num = Number(d.slice(8, 10));
+      return `<span title="${d}${on ? ' — active' : ' — no activity'}" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;font-size:10px;font-weight:700;${on ? 'background:var(--green);color:#fff' : 'background:var(--green-tint);color:var(--gray-soft)'}">${num}</span>`;
+    }).join('');
+    body.innerHTML = `
+      <div class="stat-grid">
+        ${stat('Testers tracked', testers.length)}
+        ${stat('Active today', activeToday)}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Last 14 days, per tester</h3>
+        <p class="small muted" style="margin-top:-6px">Green means the app was opened or used that day (Zambia time). Days before Oct 22 count only real actions: applying, posting, messaging.</p>
+        ${testers.length ? testers.map((t) => {
+          const in14 = t.active_days.filter(d => days.includes(d)).length;
+          return `
+          <div style="padding:10px 0;border-bottom:1px solid var(--line)">
+            <div class="split" style="align-items:flex-start">
+              <span><b>${esc(t.name)}</b> <span class="small muted">${esc(t.city)}</span></span>
+              <b>${in14} of 14 days</b>
+            </div>
+            <div style="display:flex;gap:3px;flex-wrap:wrap;margin:7px 0">${strip(t)}</div>
+            <div class="small muted">
+              Last opened: ${fmtTs(t.last_seen_at)} • ${t.orientation_done ? '✅ Orientation done' : '⬜ Orientation not done'}<br>
+              ${t.applications} application${t.applications === 1 ? '' : 's'} • ${t.jobs_posted} job${t.jobs_posted === 1 ? '' : 's'} posted • ${t.messages_sent} message${t.messages_sent === 1 ? '' : 's'} sent • ${esc(t.phone)}
+            </div>
+            <button class="btn btn-sm btn-outline tester-untoggle" data-id="${t.id}" style="margin-top:6px">⭐ Tester (tap to remove)</button>
+          </div>`;
+        }).join('') : '<p class="small muted">No testers flagged yet. Add them below, or from the User activity page.</p>'}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Add or remove testers</h3>
+        <p class="small muted" style="margin-top:-6px">Tap ☆ next to each of your testers so the tracker follows the right people. The full user list is on the <a href="#/admin/activity">User activity</a> page.</p>
+        <div id="tester-picker">${loadingHtml('Loading users…')}</div>
+      </div>`;
+    const wireToggles = (root, rerun) => {
+      root.querySelectorAll('.tester-untoggle').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            await api('/api/admin/users/' + btn.dataset.id + '/tester', { method: 'PATCH', body: JSON.stringify({ is_tester: false }) });
+            rerun();
+          } catch (e2) { btn.disabled = false; alert(e2.message); }
+        });
+      });
+    };
+    wireToggles(body, viewTesters);
+    // Picker: every user with a star toggle, most recently active first.
+    const picker = document.getElementById('tester-picker');
+    try {
+      const all = await api('/api/admin/activity');
+      const users = all.users || [];
+      picker.innerHTML = users.length ? users.map((u) => `
+        <div class="split" style="padding:7px 0;border-bottom:1px solid var(--line);align-items:center">
+          <span><b>${esc(u.name)}</b> <span class="small muted">${esc(u.city)} • ${esc(u.phone)}</span></span>
+          <button class="btn btn-sm ${u.is_tester ? '' : 'btn-outline'} tester-pick" data-id="${u.id}" data-flag="${u.is_tester ? '1' : '0'}">${u.is_tester ? '⭐' : '☆'}</button>
+        </div>`).join('') : '<p class="small muted">No users yet.</p>';
+      picker.querySelectorAll('.tester-pick').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            await api('/api/admin/users/' + btn.dataset.id + '/tester', { method: 'PATCH', body: JSON.stringify({ is_tester: btn.dataset.flag !== '1' }) });
+            viewTesters();
+          } catch (e2) { btn.disabled = false; alert(e2.message); }
+        });
+      });
+    } catch (e3) {
+      picker.innerHTML = '<p class="small muted">Could not load the user list.</p>';
+    }
+  } catch (e) {
+    body.innerHTML = emptyHtml('info', 'Could not load testers', e.message);
   }
 }
 
@@ -3423,6 +3558,7 @@ const routes = [
   [/^#\/admin\/jobs$/, viewAdminJobs],
   [/^#\/admin\/referrals$/, viewReferralDashboard],
   [/^#\/admin\/activity$/, viewUserActivity],
+  [/^#\/admin\/testers$/, viewTesters],
   [/^#\/admin\/verifications$/, viewVerifications],
   [/^#\/admin\/food-licenses$/, viewFoodLicenses],
   [/^#\/admin\/resets$/, viewAdminResets],

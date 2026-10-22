@@ -296,6 +296,9 @@ function touchLastSeen(userId) {
   lastSeenTouch.set(userId, now);
   runWrite("UPDATE users SET last_seen_at = datetime('now') WHERE id = ?", [userId])
     .catch(() => { /* activity tracking must never break a request */ });
+  // One row per user per day (Zambia time, UTC+2) feeds the tester tracker.
+  runWrite("INSERT OR IGNORE INTO activity_days (user_id, day) VALUES (?, date('now', '+2 hours'))", [userId])
+    .catch(() => { /* same: never break a request */ });
 }
 
 /** Auth middleware — reads httpOnly cookie, falls back to Bearer header. */
@@ -1561,7 +1564,7 @@ app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
   if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
   const rows = await getAll(`
     SELECT u.id, u.name, u.phone, u.city, u.created_at, u.last_seen_at,
-           u.orientation_accepted_at, u.selfie_status, u.open_to_work,
+           u.orientation_accepted_at, u.selfie_status, u.open_to_work, u.is_tester,
       (SELECT COUNT(*) FROM applications a
         WHERE a.worker_id = u.id AND a.status != 'withdrawn') AS applications,
       (SELECT COUNT(*) FROM jobs j WHERE j.poster_id = u.id) AS jobs_posted,
@@ -1590,12 +1593,73 @@ app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
       orientation_done: !!r.orientation_accepted_at,
       selfie_status: r.selfie_status || 'pending',
       open_to_work: !!r.open_to_work,
+      is_tester: !!r.is_tester,
       applications: Number(r.applications || 0),
       jobs_posted: Number(r.jobs_posted || 0),
       messages_sent: Number(r.messages_sent || 0),
       conversations: Number(r.conversations || 0),
     })),
   });
+}));
+
+// ---------------------------------------------------------------- admin tester tracker
+// Zac flags his Play Store testers (is_tester) and this board tracks them
+// apart from everyone else: a day-by-day grid of who actually used the app.
+// Days come from activity_days (opens, recorded from Oct 22, 2026) unioned
+// with the days of their recorded actions (applications, jobs, messages),
+// so real activity before opens were tracked still shows. Zambia days.
+app.patch('/api/admin/users/:id/tester', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return err(res, 400, 'Bad user id.');
+  const flag = req.body && req.body.is_tester ? 1 : 0;
+  await runWrite('UPDATE users SET is_tester = ? WHERE id = ?', [flag, id]);
+  res.json({ ok: true, id, is_tester: !!flag });
+}));
+
+app.get('/api/admin/testers', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const rows = await getAll(`
+    SELECT u.id, u.name, u.phone, u.city, u.created_at, u.last_seen_at,
+           u.orientation_accepted_at, u.open_to_work,
+      (SELECT COUNT(*) FROM applications a
+        WHERE a.worker_id = u.id AND a.status != 'withdrawn') AS applications,
+      (SELECT COUNT(*) FROM jobs j WHERE j.poster_id = u.id) AS jobs_posted,
+      (SELECT COUNT(*) FROM messages m WHERE m.sender_id = u.id) AS messages_sent
+    FROM users u
+    WHERE u.is_tester = 1
+    ORDER BY COALESCE(u.last_seen_at, u.created_at) DESC
+    LIMIT 100`);
+  const testers = [];
+  for (const r of rows) {
+    const dayRows = await getAll(`
+      SELECT DISTINCT d FROM (
+        SELECT day AS d FROM activity_days
+          WHERE user_id = ? AND day >= date('now', '+2 hours', '-20 days')
+        UNION
+        SELECT date(a.created_at, '+2 hours') FROM applications a WHERE a.worker_id = ?
+        UNION
+        SELECT date(j.created_at, '+2 hours') FROM jobs j WHERE j.poster_id = ?
+        UNION
+        SELECT date(m.created_at, '+2 hours') FROM messages m WHERE m.sender_id = ?
+      ) WHERE d IS NOT NULL ORDER BY d`, [r.id, r.id, r.id, r.id]);
+    testers.push({
+      id: Number(r.id),
+      name: r.name,
+      phone: r.phone,
+      city: r.city,
+      signed_up_at: r.created_at,
+      last_seen_at: r.last_seen_at || null,
+      orientation_done: !!r.orientation_accepted_at,
+      open_to_work: !!r.open_to_work,
+      applications: Number(r.applications || 0),
+      jobs_posted: Number(r.jobs_posted || 0),
+      messages_sent: Number(r.messages_sent || 0),
+      active_days: dayRows.map((x) => x.d),
+    });
+  }
+  const todayRow = await getOne("SELECT date('now', '+2 hours') AS d");
+  res.json({ today: todayRow.d, testers });
 }));
 
 // ---------------------------------------------------------------- referrals & giveaways
