@@ -1038,6 +1038,9 @@ async function viewWorkers() {
 
 let marketState = { q: '', category: '', city: '', condition: '', condGroup: '', sort: 'newest', page: 1 };
 const MARKET_CAT_ICONS = { 'Vehicles & Parts': 'truck', 'Electronics': 'grid', 'Phones & Tablets': 'phone', 'Computers & IT': 'briefcase', 'Home & Furniture': 'home', 'Appliances': 'sparkles', 'Fashion & Clothing': 'tag', 'Beauty & Health': 'heart', 'Building & Hardware': 'wrench', 'Agriculture & Livestock': 'leaf', 'Food & Produce': 'utensils', 'Baby & Kids': 'user', 'Sports & Leisure': 'sparkles', 'Books & Education': 'clipboard', 'Property & Rentals': 'pin', 'Other': 'grid' };
+// Real category photos for the marketplace strip (Zac, Oct 23, 2026: the
+// category icons should be pictures). Self-hosted under /img/cats.
+const MARKET_CAT_PHOTOS = { 'Vehicles & Parts': 'vehicles', 'Electronics': 'electronics', 'Phones & Tablets': 'phones', 'Computers & IT': 'computers', 'Home & Furniture': 'furniture', 'Appliances': 'appliances', 'Fashion & Clothing': 'fashion', 'Beauty & Health': 'beauty', 'Building & Hardware': 'building', 'Agriculture & Livestock': 'agriculture', 'Food & Produce': 'food', 'Baby & Kids': 'baby', 'Sports & Leisure': 'sports', 'Books & Education': 'books', 'Property & Rentals': 'property', 'Other': 'other' };
 
 function fmtK(n) { return 'K' + Number(n || 0).toLocaleString('en-ZM'); }
 
@@ -1072,7 +1075,7 @@ async function viewMarket() {
     <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="m-q" type="search" placeholder="Search items" value="${esc(marketState.q)}" aria-label="Search items"></div>
     <div class="mcat-strip" id="m-chips">
       <button class="mcat-item ${!marketState.category ? 'active' : ''}" data-mcat=""><span class="mcat-ico">${icon('grid')}</span>All</button>
-      ${MARKET_CATEGORIES.map(c => `<button class="mcat-item ${marketState.category === c ? 'active' : ''}" data-mcat="${esc(c)}"><span class="mcat-ico">${icon(MARKET_CAT_ICONS[c] || 'tag')}</span>${esc(c.split(' ')[0])}</button>`).join('')}
+      ${MARKET_CATEGORIES.map(c => `<button class="mcat-item ${marketState.category === c ? 'active' : ''}" data-mcat="${esc(c)}">${MARKET_CAT_PHOTOS[c] ? `<span class="mcat-ico mcat-photo"><img src="/img/cats/${MARKET_CAT_PHOTOS[c]}.jpg" alt="" loading="lazy"></span>` : `<span class="mcat-ico">${icon(MARKET_CAT_ICONS[c] || 'tag')}</span>`}${esc(c.split(' ')[0])}</button>`).join('')}
     </div>
     <div class="chips" id="m-quick" style="margin-top:8px">
       <button class="chip ${!marketState.condGroup && marketState.sort !== 'nearby' ? 'active' : ''}" id="mq-all">All</button>
