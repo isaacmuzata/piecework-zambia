@@ -194,21 +194,21 @@ function toggleSave(id) {
   });
 }
 
-/* ---------------- share a job ---------------- */
-function shareJob(id, title) {
-  const url = 'https://pieceworkzambia.com/#/job/' + id;
-  const text = '"' + title + '" — see this job on PieceWork Zambia';
+/* ---------------- sharing ---------------- */
+const PUBLIC_ORIGIN = 'https://pieceworkzambia.com';
+
+function openShareSheet({ heading, url, text, copiedMessage }) {
   // Bottom-sheet with explicit options so a link can always be copied,
   // even where the native share sheet is unavailable.
   const overlay = document.createElement('div');
   overlay.className = 'share-overlay';
   const close = () => overlay.remove();
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  const opt = (icn, label, fn) =>
+  const opt = (icn, label) =>
     `<button class="share-opt" data-act="${icn}">${icon(icn)}${label}</button>`;
   overlay.innerHTML = `
-    <div class="share-sheet" role="dialog" aria-label="Share this job">
-      <h3>Share this job</h3>
+    <div class="share-sheet" role="dialog" aria-label="${esc(heading)}">
+      <h3>${esc(heading)}</h3>
       <p class="share-sub">${esc(url)}</p>
       <div class="share-row">
         ${opt('copy', 'Copy link')}
@@ -229,7 +229,7 @@ function shareJob(id, title) {
       try { document.execCommand('copy'); } catch (e2) {}
       ta.remove();
     }
-    toast('Job link copied. Paste it anywhere to share.');
+    toast(copiedMessage);
     close();
   };
   overlay.querySelector('[data-act="copy"]').addEventListener('click', copyLink);
@@ -247,6 +247,36 @@ function shareJob(id, title) {
     close();
   });
   document.body.appendChild(overlay);
+}
+
+function shareJob(id, title) {
+  const url = PUBLIC_ORIGIN + '/#/job/' + id;
+  openShareSheet({
+    heading: 'Share this job',
+    url,
+    text: '"' + title + '" — see this job on PieceWork Zambia',
+    copiedMessage: 'Job link copied. Paste it anywhere to share.',
+  });
+}
+
+function shareProduct(id, title) {
+  const url = PUBLIC_ORIGIN + '/#/product/' + id;
+  openShareSheet({
+    heading: 'Share this item',
+    url,
+    text: '"' + title + '" — see this item on PieceWork Zambia',
+    copiedMessage: 'Product link copied. Paste it anywhere to share.',
+  });
+}
+
+function shareBusiness(slug, name) {
+  const url = PUBLIC_ORIGIN + '/#/business/' + encodeURIComponent(slug);
+  openShareSheet({
+    heading: 'Share this storefront',
+    url,
+    text: '"' + name + '" — visit this storefront on PieceWork Zambia',
+    copiedMessage: 'Storefront link copied. Paste it anywhere to share.',
+  });
 }
 
 /* ---------------- location (kilometre matching) ---------------- */
@@ -1052,6 +1082,7 @@ function productCard(p) {
       ${p.cover_photo
         ? `<img src="${esc(p.cover_photo)}" alt="${esc(p.title)}" loading="lazy">`
         : `<div class="job-thumb product-thumb">${icon('tag')}</div>`}
+      <button class="job-save product-share" data-share-product="${p.id}" data-title="${esc(p.title)}" aria-label="Share this item">${icon('share')}</button>
       <button class="job-save ${savedP ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${savedP ? 'true' : 'false'}">${icon('heart')}</button>
     </div>
     <div class="pg-body">
@@ -1184,7 +1215,7 @@ async function viewProduct(id) {
       <div class="card" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
           <h1 class="page-title" style="font-size:22px;margin:0">${esc(p.title)}</h1>
-          <button class="icon-btn ${isSavedProduct(p.id) ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${isSavedProduct(p.id) ? 'true' : 'false'}">${icon('heart')}</button>
+          <span style="display:inline-flex;gap:8px;flex:none"><button class="icon-btn" data-share-product="${p.id}" data-title="${esc(p.title)}" aria-label="Share this item">${icon('share')}</button><button class="icon-btn ${isSavedProduct(p.id) ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${isSavedProduct(p.id) ? 'true' : 'false'}">${icon('heart')}</button></span>
         </div>
         <div class="product-price" style="font-size:24px">${fmtK(p.price)}${p.negotiable ? ' <span class="neg-pill">Negotiable</span>' : ''}</div>
         <div class="job-meta" style="margin-top:6px">
@@ -1693,6 +1724,9 @@ async function viewBusiness(slug) {
           ${currentUser ? `<button class="btn ${b.following ? 'btn-outline' : 'btn-primary'}" id="biz-follow">${b.following ? 'Following' : 'Follow'}</button>` : `<a class="btn btn-primary" href="#/login">Follow</a>`}
           <span class="small muted" id="biz-followers">${b.follower_count || 0} followers</span>
         </div>`}
+        <div class="btn-row" style="margin-top:8px">
+          <button class="btn btn-outline" data-share-business="${esc(b.slug)}" data-title="${esc(b.name)}" aria-label="Share this storefront">${icon('share')} Share storefront</button>
+        </div>
       </div>
       <div class="biz-tabs" role="tablist">
         <button class="biz-tab active" data-btab="products">Products</button>
@@ -5379,6 +5413,20 @@ document.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     shareJob(shareBtn.dataset.share, shareBtn.dataset.title || 'Job on PieceWork Zambia');
+    return;
+  }
+  const productShareBtn = e.target.closest('[data-share-product]');
+  if (productShareBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    shareProduct(productShareBtn.dataset.shareProduct, productShareBtn.dataset.title || 'Item on PieceWork Zambia');
+    return;
+  }
+  const businessShareBtn = e.target.closest('[data-share-business]');
+  if (businessShareBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    shareBusiness(businessShareBtn.dataset.shareBusiness, businessShareBtn.dataset.title || 'Storefront on PieceWork Zambia');
     return;
   }
   const saveBtn = e.target.closest('[data-save]');

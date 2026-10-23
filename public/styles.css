@@ -861,3 +861,4 @@ a.biz-card{display:flex;gap:12px;align-items:center;color:var(--ink);margin-bott
 .mcat-photo{padding:0;overflow:hidden;background:#E3EBFE;border-radius:18px}
 .mcat-photo img{width:100%;height:100%;object-fit:cover;display:block}
 .mcat-item.active .mcat-photo{box-shadow:0 0 0 2px var(--cta),0 4px 12px rgba(36,104,253,.35)}
+.pg-media .product-share{right:50px}
