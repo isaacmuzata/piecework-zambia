@@ -5391,7 +5391,7 @@ document.addEventListener('click', (e) => {
     toggleSaveProduct(psaveBtn.dataset.psave);
     return;
   }
-  const pcard = e.target.closest('.product-card[data-product]');
+  const pcard = e.target.closest('.product-card-g[data-product], .product-card[data-product]');
   if (pcard && !e.target.closest('a') && !e.target.closest('button')) {
     location.hash = '#/product/' + pcard.dataset.product;
   }
