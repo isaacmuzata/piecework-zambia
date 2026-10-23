@@ -324,6 +324,20 @@ const SCHEMA = [
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
   `CREATE INDEX IF NOT EXISTS idx_resets_user ON password_resets(user_id)`,
+  // SMS notification log (2026-10-23): every event notification attempt is
+  // recorded. 'skipped' when no Africa's Talking creds are configured,
+  // 'sent'/'failed' from the provider result when they are.
+  `CREATE TABLE IF NOT EXISTS sms_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    phone      TEXT,
+    kind       TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'skipped',
+    error      TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sms_log_user ON sms_log(user_id)`,
 ];
 
 // Distance matching: precise coordinates are optional on users and jobs.

@@ -548,6 +548,52 @@ function sendSms(to, message) {
   });
 }
 
+// ---------------------------------------------------------------- SMS notifications
+// Event notifications (offer made, application made, application accepted)
+// go out over the same Africa's Talking transport as reset codes. Every
+// attempt is written to sms_log: 'skipped' when no gateway creds are set,
+// 'sent' or 'failed' (with the provider error) when they are. notifySms
+// must never break a request: it swallows all errors and callers fire it
+// without awaiting.
+async function notifySms(userId, kind, message) {
+  try {
+    const user = await getOne('SELECT id, phone FROM users WHERE id = ?', [userId]);
+    if (!user || !user.phone) return;
+    if (!smsEnabled()) {
+      await runWrite(
+        'INSERT INTO sms_log (user_id, phone, kind, body, status) VALUES (?, ?, ?, ?, ?)',
+        [userId, user.phone, kind, message, 'skipped']
+      );
+      return;
+    }
+    try {
+      await sendSms(user.phone, message);
+      await runWrite(
+        'INSERT INTO sms_log (user_id, phone, kind, body, status) VALUES (?, ?, ?, ?, ?)',
+        [userId, user.phone, kind, message, 'sent']
+      );
+    } catch (e) {
+      await runWrite(
+        'INSERT INTO sms_log (user_id, phone, kind, body, status, error) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, user.phone, kind, message, 'failed', String((e && e.message) || e).slice(0, 300)]
+      );
+    }
+  } catch (e) {
+    console.error('notifySms failed:', e && e.message);
+  }
+}
+
+// Build a message that fits a single SMS segment (160 chars) by shrinking
+// the interpolated name first, then the title, only as much as needed.
+function composeSms(build, name, title) {
+  let n = String(name || '').trim();
+  let t = String(title || '').trim();
+  let msg = build(n, t);
+  while (msg.length > 160 && t.length) { t = t.slice(0, -1).trimEnd(); msg = build(n, t); }
+  while (msg.length > 160 && n.length) { n = n.slice(0, -1).trimEnd(); msg = build(n, t); }
+  return msg.slice(0, 160);
+}
+
 function newResetCode() {
   return String(crypto.randomInt(100000, 1000000));
 }
@@ -660,6 +706,17 @@ app.get('/api/admin/resets', ah(auth), ah(async (req, res) => {
         : (new Date(r.expires_at).getTime() < Date.now() ? 'expired' : 'pending'),
     })),
   });
+}));
+
+// Admin: SMS notification log (newest first): what was sent, skipped (no
+// gateway configured) or failed, and to whom.
+app.get('/api/admin/sms-log', ah(auth), ah(async (req, res) => {
+  if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
+  const rows = await getAll(
+    `SELECT id, user_id, phone, kind, body, status, error, created_at
+     FROM sms_log ORDER BY id DESC LIMIT 50`
+  );
+  res.json({ sms_log: rows });
 }));
 
 // Admin: (re)issue the code for a request and return it ONCE as plaintext so
@@ -1303,12 +1360,24 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
       "UPDATE applications SET status = 'pending', message = ?, created_at = datetime('now') WHERE id = ?",
       [message, dup.id]
     );
+    if (job.poster_id !== req.user.id) {
+      notifySms(job.poster_id, 'application', composeSms(
+      (n, t) => `PieceWork: ${n} applied for your job '${t}'. Open the app to review: pieceworkzambia.com`,
+      req.user.name, job.title
+    )).catch(() => {});
+    }
     return res.status(201).json({ id: dup.id });
   }
   const info = await runWrite(
     'INSERT INTO applications (job_id, worker_id, message) VALUES (?, ?, ?)',
     [id, req.user.id, message]
   );
+  if (job.poster_id !== req.user.id) {
+    notifySms(job.poster_id, 'application', composeSms(
+      (n, t) => `PieceWork: ${n} applied for your job '${t}'. Open the app to review: pieceworkzambia.com`,
+      req.user.name, job.title
+    )).catch(() => {});
+  }
   res.status(201).json({ id: insertId(info) });
 }));
 
@@ -1404,6 +1473,12 @@ app.patch('/api/applications/:id', ah(auth), ah(async (req, res) => {
     ], 'write');
   } else {
     await runWrite('UPDATE applications SET status = ? WHERE id = ?', ['declined', id]);
+  }
+  if (status === 'accepted' && appRow.worker_id !== req.user.id) {
+    notifySms(appRow.worker_id, 'accepted', composeSms(
+      (n, t) => `PieceWork: Good news, you were accepted for '${t}'. Open the app for the poster's number: pieceworkzambia.com`,
+      '', job.title
+    )).catch(() => {});
   }
   res.json({ ok: true });
 }));
@@ -2993,12 +3068,24 @@ app.post('/api/products/:id/offers', ah(auth), ah(async (req, res) => {
   if (existing) {
     await runWrite('UPDATE offers SET amount = ?, message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [amount, message, existing.id]);
+    if (product.seller_id !== req.user.id) {
+      notifySms(product.seller_id, 'offer', composeSms(
+      (n, t) => `PieceWork: ${n} offered K${amount.toLocaleString('en-US')} for your item '${t}'. Open the app to reply: pieceworkzambia.com`,
+      req.user.name, product.title
+    )).catch(() => {});
+    }
     return res.json({ ok: true, id: existing.id, updated: true });
   }
   const info = await runWrite(
     'INSERT INTO offers (product_id, buyer_id, seller_id, amount, message) VALUES (?, ?, ?, ?, ?)',
     [id, req.user.id, product.seller_id, amount, message]
   );
+  if (product.seller_id !== req.user.id) {
+    notifySms(product.seller_id, 'offer', composeSms(
+      (n, t) => `PieceWork: ${n} offered K${amount.toLocaleString('en-US')} for your item '${t}'. Open the app to reply: pieceworkzambia.com`,
+      req.user.name, product.title
+    )).catch(() => {});
+  }
   res.status(201).json({ id: insertId(info) });
 }));
 
