@@ -41,10 +41,22 @@ app.use(cors({
 }));
 const json400kb = express.json({ limit: '400kb' });
 const json10mb = express.json({ limit: '10mb' });
-// Profile updates may carry an intro video (up to ~6MB); everything else
-// stays on the small default limit.
+// Photo-carrying routes (registration selfie, job/product photos, business
+// logo, cover and documents, NRC uploads) and profile updates with an intro
+// video legitimately exceed the small default limit: a single phone photo
+// downscaled by the app still runs 200-500 KB as base64. Everything else
+// stays on the small default limit. (Oct 23, 2026: the 400 KB cap was
+// rejecting real marketplace and job photos with a 413 before validation.)
+const BIG_JSON_PREFIXES = [
+  ['POST', '/api/auth/register'],
+  ['POST', '/api/jobs'], ['PATCH', '/api/jobs'],
+  ['POST', '/api/products'], ['PATCH', '/api/products'],
+  ['POST', '/api/businesses'], ['PATCH', '/api/businesses'],
+  ['POST', '/api/applications'], ['PATCH', '/api/applications'],
+];
 app.use((req, res, next) => {
   if (req.method === 'PATCH' && req.path === '/api/users/me') return json10mb(req, res, next);
+  if (BIG_JSON_PREFIXES.some(([m, p]) => req.method === m && req.path.startsWith(p))) return json10mb(req, res, next);
   json400kb(req, res, next);
 });
 app.use(cookieParser());
