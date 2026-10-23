@@ -250,7 +250,7 @@ function openShareSheet({ heading, url, text, copiedMessage }) {
 }
 
 function shareJob(id, title) {
-  const url = PUBLIC_ORIGIN + '/#/job/' + id;
+  const url = PUBLIC_ORIGIN + '/s/job/' + id;
   openShareSheet({
     heading: 'Share this job',
     url,
@@ -260,7 +260,7 @@ function shareJob(id, title) {
 }
 
 function shareProduct(id, title) {
-  const url = PUBLIC_ORIGIN + '/#/product/' + id;
+  const url = PUBLIC_ORIGIN + '/s/product/' + id;
   openShareSheet({
     heading: 'Share this item',
     url,
@@ -270,12 +270,22 @@ function shareProduct(id, title) {
 }
 
 function shareBusiness(slug, name) {
-  const url = PUBLIC_ORIGIN + '/#/business/' + encodeURIComponent(slug);
+  const url = PUBLIC_ORIGIN + '/s/business/' + encodeURIComponent(slug);
   openShareSheet({
     heading: 'Share this storefront',
     url,
     text: '"' + name + '" — visit this storefront on PieceWork Zambia',
     copiedMessage: 'Storefront link copied. Paste it anywhere to share.',
+  });
+}
+
+function shareProfile(id, name) {
+  const url = PUBLIC_ORIGIN + '/s/user/' + id;
+  openShareSheet({
+    heading: 'Share this profile',
+    url,
+    text: '"' + name + '" · see this profile on PieceWork Zambia',
+    copiedMessage: 'Profile link copied. Paste it anywhere to share.',
   });
 }
 
@@ -1246,6 +1256,7 @@ async function viewProduct(id) {
         ${!isOwner ? `
         <div class="btn-row" style="margin-top:12px">
           <button class="btn btn-primary" id="btn-msg-seller">${icon('message')} Message seller</button>
+          <button class="btn btn-outline" data-share-product="${p.id}" data-title="${esc(p.title)}">${icon('share')} Share</button>
           <button class="btn btn-outline" id="btn-report-product">${icon('shield')} Report</button>
         </div>
         ${p.status === 'active' ? `
@@ -1261,6 +1272,7 @@ async function viewProduct(id) {
         </div>` : '<p class="small muted" style="margin-top:10px">This item is not on sale right now.</p>'}
         ` : `
         <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-outline" data-share-product="${p.id}" data-title="${esc(p.title)}">${icon('share')} Share</button>
           <a class="btn btn-outline" href="#/product/${p.id}/edit">${icon('edit')} Edit listing</a>
           ${p.status === 'active' ? `<button class="btn btn-outline" id="btn-mark-sold">Mark as sold</button><button class="btn btn-outline" id="btn-hide">Hide</button>` : ''}
           ${p.status === 'hidden' ? `<button class="btn btn-outline" id="btn-unhide">Show again</button>` : ''}
@@ -3096,7 +3108,7 @@ async function viewProfile() {
       <h2>${esc(currentUser.name)}</h2>
       <div class="sub">${esc(currentUser.city)} · ${stars(currentUser.rating_avg)} (${currentUser.rating_count} reviews)</div>
       ${currentUser.selfie_status === 'approved' ? '<div style="margin-top:6px"><span class="badge badge-verified">✓ Verified Member</span></div>' : ''}
-      <div style="margin-top:12px"><a class="btn btn-sm btn-primary" href="#/user/${currentUser.id}">${icon('eye')}View public profile</a></div>
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><a class="btn btn-sm btn-primary" href="#/user/${currentUser.id}">${icon('eye')}View public profile</a><button class="btn btn-sm btn-outline" id="pf-share">${icon('share')}Share my profile</button></div>
     </div>
     <div class="profile-stats" id="pf-stats">
       <div><strong>–</strong><span>Loading</span></div><div><strong>–</strong><span></span></div><div><strong>–</strong><span></span></div>
@@ -3123,6 +3135,7 @@ async function viewProfile() {
   </div>`;
 
   document.getElementById('pf-edit').addEventListener('click', () => { location.hash = '#/profile/edit'; });
+  document.getElementById('pf-share').addEventListener('click', () => shareProfile(currentUser.id, currentUser.name));
   document.getElementById('pf-logout').addEventListener('click', logout);
   const tabO = document.getElementById('tab-overview');
   const tabR = document.getElementById('tab-reviews');
@@ -3481,6 +3494,7 @@ async function viewUser(id) {
         <h2>${esc(user.name)}</h2>
         <div class="sub">${esc(user.city)} · ${stars(user.rating_avg)} (${user.rating_count} reviews)</div>
         ${trustBadgesHtml(user.badges, user.vouch_count)}
+        <div style="margin-top:12px"><button class="btn btn-sm btn-outline" id="share-profile-btn">${icon('share')}Share profile</button></div>
       </div>
       ${user.intro_video ? `
       <div class="page" style="padding-top:0">
@@ -3540,6 +3554,8 @@ async function viewUser(id) {
         </div>
       </div>
     </div>`;
+    const shareProfileBtn = document.getElementById('share-profile-btn');
+    if (shareProfileBtn) shareProfileBtn.addEventListener('click', () => shareProfile(user.id, user.name));
     const vouchBtn = document.getElementById('vouch-btn');
     if (vouchBtn) vouchBtn.addEventListener('click', async () => {
       vouchBtn.disabled = true;

@@ -3263,6 +3263,127 @@ app.post('/api/conversations/:id/messages', ah(auth), msgLimiter, ah(async (req,
   res.status(201).json({ message: msg });
 }));
 
+
+// ---------------------------------------------------------------- share previews
+// Social apps (WhatsApp, Facebook) do not run the SPA and cannot read hash
+// routes, so every shared link used to preview with one static promo image
+// (the old hiring artwork). These /s/ pages carry per-item Open Graph tags:
+// the shop's own cover or logo, the product's own photo, the member's own
+// profile picture, the job's own photo. Real visitors are sent straight on
+// to the matching in-app page. Zac, Oct 23, 2026.
+const SHARE_ORIGIN = 'https://pieceworkzambia.com';
+const BRAND_OG_IMAGE = SHARE_ORIGIN + '/img/og-brand.jpg';
+const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const excerpt = (v, n) => { const t = String(v || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '...' : t; };
+
+function sharePreviewPage(res, { title, desc, image, target }) {
+  const t = escHtml(title); const d = escHtml(desc); const img = escHtml(image); const url = escHtml(target);
+  res.set('Cache-Control', 'no-cache');
+  res.type('html').send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>${t}</title>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="PieceWork Zambia">
+<meta property="og:title" content="${t}">
+<meta property="og:description" content="${d}">
+<meta property="og:image" content="${img}">
+<meta property="og:url" content="${url}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${t}">
+<meta name="twitter:description" content="${d}">
+<meta name="twitter:image" content="${img}">
+<meta http-equiv="refresh" content="0; url=${url}">
+</head><body style="font-family:sans-serif;background:#101B35;color:#F5F7FB;text-align:center;padding:40px">
+<p>${t}</p><p><a href="${url}" style="color:#FFB547">Open on PieceWork Zambia</a></p>
+<script>location.replace(${JSON.stringify(target)});</script>
+</body></html>`);
+}
+
+function genericShare(res, target) {
+  return sharePreviewPage(res, {
+    title: 'PieceWork Zambia: Quick jobs. Quick cash.',
+    desc: 'Find piece work, hire trusted help, buy and sell in the Marketplace, all across Zambia.',
+    image: BRAND_OG_IMAGE,
+    target,
+  });
+}
+
+function sendDataImage(res, value) {
+  const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,([\s\S]+)$/.exec(String(value || ''));
+  if (!m) return err(res, 404, 'No image.');
+  res.set('Content-Type', m[1]);
+  res.set('Cache-Control', 'public, max-age=86400');
+  return res.send(Buffer.from(m[2], 'base64'));
+}
+
+// A member's public profile picture (the avatar already shown across the
+// app). The verification selfie is never served here.
+app.get('/api/users/:id/avatar', ah(async (req, res) => {
+  const u = await getOne('SELECT avatar FROM users WHERE id = ?', [req.params.id]);
+  if (!u || !u.avatar) return err(res, 404, 'No profile picture.');
+  return sendDataImage(res, u.avatar);
+}));
+
+// A storefront's own logo or cover, for link previews.
+app.get('/api/businesses/:id/image/:kind', ah(async (req, res) => {
+  const kind = req.params.kind === 'cover' ? 'cover' : 'logo';
+  const b = await getOne(`SELECT ${kind} AS img FROM businesses WHERE id = ?`, [req.params.id]);
+  if (!b || !b.img) return err(res, 404, 'No image.');
+  return sendDataImage(res, b.img);
+}));
+
+app.get('/s/business/:slug', ah(async (req, res) => {
+  const b = await getOne('SELECT * FROM businesses WHERE slug = ?', [req.params.slug]);
+  if (!b || b.status !== 'active') return genericShare(res, SHARE_ORIGIN + '/#/businesses');
+  const image = b.cover
+    ? `${SHARE_ORIGIN}/api/businesses/${b.id}/image/cover`
+    : (b.logo ? `${SHARE_ORIGIN}/api/businesses/${b.id}/image/logo` : BRAND_OG_IMAGE);
+  return sharePreviewPage(res, {
+    title: `${b.name} · Storefront on PieceWork Zambia`,
+    desc: excerpt(b.tagline || b.description, 180) || `Visit ${b.name} on PieceWork Zambia.`,
+    image,
+    target: `${SHARE_ORIGIN}/#/business/${encodeURIComponent(b.slug)}`,
+  });
+}));
+
+app.get('/s/product/:id', ah(async (req, res) => {
+  const p = await getOne(`SELECT pr.*, (SELECT ph.id FROM product_photos ph WHERE ph.product_id = pr.id ORDER BY ph.sort, ph.id LIMIT 1) AS cover_photo_id FROM products pr WHERE pr.id = ?`, [req.params.id]);
+  if (!p || p.status !== 'active') return genericShare(res, SHARE_ORIGIN + '/#/market');
+  return sharePreviewPage(res, {
+    title: `${p.title} · K${Number(p.price || 0).toLocaleString('en-US')} on PieceWork Zambia`,
+    desc: excerpt(p.description, 180) || `${p.condition || ''} · ${p.city || ''} · See it on PieceWork Zambia.`,
+    image: p.cover_photo_id ? `${SHARE_ORIGIN}/api/products/${p.id}/photos/${p.cover_photo_id}` : BRAND_OG_IMAGE,
+    target: `${SHARE_ORIGIN}/#/product/${p.id}`,
+  });
+}));
+
+app.get('/s/user/:id', ah(async (req, res) => {
+  const u = await getOne('SELECT id, name, city, avatar, suspended_at FROM users WHERE id = ?', [req.params.id]);
+  if (!u || u.suspended_at) return genericShare(res, SHARE_ORIGIN + '/');
+  let statsLine = '';
+  try {
+    const st = await trackRecord(u.id);
+    statsLine = ` · ${st.jobs_completed} jobs completed · ${st.items_sold} items sold`;
+  } catch { /* stats are a bonus, never block the preview */ }
+  return sharePreviewPage(res, {
+    title: `${u.name} · PieceWork Zambia`,
+    desc: `${u.city || 'Zambia'}${statsLine}. See the profile, ratings and reviews on PieceWork Zambia.`,
+    image: u.avatar ? `${SHARE_ORIGIN}/api/users/${u.id}/avatar` : BRAND_OG_IMAGE,
+    target: `${SHARE_ORIGIN}/#/user/${u.id}`,
+  });
+}));
+
+app.get('/s/job/:id', ah(async (req, res) => {
+  const j = await getOne(`SELECT jb.*, (SELECT ph.id FROM job_photos ph WHERE ph.job_id = jb.id ORDER BY ph.sort, ph.id LIMIT 1) AS cover_photo_id FROM jobs jb WHERE jb.id = ?`, [req.params.id]);
+  if (!j || j.is_draft) return genericShare(res, SHARE_ORIGIN + '/#/jobs');
+  return sharePreviewPage(res, {
+    title: `${j.title} · ${j.city} on PieceWork Zambia`,
+    desc: excerpt(j.description, 180) || `${j.category} piece work in ${j.city}. Apply on PieceWork Zambia.`,
+    image: j.cover_photo_id ? `${SHARE_ORIGIN}/api/jobs/${j.id}/photos/${j.cover_photo_id}` : BRAND_OG_IMAGE,
+    target: `${SHARE_ORIGIN}/#/job/${j.id}`,
+  });
+}));
+
 // ---------------------------------------------------------------- frontend
 // The service worker script itself must never be HTTP-cached: browsers check
 // for SW updates against the HTTP cache, so a cached sw.js would delay every
