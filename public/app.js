@@ -1208,6 +1208,7 @@ async function viewProduct(id) {
           <span style="display:block">${stars(p.seller_rating || 0)} <span class="small muted">(${p.seller_rating_count || 0} reviews)</span></span>
           ${p.seller_verified ? '<span class="badge badge-status-open">ID verified</span>' : '<span class="small muted">ID not verified yet</span>'}</span>
         </a>
+        ${p.seller_stats ? `<div class="trust-strip"><span>${icon('check')} ${p.seller_stats.jobs_completed} job${p.seller_stats.jobs_completed === 1 ? '' : 's'} completed</span><span>${p.seller_stats.items_sold} item${p.seller_stats.items_sold === 1 ? '' : 's'} sold</span><span>${p.seller_stats.items_listed} listed now</span></div>` : ''}
         ${!isOwner ? `
         <div class="btn-row" style="margin-top:12px">
           <button class="btn btn-primary" id="btn-msg-seller">${icon('message')} Message seller</button>
@@ -3431,7 +3432,7 @@ function stampConfidential(dataUrl) {
 async function viewUser(id) {
   app.innerHTML = loadingHtml('Loading profile…');
   try {
-    const { user, completed_jobs, reviews, vouched_by, viewer_vouched } = await api('/api/users/' + id);
+    const { user, completed_jobs, reviews, vouched_by, viewer_vouched, stats } = await api('/api/users/' + id);
     const skills = (user.skills || '').split(',').map(s => s.trim()).filter(Boolean);
     const isSelf = currentUser && currentUser.id === user.id;
     const canVouch = currentUser && !isSelf && currentUser.selfie_status === 'approved';
@@ -3452,6 +3453,7 @@ async function viewUser(id) {
       </div>` : ''}
       <div class="profile-stats">
         <div><strong>${completed_jobs}</strong><span>Jobs completed</span></div>
+        <div><strong>${stats ? stats.items_sold : 0}</strong><span>Items sold</span></div>
         <div><strong>${user.rating_avg ? Number(user.rating_avg).toFixed(1) : '–'}</strong><span>Avg rating</span></div>
         <div><strong>${reviews.length}</strong><span>Reviews</span></div>
       </div>

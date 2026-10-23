@@ -1750,30 +1750,36 @@ app.get('/api/users/:id', maybeAuth, ah(async (req, res) => {
     };
   }
   res.json({
-    user: u, completed_jobs: completed, reviews,
+    user: u, completed_jobs: completed, reviews, stats: await trackRecord(id),
     vouched_by: vouchedBy.map(r => r.name), viewer_vouched: viewerVouched,
   });
 }));
 
-app.get('/api/users/me/stats', ah(auth), ah(async (req, res) => {
-  const me = req.user.id;
-  const one = async (sql) => { const r = await getOne(sql, [me]); return r ? r.c : 0; };
+// Track record counts, one definition shared by the own-profile stats, the
+// public profile, and the marketplace seller card (the trust strip a tester
+// asked for, Oct 23, 2026: show how credible and reliable a person is).
+async function trackRecord(userId) {
+  const one = async (sql) => { const r = await getOne(sql, [userId]); return r ? r.c : 0; };
   const posted = await one("SELECT COUNT(*) AS c FROM jobs WHERE poster_id = ? AND status = 'completed'");
   const worked = await getOne(
     `SELECT COUNT(*) AS c FROM applications a JOIN jobs j ON j.id = a.job_id
-     WHERE a.worker_id = ? AND a.status = 'accepted' AND j.status = 'completed'`, [me]);
+     WHERE a.worker_id = ? AND a.status = 'accepted' AND j.status = 'completed'`, [userId]);
   const sold = await one("SELECT COUNT(*) AS c FROM products WHERE seller_id = ? AND status = 'sold'");
   const postedAll = await one('SELECT COUNT(*) AS c FROM jobs WHERE poster_id = ?');
   const listed = await one("SELECT COUNT(*) AS c FROM products WHERE seller_id = ? AND status = 'active'");
-  const u = await getOne('SELECT rating_avg, rating_count FROM users WHERE id = ?', [me]);
-  res.json({
+  const u = await getOne('SELECT rating_avg, rating_count FROM users WHERE id = ?', [userId]);
+  return {
     jobs_completed: posted + (worked ? worked.c : 0),
     items_sold: sold,
     jobs_posted: postedAll,
     items_listed: listed,
     rating_avg: u ? Number(u.rating_avg || 0) : 0,
     rating_count: u ? Number(u.rating_count || 0) : 0,
-  });
+  };
+}
+
+app.get('/api/users/me/stats', ah(auth), ah(async (req, res) => {
+  res.json(await trackRecord(req.user.id));
 }));
 
 app.patch('/api/users/me', ah(auth), ah(async (req, res) => {
@@ -2908,6 +2914,7 @@ app.get('/api/products/:id', ah(maybeAuth), ah(async (req, res) => {
       status: o.status, created_at: o.created_at,
     }));
   }
+  product.seller_stats = await trackRecord(product.seller_id);
   res.json({ product, my_offer: myOffer, ...(offers ? { offers } : {}) });
 }));
 
