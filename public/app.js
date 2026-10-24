@@ -44,6 +44,7 @@ const ICONS = {
   tag: '<path d="M12 2H2v10l9.3 9.3a1 1 0 0 0 1.4 0l8.6-8.6a1 1 0 0 0 0-1.4z"/><circle cx="7" cy="7" r="1.4"/>',
   phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>',
   eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>',
   edit: '<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
   send: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>',
@@ -490,6 +491,34 @@ async function logout() {
   toast('Signed out.');
 }
 
+/** Password visibility (Zac, Oct 24): an eye toggle on every password
+ * field, so people can check what they typed. */
+function wirePasswordEyes(scope) {
+  (scope || document).querySelectorAll('input[type="password"]').forEach((input) => {
+    if (input.dataset.eyeWired) return;
+    input.dataset.eyeWired = '1';
+    const wrap = document.createElement('span');
+    wrap.className = 'pw-wrap';
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pw-eye';
+    btn.setAttribute('aria-label', 'Show password');
+    btn.setAttribute('aria-pressed', 'false');
+    btn.innerHTML = icon('eye');
+    btn.addEventListener('click', () => {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.innerHTML = icon(show ? 'eyeOff' : 'eye');
+      btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+      input.focus();
+    });
+    wrap.appendChild(btn);
+  });
+}
+
 /** Dark mode: <html data-theme> is set early in index.html; this keeps the
  * topbar toggle in sync and persists the choice on the device. */
 function currentTheme() {
@@ -786,24 +815,23 @@ async function viewHome() {
       <p class="muted" style="margin:0 0 10px">Find work, hire workers, buy and sell. Get things done.</p>
       <div class="searchbar">${icon('search')}<input id="home-q" type="search" placeholder="Search jobs, products, services" aria-label="Search jobs, products and people"></div>
     </div>
-    <div class="qa-grid">
-      <a class="qa-item" href="#/jobs"><span class="qa-ico" style="background:#E3EBFE;color:#2468FD">${icon('briefcase')}</span>Find Work</a>
-      <a class="qa-item" href="#/post"><span class="qa-ico" style="background:#E2F4E8;color:#16A34A">${icon('plus')}</span>Post a Job</a>
-      <a class="qa-item" href="#/market"><span class="qa-ico" style="background:#FFF0D2;color:#B45309">${icon('tag')}</span>Marketplace</a>
-      <a class="qa-item" href="#/sell"><span class="qa-ico" style="background:#E4E9F5;color:#101B35">${icon('plus')}</span>Sell an Item</a>
-      <a class="qa-item" href="#/businesses"><span class="qa-ico" style="background:#E3EBFE;color:#101B35">${icon('grid')}</span>Businesses</a>
-      <span class="qa-item soon" title="Delivery is coming soon"><span class="qa-ico" style="background:#E2F4E8;color:#16A34A">${icon('truck')}</span>Delivery<span class="soon-pill">Soon</span></span>
-      <a class="qa-item" href="#/messages"><span class="qa-ico" style="background:#E3EBFE;color:#2468FD">${icon('message')}</span>Messages</a>
-      <a class="qa-item" href="#/categories"><span class="qa-ico" style="background:#E5E7EB;color:#6B7280">${icon('sliders')}</span>More</a>
+    <section class="hero-card">
+      <div class="hero-copy">
+        <h2>Find Reliable Help Near You</h2>
+        <p>Hire trusted workers for everyday tasks, or find work in ${esc(currentUser.city || 'your area')}.</p>
+        <a class="btn btn-primary" href="#/workers">Find Workers</a>
+      </div>
+      <img class="hero-img" src="/img/landing/hero-pro.jpg" alt="A trusted PieceWork professional" loading="lazy">
+    </section>
+    <div class="qa4">
+      <a class="qa4-item" href="#/post"><span class="qa4-ico" style="background:#E6F7F0;color:#0B8562">${icon('plus')}</span>Post a Job</a>
+      <a class="qa4-item" href="#/workers"><span class="qa4-ico" style="background:#E3EBFE;color:#2563EB">${icon('users')}</span>Find Workers</a>
+      <a class="qa4-item" href="#/market"><span class="qa4-ico" style="background:#FEF3D8;color:#B45309">${icon('tag')}</span>Marketplace</a>
+      <a class="qa4-item" href="#/saved"><span class="qa4-ico" style="background:#FDE8E8;color:#C81E1E">${icon('heart')}</span>Saved</a>
     </div>
     <div class="page" style="padding-top:6px">
       <div id="home-ads"></div>
-      <a class="promo-card" href="#/jobs" style="text-decoration:none;color:#fff">
-        <img src="/img/landing/hero.jpg" alt="Zambians doing piece work" loading="lazy">
-        <div class="promo-text"><h3>Find Opportunities Around You</h3><p>Jobs, products, services and more in ${esc(currentUser.city || 'Zambia')}</p></div>
-        <span class="promo-arrow">${icon('chevR')}</span>
-      </a>
-      <div class="section-title"><span>Popular Categories</span><a href="#/categories">See all</a></div>
+      <div class="section-title"><span>Popular Services</span><a href="#/categories">See all</a></div>
       <div class="pop-strip">
         ${[['Painting', 'painting.jpg'], ['Gardening', 'gardening.jpg'], ['Cleaning', 'cleaning.jpg'], ['Construction', 'construction.jpg'], ['Delivery & Errands', 'deliveries.jpg'], ['Car Wash', 'carwash.jpg']].map(([c, img]) => `
           <div class="pop-tile" data-cat-link="${esc(c)}" tabindex="0" role="link" aria-label="Browse ${esc(c)} jobs">
@@ -811,10 +839,12 @@ async function viewHome() {
             <b>${esc(c === 'Delivery & Errands' ? 'Delivery' : c)}</b>
           </div>`).join('')}
       </div>
+      <div id="home-workers"></div>
       <div id="gw-promo"></div>
       <div id="home-reco"></div>
-      <div class="section-title"><span>${getLoc() ? 'Jobs Near You' : 'Fresh Jobs'}</span><a href="#/jobs">See all</a></div>
+      <div class="section-title"><span>${getLoc() ? 'Jobs Near You' : 'Recent Jobs'}</span><a href="#/jobs">See all</a></div>
       <div id="home-jobs">${skeletonCards(3)}</div>
+      <div id="home-picks"></div>
       <div class="card safety-card" style="margin-top:18px">
         <div class="safety-ico">${icon('shield')}</div>
         <div>
@@ -837,7 +867,7 @@ async function viewHome() {
     const slot = document.getElementById('gw-promo');
     if (!slot || !giveaway) return;
     slot.innerHTML = `
-      <a class="promo-card" href="#/invite" style="text-decoration:none;color:#fff;background:linear-gradient(135deg,#101B35,#2468FD);display:flex;align-items:center;gap:14px;padding:18px">
+      <a class="promo-card" href="#/invite" style="text-decoration:none;color:#fff;background:linear-gradient(135deg,#0B1F3B,#2563EB);display:flex;align-items:center;gap:14px;padding:18px">
         <div style="font-size:34px">🎉</div>
         <div class="promo-text"><h3>Win K${Number(giveaway.prize_kwacha).toLocaleString()}!</h3><p>Invite friends, earn raffle entries. Drawn live on Facebook.</p></div>
       </a>`;
@@ -864,6 +894,48 @@ async function viewHome() {
     slot.innerHTML = `
       <div class="section-title"><span>Recommended Jobs Near You</span><a href="#/jobs">See all</a></div>
       <div class="card-grid">${d.jobs.slice(0, 3).map(j => `<div class="reco-item"><div class="small reco-reason">⭐ ${esc(j.recommend_reason || 'Recommended for you')}</div>${jobCard(j)}</div>`).join('')}</div>`;
+  }).catch(() => {});
+  // Redesign: Featured Workers from the real open-to-work directory.
+  api('/api/workers').then((d) => {
+    const slot = document.getElementById('home-workers');
+    if (!slot) return;
+    const ws = (d.workers || []).slice(0, 8);
+    if (!ws.length) {
+      slot.innerHTML = `
+      <div class="section-title"><span>Featured Workers</span><a href="#/workers">See all</a></div>
+      <div class="card" style="display:flex;gap:12px;align-items:center">
+        <div><b>No workers listed yet</b><p class="small muted" style="margin:2px 0 0">Post a job and let workers come to you.</p></div>
+        <a class="btn btn-sm btn-primary" href="#/post" style="margin-left:auto">Post a Job</a>
+      </div>`;
+      return;
+    }
+    slot.innerHTML = `
+      <div class="section-title"><span>Featured Workers</span><a href="#/workers">See all</a></div>
+      <div class="fw-scroll">${ws.map(w => `
+        <a class="fw-card" href="#/user/${w.id}">
+          ${avatarHtml(w, 'lg')}
+          <b>${esc(w.name)}</b>
+          ${w.rating_count ? `<span class="fw-rate">${stars(w.rating_avg)} ${Number(w.rating_avg).toFixed(1)}</span>` : ''}
+          <span class="fw-skills">${esc(String(w.skills || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 2).join(' · '))}</span>
+          <span class="fw-city">${icon('pin')}${esc(w.city || '')}</span>
+        </a>`).join('')}
+      </div>`;
+  }).catch(() => {});
+  // Redesign: Marketplace Picks from real listings.
+  api('/api/products').then((d) => {
+    const slot = document.getElementById('home-picks');
+    if (!slot) return;
+    const ps = (d.products || []).slice(0, 8);
+    if (!ps.length) return;
+    slot.innerHTML = `
+      <div class="section-title"><span>Marketplace Picks</span><a href="#/market">See all</a></div>
+      <div class="hscroll">${ps.map(productCard).join('')}</div>`;
+    slot.querySelectorAll('[data-product]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        location.hash = '#/product/' + el.dataset.product;
+      });
+    });
   }).catch(() => {});
   try {
     const loc = getLoc();
@@ -1135,8 +1207,9 @@ function workerCard(w) {
 async function viewWorkers() {
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Looking for Work</h1>
-    <p class="page-sub">Workers who opted in to be found by posters. Tap a card to see the full profile.</p>
+    <h1 class="page-title">Find Workers</h1>
+    <p class="page-sub">Workers who marked themselves open to work. Search by name or skill, and tap a card for the full profile.</p>
+    <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="wk-q" type="search" placeholder="Search name, skill or town" aria-label="Search workers"></div>
     <div class="field" style="max-width:320px">
       <select id="wk-city" aria-label="Filter by city"><option value="">All cities</option>${CITIES.map(c => `<option>${esc(c)}</option>`).join('')}</select>
     </div>
@@ -1144,13 +1217,17 @@ async function viewWorkers() {
   </div></div>`;
   const results = document.getElementById('wk-results');
   const sel = document.getElementById('wk-city');
+  const wq = document.getElementById('wk-q');
   async function load() {
     results.innerHTML = skeletonCards(3);
     try {
-      const q = sel.value ? '?city=' + encodeURIComponent(sel.value) : '';
-      const data = await api('/api/workers' + q);
+      const params = new URLSearchParams();
+      if (sel.value) params.set('city', sel.value);
+      if (wq.value.trim()) params.set('q', wq.value.trim());
+      const qs = params.toString();
+      const data = await api('/api/workers' + (qs ? '?' + qs : ''));
       if (!data.workers.length) {
-        results.innerHTML = emptyHtml('users', 'No workers listed yet',
+        results.innerHTML = emptyHtml('users', 'No workers found',
           'Be the first — tick "I\u2019m looking for work" in your profile settings.',
           currentUser ? `<a class="btn btn-sm btn-primary" href="#/profile/edit">Update my profile</a>` : `<a class="btn btn-sm btn-primary" href="#/register">Join free</a>`);
         return;
@@ -1166,6 +1243,8 @@ async function viewWorkers() {
     }
   }
   sel.addEventListener('change', load);
+  let wkT;
+  wq.addEventListener('input', () => { clearTimeout(wkT); wkT = setTimeout(load, 250); });
   load();
 }
 
@@ -1342,7 +1421,7 @@ async function viewProduct(id) {
       ${p.business ? `<a class="card" href="#/business/${esc(p.business.slug)}" style="display:flex;align-items:center;gap:10px;color:var(--ink);margin-top:12px"><span style="flex:1">Sold by <b>${esc(p.business.name)}</b>${p.business.verified ? ' <span class="badge badge-verified">✓ Verified business</span>' : ''}</span><span class="chev">${icon('chevR')}</span></a>` : ''}
       <div class="card">
         <h3 style="margin-top:0">Seller</h3>
-        <a href="#/user/${p.seller_id}" style="display:flex;align-items:center;gap:10px;color:var(--ink)">
+        <a href="#/user/${p.seller_id}" style="display:flex;align-items:flex-start;gap:10px;color:var(--ink)">
           ${avatarHtml({ name: p.seller_name, avatar: p.seller_avatar }, 'md')}
           <span><b>${esc(p.seller_name)}</b>
           <span class="small muted" style="display:block">${esc(p.seller_city || '')}${p.seller_since ? ' · Member since ' + esc(String(p.seller_since).slice(0, 4)) : ''}</span>
@@ -1368,7 +1447,7 @@ async function viewProduct(id) {
           <p class="small muted" style="margin-top:6px">An offer is a proposal, not a payment. You pay the seller directly when you meet.</p>
         </div>` : '<p class="small muted" style="margin-top:10px">This item is not on sale right now.</p>'}
         ` : `
-        <div class="btn-row" style="margin-top:12px">
+        <div class="btn-row owner-actions" style="margin-top:12px">
           <button class="btn btn-outline" data-share-product="${p.id}" data-title="${esc(p.title)}">${icon('share')} Share</button>
           <a class="btn btn-outline" href="#/product/${p.id}/edit">${icon('edit')} Edit listing</a>
           ${p.status === 'active' ? `<button class="btn btn-outline" id="btn-mark-sold">Mark as sold</button><button class="btn btn-outline" id="btn-hide">Hide</button>` : ''}
@@ -2778,6 +2857,7 @@ function jobFormHtml(prefill = {}, mode = 'post') {
   const isEdit = mode === 'edit';
   return `
   <form id="job-form" novalidate>
+    <div class="jf-step"><span>1</span>Job details</div>
     <div class="field">
       <label for="jf-title">Job title</label>
       <input name="title" id="jf-title" maxlength="120" value="${esc(prefill.title || '')}" placeholder="e.g. Need 3 people to offload a truck">
@@ -2794,6 +2874,7 @@ function jobFormHtml(prefill = {}, mode = 'post') {
       <textarea name="description" id="jf-desc" placeholder="What exactly needs doing? Hours? What should workers bring?">${esc(prefill.description || '')}</textarea>
       <div class="hint">Be specific — clear jobs get better workers.</div>
     </div>
+    <div class="jf-step"><span>2</span>Where and when</div>
     <div style="display:flex;gap:10px">
       <div class="field" style="flex:1">
         <label for="jf-city">City</label>
@@ -2811,6 +2892,7 @@ function jobFormHtml(prefill = {}, mode = 'post') {
       <label for="jf-date">Date needed</label>
       <input name="date_needed" id="jf-date" type="date" min="${today}" value="${esc(prefill.date_needed || today)}">
     </div>
+    <div class="jf-step"><span>3</span>Pay and team</div>
     <div style="display:flex;gap:10px">
       <div class="field" style="flex:1">
         <label for="jf-pay">Pay (Kwacha)</label>
@@ -2864,6 +2946,7 @@ function jobFormHtml(prefill = {}, mode = 'post') {
         <span><b>Urgent</b><br><span class="hint">This job needs workers fast. It gets an Urgent badge.</span></span>
       </label>
     </div>
+    <div class="jf-step"><span>4</span>Instructions and location</div>
     <div class="field">
       <label for="jf-instructions">Instructions for workers <span class="hint-inline">(optional)</span></label>
       <textarea name="instructions" id="jf-instructions" maxlength="1000" placeholder="e.g. Report to the security gate at 07:00 and ask for Mr Banda. Bring your own gloves.">${esc(prefill.instructions || '')}</textarea>
@@ -2891,8 +2974,10 @@ function jobFormHtml(prefill = {}, mode = 'post') {
         <span class="small">I have read and agree to the <a href="#/terms" target="_blank" rel="noopener">Terms and Conditions</a> — including that PieceWork is not liable for any damage or theft, and that I am responsible for my own safety precautions when hiring.</span>
       </label>
     </div>`)}
-    <button class="btn btn-primary full" type="submit">${icon(isEdit ? 'check' : 'send')}${isEdit ? 'Save changes' : 'Post job'}</button>
-    ${isEdit ? '' : '<button class="btn btn-outline full" type="button" id="btn-save-draft" style="margin-top:8px">Save as draft instead</button>'}
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">${icon(isEdit ? 'check' : 'send')}${isEdit ? 'Save changes' : 'Post job'}</button>
+      ${isEdit ? '' : '<button class="btn btn-outline" type="button" id="btn-save-draft">Save draft</button>'}
+    </div>
   </form>`;
 }
 
@@ -2900,7 +2985,7 @@ async function viewPost() {
   if (!requireAuth('#/post')) return;
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Hire workers</h1>
+    <h1 class="page-title">Post a Job</h1>
     <p class="page-sub">Have work that needs doing? Describe it here and nearby workers will apply. <b>Looking for work yourself?</b> Do not post here — <a href="#/profile">tick &ldquo;I&rsquo;m looking for work&rdquo; in your profile</a> instead.</p>
     <div class="card">${jobFormHtml()}</div>
     ${momoNoteHtml()}
@@ -3706,6 +3791,12 @@ async function viewUser(id) {
           ${isSelf ? `<div style="margin-top:12px"><a class="btn btn-sm btn-outline" href="#/profile/edit">${icon('edit')}Edit my profile</a></div>` : ''}
         </div>
         ${!isSelf && currentUser ? `
+        <div class="card hire-cta">
+          <h3 style="margin-top:0">Hire ${firstName}</h3>
+          <p class="small muted" style="margin-top:0">${user.open_to_work ? `${firstName} is open to work in ${esc(user.city)}.` : `Post a job and ${firstName} can apply with one tap.`} PieceWork hiring runs through job posts, so your agreement stays on the record.</p>
+          <a class="btn btn-primary" href="#/post">${icon('plus')}Post a Job</a>
+        </div>` : ''}
+        ${!isSelf && currentUser ? `
         <div class="card">
           <h3 style="margin-top:0">${icon('users')} Vouch for ${firstName}</h3>
           <p class="small muted" style="margin-top:0">Know ${firstName} in real life? Your vouch tells posters this person can be trusted. Only vouch for people you personally know.</p>
@@ -3810,7 +3901,7 @@ function viewCategories() {
       }).join('')}
     </div>
     <a class="promo-card" href="#/jobs" style="text-decoration:none;color:#fff">
-      <img src="/img/landing/hero.jpg" alt="Zambians doing piece work" loading="lazy">
+      <img src="/img/landing/zambia-man.jpg" alt="A Zambian worker" loading="lazy">
       <div class="promo-text"><h3>Work skills build stronger communities.</h3><p>Every job done well builds your reputation — and your income.</p></div>
     </a>
   </div></div>`;
@@ -4031,6 +4122,7 @@ function viewLogin() {
     </div>
     <p style="text-align:center">New here? <a href="#/register" style="font-weight:700">Create an account</a></p>
   </div></div>`;
+  wirePasswordEyes(app);
   const form = document.getElementById('login-form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -4128,6 +4220,7 @@ function viewReset() {
     </div>
     <p style="text-align:center"><a href="#/login" style="font-weight:600">Back to sign in</a></p>
   </div></div>`;
+  wirePasswordEyes(app);
   const form = document.getElementById('reset-form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -4211,6 +4304,7 @@ function viewRegister() {
     </div>
     <p style="text-align:center">Already registered? <a href="#/login" style="font-weight:700">Sign in</a></p>
   </div></div>`;
+  wirePasswordEyes(app);
   const form = document.getElementById('reg-form');
   let regAvatar = null, regSelfie = null;
   const wirePhotoPicker = (btnId, fileId, previewId, setter, maxDim, square) => {
@@ -4262,7 +4356,7 @@ function viewLanding() {
   app.innerHTML = `
   <div class="view">
     <section class="hero">
-      <img class="bg" src="/img/landing/hero.jpg" alt="Zambian workers doing piece work — bricklaying, gardening, painting and deliveries" fetchpriority="high">
+      <img class="bg" src="/img/landing/cleaner-pro.jpg" alt="A PieceWork cleaning professional" fetchpriority="high">
       <div class="hero-overlay"></div>
       <div class="hero-content">
         <span class="kicker">Zambia's piece-work marketplace</span>
@@ -4581,9 +4675,9 @@ async function viewAdmin() {
       <div class="admin-dash">
         <div class="dash-head"><h2>Admin Dashboard</h2><span>PieceWork Zambia at a glance</span></div>
         <div class="dash-tiles">
-          ${tile('#2468FD', 'users', 'Users', s.users)}
-          ${tile('#16A34A', 'briefcase', 'Jobs', jobsTotal)}
-          ${tile('#FFB547;color:#101B35', 'tag', 'Products', s.products_total || 0)}
+          ${tile('#2563EB', 'users', 'Users', s.users)}
+          ${tile('#10B981', 'briefcase', 'Jobs', jobsTotal)}
+          ${tile('#F59E0B;color:#0B1F3B', 'tag', 'Products', s.products_total || 0)}
           ${tile('#16294F', 'grid', 'Businesses', s.businesses_total || 0)}
           ${tile('#0D9488', 'clipboard', 'Applications', s.applications)}
           ${tile('#E0245E', 'shield', 'Reports open', s.reports_open || 0)}
