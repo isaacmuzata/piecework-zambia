@@ -1995,7 +1995,7 @@ async function sweepExpiredNrc() {
 // ---------------------------------------------------------------- selfie verification (admin)
 app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
   if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
-  const [rows, countRow] = await Promise.all([
+  const [rows, countRow, , , , , rejected, rejectedCount, redoneCount, approvedCount] = await Promise.all([
     getAll(`
     SELECT id, name, phone, city, selfie, selfie_status, created_at
     FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'
@@ -2005,9 +2005,35 @@ app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
     getOne('SELECT COUNT(*) AS c FROM businesses'),
     getOne("SELECT COUNT(*) AS c FROM businesses WHERE status = 'pending'"),
     getOne("SELECT COUNT(*) AS c FROM reports WHERE status = 'open'"),
+    getAll(`SELECT id, name, phone, city, created_at FROM users
+            WHERE selfie IS NOT NULL AND selfie_status = 'rejected'
+            ORDER BY created_at DESC LIMIT 100`),
+    getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie_status = 'rejected'`),
+    getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie_resubmitted_at IS NOT NULL`),
+    getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie_status = 'approved'`),
   ]);
-  res.json({ pending: rows, pending_count: Number(countRow.c || 0) });
+  res.json({
+    pending: rows, pending_count: Number(countRow.c || 0),
+    rejected, rejected_count: Number(rejectedCount.c || 0),
+    redone_count: Number(redoneCount.c || 0),
+    approved_count: Number(approvedCount.c || 0),
+  });
 }));
+
+// The standard rejection notice (Zac, Oct 24): one SMS segment, in the
+// same voice as every other PieceWork text, plus a push for members who
+// enabled notifications. The K1,500 giveaway consequence rides on the
+// push and on the Edit Profile notice, to keep the SMS to one segment.
+const SELFIE_REJECTED_SMS = 'Hi, this is Zac, your assistant. Your PieceWork profile pic was not approved and is blocking recruiters. Open Profile, Edit profile and upload a clear selfie.';
+function notifySelfieRejected(userId) {
+  notifySms(userId, 'selfie_rejected', SELFIE_REJECTED_SMS).catch(() => {});
+  notifyPush(userId, {
+    title: 'PieceWork Zambia',
+    body: 'Your profile pic verification was not approved. It is blocking recruiters from moving to the next step, and unapproved pics disqualify you from the K1,500 giveaway. Tap to fix your profile.',
+    url: '#/profile/edit',
+    tag: 'selfie-rejected',
+  }).catch(() => {});
+}
 
 app.post('/api/admin/verifications/:userId', ah(auth), ah(async (req, res) => {
   if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
@@ -2018,6 +2044,19 @@ app.post('/api/admin/verifications/:userId', ah(auth), ah(async (req, res) => {
   if (!user) return err(res, 404, 'User not found.');
   await runWrite('UPDATE users SET selfie_status = ? WHERE id = ?', [status, userId]);
   logAdmin(req, 'verification.decision', 'user', userId, `selfie ${status}`);
+  if (status === 'rejected') notifySelfieRejected(userId);
+  res.json({ ok: true });
+}));
+
+// Resend the standard rejection notice (e.g. for members rejected before
+// the automatic SMS existed). Admin-triggered from the Rejected list.
+app.post('/api/admin/verifications/:userId/notify', ah(auth), ah(async (req, res) => {
+  if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
+  const userId = parseInt(req.params.userId, 10);
+  const user = await getOne('SELECT id FROM users WHERE id = ?', [userId]);
+  if (!user) return err(res, 404, 'User not found.');
+  notifySelfieRejected(userId);
+  logAdmin(req, 'verification.notify', 'user', userId, 'rejection notice resent');
   res.json({ ok: true });
 }));
 
@@ -2171,6 +2210,7 @@ app.get('/api/users/me/stats', ah(auth), ah(async (req, res) => {
 
 app.patch('/api/users/me', ah(auth), ah(async (req, res) => {
   const b = req.body || {};
+  const meRow = await getOne('SELECT selfie_status FROM users WHERE id = ?', [req.user.id]);
   const fields = {};
   const updates = [];
   const params = [];
@@ -2190,6 +2230,20 @@ app.patch('/api/users/me', ah(auth), ah(async (req, res) => {
     if (av && !/^data:image\/(jpeg|png|webp);base64,/.test(av)) fields.avatar = 'Avatar must be a JPEG, PNG or WebP image.';
     else if (av.length > 300000) fields.avatar = 'That photo is too large. Try a smaller one.';
     else { updates.push('avatar = ?'); params.push(av); }
+  }
+  if ('selfie' in b) {
+    const sErr = imageDataUrlError(b.selfie, 500000, 'A verification selfie');
+    if (sErr) fields.selfie = sErr;
+    else {
+      updates.push('selfie = ?'); params.push(String(b.selfie));
+      // A fresh selfie always goes back to the review queue. When it
+      // replaces a rejected one, stamp the re-do so the admin dashboard
+      // can count members who fixed their photo.
+      updates.push("selfie_status = 'pending'");
+      if (meRow && meRow.selfie_status === 'rejected') {
+        updates.push("selfie_resubmitted_at = datetime('now')");
+      }
+    }
   }
   if ('intro_video' in b) {
     const v = String(b.intro_video || '');
@@ -2509,7 +2563,7 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
   const [
     userCount, signupsByDay, appCount, appsByStatus,
     jobsByStatus, convCount, msgCount, otwCount, selfiePending,
-    productsTotal, businessesTotal, businessesPending, reportsOpen,
+    productsTotal, businessesTotal, businessesPending, reportsOpen, selfieRejected, selfieRedone,
   ] = await Promise.all([
     getOne('SELECT COUNT(*) AS c FROM users'),
     getAll(`SELECT date(created_at) AS d, COUNT(*) AS c FROM users
@@ -2525,6 +2579,8 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
     getOne('SELECT COUNT(*) AS c FROM businesses'),
     getOne("SELECT COUNT(*) AS c FROM businesses WHERE status = 'pending'"),
     getOne("SELECT COUNT(*) AS c FROM reports WHERE status = 'open'"),
+    getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie_status = 'rejected'`),
+    getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie_resubmitted_at IS NOT NULL`),
   ]);
   res.json({
     users: Number(userCount.c || 0),
@@ -2540,6 +2596,8 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
     businesses_total: Number(businessesTotal.c || 0),
     businesses_pending: Number(businessesPending.c || 0),
     reports_open: Number(reportsOpen.c || 0),
+    selfies_rejected: Number(selfieRejected.c || 0),
+    selfies_redone: Number(selfieRedone.c || 0),
   });
 }));
 

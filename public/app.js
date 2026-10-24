@@ -2018,7 +2018,7 @@ function businessFormHtml(prefill, isEdit) {
     <div class="form-2col">
       <div class="field"><label for="bf-logo">Logo</label>
         <input id="bf-logo" type="file" accept="image/*">
-        ${p.logo ? `<img src="${p.logo}" alt="Current logo" style="width:56px;height:56px;border-radius:14px;object-fit:cover;margin-top:6px">` : ''}</div>
+        ${p.logo ? `<img src="${p.logo}" alt="Current logo" style="width:56px;height:56px;border-radius:14px;object-fit:contain;background:#fff;border:1px solid var(--line);margin-top:6px">` : ''}</div>
       <div class="field"><label for="bf-cover">Cover photo</label>
         <input id="bf-cover" type="file" accept="image/*">
         ${p.cover ? `<img src="${p.cover}" alt="Current cover" style="width:100%;height:56px;border-radius:14px;object-fit:cover;margin-top:6px">` : ''}</div>
@@ -2031,17 +2031,17 @@ function businessFormHtml(prefill, isEdit) {
 async function wireBusinessForm(form, existing) {
   form._logo = undefined;
   form._cover = undefined;
-  const bind = (inputId, key) => {
+  const bind = (inputId, key, convert) => {
     const input = form.querySelector(inputId);
     if (input) input.addEventListener('change', async () => {
       const f = (input.files || [])[0];
       if (!f) return;
-      try { form[key] = await fileToDoc(f); toast('Image ready.'); }
+      try { form[key] = await convert(f); toast('Image ready.'); }
       catch (e) { toast('Could not read that image.', true); }
     });
   };
-  bind('#bf-logo', '_logo');
-  bind('#bf-cover', '_cover');
+  bind('#bf-logo', '_logo', fileToLogoImage);
+  bind('#bf-cover', '_cover', fileToDoc);
 }
 
 function collectBusinessData(form) {
@@ -3487,6 +3487,15 @@ function viewProfileEdit() {
       <div class="hint" style="margin-top:8px">10 seconds max. Say your name, what you do, and why someone should hire you. Posters trust a face they have seen.</div>
     </div>
     <div class="card">
+      <h3 style="margin-top:0">${icon('shield')}Verification selfie</h3>
+      <div id="sf-status"></div>
+      ${selfieGuideHtml()}
+      <div id="sf-preview" style="margin-bottom:8px"></div>
+      <input type="file" id="sf-file" accept="image/*" hidden>
+      <button type="button" class="btn btn-sm btn-outline" id="sf-btn">${icon('camera')}Upload new selfie</button>
+      <div class="hint" style="margin-top:8px">Saved when you tap Save changes below. A new selfie goes back to the team for review.</div>
+    </div>
+    <div class="card">
       <h3 style="margin-top:0">${icon('utensils')}Food handler's license</h3>
       <p class="small muted" style="margin-top:0">Do waiter, bartender, mixologist or catering work? Upload your council food handler's license. Our team reviews it (and may phone the council to confirm) before approval. Only approved licenses unlock hospitality jobs that require one.</p>
       <div id="fl-status"></div>
@@ -3572,6 +3581,29 @@ function viewProfileEdit() {
     renderIvPreview(null);
   });
 
+  // Verification selfie: status + re-upload, back to the review queue.
+  let newSelfie = null;
+  const sfStatus = document.getElementById('sf-status');
+  const sfPreview = document.getElementById('sf-preview');
+  const sfFile = document.getElementById('sf-file');
+  const SF_LABEL = {
+    approved: 'Approved. Recruiters can see you are verified.',
+    pending: 'Under review by the PieceWork team.',
+    rejected: 'Not approved. It is blocking recruiters from moving to the next step with you. Upload a new selfie that follows the guide below.',
+  };
+  sfStatus.innerHTML = `<p class="small"><b>Status:</b> ${esc(SF_LABEL[currentUser.selfie_status] || 'Not submitted yet.')}</p>`;
+  document.getElementById('sf-btn').addEventListener('click', () => sfFile.click());
+  sfFile.addEventListener('change', async () => {
+    const file = sfFile.files[0];
+    if (!file) return;
+    try {
+      newSelfie = await fileToSizedImage(file, 512, false);
+      sfPreview.innerHTML = `<img src="${newSelfie}" alt="New verification selfie" style="width:120px;height:120px;object-fit:cover;border-radius:12px">`;
+      toast('Selfie ready — tap Save changes to send it for review.');
+    } catch (e) { toast(e.message, true); }
+    sfFile.value = '';
+  });
+
   // Food handler's license: photo + number + expiry, goes to team review.
   let newFoodLicenseImage = null;
   let flInitNumber = '', flInitExp = '';
@@ -3629,6 +3661,7 @@ function viewProfileEdit() {
       open_to_work: form.open_to_work.checked,
     };
     if (newAvatar) payload.avatar = newAvatar;
+    if (newSelfie) payload.selfie = newSelfie;
     if (ivState !== 'unchanged') payload.intro_video = ivState === 'removed' ? '' : newIntroVideo;
     if (newFoodLicenseImage || flNumber.value.trim() !== flInitNumber || flExp.value !== flInitExp) {
       payload.food_license_image = newFoodLicenseImage || '';
@@ -3638,7 +3671,7 @@ function viewProfileEdit() {
     try {
       const { user } = await api('/api/users/me', { method: 'PATCH', body: JSON.stringify(payload) });
       currentUser = user; renderChrome();
-      toast('Profile updated.');
+      toast(payload.selfie ? 'Profile updated. Your new selfie is in the review queue.' : 'Profile updated.');
       location.hash = '#/profile';
     } catch (err2) { showFieldErrors(form, err2.fields); toast(err2.message, true); }
     btn.disabled = false;
@@ -3700,6 +3733,31 @@ function fileToSizedImage(file, maxDim, square) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
         resolve(canvas.toDataURL('image/jpeg', 0.82));
+      } catch (e) { reject(new Error('Could not process that image.')); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image.')); };
+    img.src = url;
+  });
+}
+
+/** Logos keep their shape and transparency: fit inside 512px, never
+ * cropped, exported as PNG when the source can carry transparency
+ * (a JPEG export would bake a black background into clear logos). */
+function fileToLogoImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) { reject(new Error('Please choose an image file.')); return; }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      try {
+        const scale = Math.min(1, 512 / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        const keepAlpha = file.type === 'image/png' || file.type === 'image/webp';
+        resolve(keepAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85));
       } catch (e) { reject(new Error('Could not process that image.')); }
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image.')); };
@@ -4302,6 +4360,7 @@ function viewRegister() {
         </div>
         <div class="field">
           <label>Verification selfie <span class="hint-inline">(required)</span></label>
+          ${selfieGuideHtml()}
           <div style="display:flex;align-items:center;gap:12px">
             <div id="rg-sf-preview" style="width:64px;height:64px;border-radius:12px;background:var(--line);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none"><span style="font-size:24px">🤳</span></div>
             <div>
@@ -4838,6 +4897,27 @@ function trustBadgesHtml(badges, vouchCount) {
   }).join('') + '</div>';
 }
 
+/** Illustrated standard for a verification selfie (Zac, Oct 24): one
+ * clear photo of yourself only. Shown at registration and in Edit
+ * Profile so members can match it before the team reviews. */
+function selfieGuideHtml() {
+  return `<div class="sf-guide">
+    <div class="sf-do">
+      <div class="sf-frame">${icon('user')}<span class="sf-badge ok">${icon('check')}</span></div>
+      <ul>
+        <li>${icon('check')} Only you in the photo</li>
+        <li>${icon('check')} Face clear, looking at the camera</li>
+        <li>${icon('check')} Good light, plain background</li>
+      </ul>
+    </div>
+    <div class="sf-donts">
+      <div class="sf-dont">${icon('users')}<span>Group photo</span><span class="sf-badge no">${icon('x')}</span></div>
+      <div class="sf-dont">${icon('eyeOff')}<span>Sunglasses or hat</span><span class="sf-badge no">${icon('x')}</span></div>
+      <div class="sf-dont">${icon('camera')}<span>Dark or blurry</span><span class="sf-badge no">${icon('x')}</span></div>
+    </div>
+  </div>`;
+}
+
 /** Quick WhatsApp reason templates for messaging users waiting on selfie review. */
 const SELFIE_REASONS = [
   { label: 'Two people in selfie', text: (n) => `Hi ${n}, your PieceWork Zambia verification selfie was not approved because it shows two people. Please take a new selfie with only yourself, face clearly visible, and upload it again under Profile in the app.` },
@@ -4935,6 +5015,7 @@ async function viewVerifications() {
     <h1 class="page-title">Selfie review</h1>
     <p class="page-sub"><a href="#/admin">← Back to admin</a><span id="verif-count"></span></p>
     <div id="verif-body">${loadingHtml('Loading pending selfies…')}</div>
+    <div id="verif-rejected"></div>
   </div></div>`;
   const body = document.getElementById('verif-body');
   async function load() {
@@ -4985,9 +5066,49 @@ async function viewVerifications() {
       await api(`/api/admin/verifications/${userId}`, { method: 'POST', body: JSON.stringify({ status }) });
       toast(status === 'approved' ? 'Selfie approved.' : 'Selfie rejected.');
       load();
+      loadRejected();
     } catch (e) { toast(e.message, true); }
   }
+  // Count dashboard + the Rejected list (Zac, Oct 24): rejected members
+  // stay visible here, with the standard SMS one tap away, until they
+  // re-do their selfie and come back to the queue above.
+  async function loadRejected() {
+    const box2 = document.getElementById('verif-rejected');
+    if (!box2) return;
+    try {
+      const d = await api('/api/admin/verifications');
+      const stats = `
+      <div class="sf-stats">
+        <div class="sf-stat"><b>${d.pending_count || 0}</b><span>Waiting</span></div>
+        <div class="sf-stat"><b>${d.rejected_count || 0}</b><span>Rejected</span></div>
+        <div class="sf-stat"><b>${d.redone_count || 0}</b><span>Re-did theirs</span></div>
+        <div class="sf-stat"><b>${d.approved_count || 0}</b><span>Approved</span></div>
+      </div>`;
+      const list = (d.rejected || []).map(u => `
+        <div class="card">
+          <b>${esc(u.name)}</b><br>
+          <span class="small muted">${esc(u.phone)} · ${esc(u.city)} · joined ${esc(fmtDate(u.created_at))}</span>
+          <div class="btn-row" style="margin-top:10px">
+            <button class="btn btn-sm btn-primary" data-notify="${u.id}">${icon('message')}Send the SMS</button>
+            <a class="btn btn-sm btn-outline" href="${waLink(u.phone, 'Hi ' + String(u.name || '').split(' ')[0] + ', this is the PieceWork Zambia team about your verification selfie: ')}" target="_blank" rel="noopener">${icon('message')}WhatsApp</a>
+          </div>
+        </div>`).join('');
+      box2.innerHTML = stats + `
+        <div class="section-title" style="margin-top:18px"><span>Rejected</span></div>
+        <p class="small muted">The standard SMS went out automatically when each selfie was rejected. Send it again here, or message on WhatsApp. When a member uploads a better selfie, they come back to the queue above and count under Re-did theirs.</p>
+        ${list || '<p class="small muted">Nobody is rejected right now.</p>'}`;
+      box2.querySelectorAll('[data-notify]').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          await api(`/api/admin/verifications/${b.dataset.notify}/notify`, { method: 'POST', body: '{}' });
+          toast('Rejection SMS sent.');
+        } catch (e) { toast(e.message, true); }
+        b.disabled = false;
+      }));
+    } catch (e) { /* the main queue already reports load errors */ }
+  }
   load();
+  loadRejected();
 }
 
 /** Admin password resets — issue codes and send them over WhatsApp. */

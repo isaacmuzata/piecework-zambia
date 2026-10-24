@@ -741,7 +741,7 @@ img.avatar{display:block}
 
 /* ================= 2.0 M4: businesses ================= */
 .biz-cover{width:100%;height:170px;object-fit:cover;border-radius:22px;display:block}
-.biz-logo{width:64px;height:64px;border-radius:18px;object-fit:cover;flex:0 0 64px}
+.biz-logo{width:64px;height:64px;border-radius:18px;object-fit:contain;background:#fff;border:1px solid var(--line);padding:5px;box-sizing:border-box;flex:0 0 64px}
 .biz-logo-fallback{background:linear-gradient(135deg,#0b5a30,#062B1C);color:#fff;display:flex;align-items:center;justify-content:center}
 .biz-logo-fallback svg{width:26px;height:26px}
 a.biz-card{display:flex;gap:12px;align-items:center;color:var(--ink);margin-bottom:10px;text-decoration:none}
@@ -949,3 +949,29 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 .svc-text b{display:block;font-size:12.5px;line-height:1.28}
 .svc-count{display:block;font-size:11px;color:var(--gray);margin-top:1px}
 @media (min-width:720px){.svc-strip{display:grid;grid-template-columns:repeat(3,1fr);overflow:visible}.svc-card{flex:none}}
+
+/* Verification selfie guide + admin selfie counts */
+.sf-guide{margin:10px 0 4px}
+.sf-do{display:flex;gap:12px;align-items:center;background:var(--green-tint);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.sf-frame{position:relative;width:54px;height:54px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;color:var(--navy);flex:0 0 54px}
+.sf-frame>svg{width:28px;height:28px}
+.sf-badge{position:absolute;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff}
+.sf-badge>svg{width:11px;height:11px}
+.sf-badge.ok{background:var(--green);right:-2px;bottom:-2px}
+.sf-do ul{list-style:none;margin:0;padding:0;font-size:12.5px;display:grid;gap:3px}
+.sf-do li{display:flex;gap:6px;align-items:center}
+.sf-do li>svg{width:13px;height:13px;color:var(--green);flex:0 0 13px}
+.sf-donts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.sf-dont{position:relative;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 6px 7px;text-align:center;color:var(--gray)}
+.sf-dont>svg{width:19px;height:19px}
+.sf-dont>span:not(.sf-badge){display:block;font-size:10.5px;margin-top:3px;line-height:1.25}
+.sf-badge.no{background:#C81E1E;top:-6px;right:-4px}
+.sf-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.sf-stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 6px;text-align:center}
+.sf-stat b{display:block;font-size:19px;color:var(--navy)}
+.sf-stat span{font-size:10.5px;color:var(--gray)}
+
+/* Card heading icons sit inline at text size. Without this, a bare
+   icon() svg in an h3 renders at full width (the food license card
+   shipped that way; the selfie card inherited the markup pattern). */
+.card h3 svg{width:19px;height:19px;vertical-align:-3px;margin-right:6px}

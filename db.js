@@ -387,6 +387,7 @@ const OPTIONAL_COLUMNS = [
   ['applications', 'arrived_at', 'TEXT'],
   ['applications', 'arrival_confirmed_at', 'TEXT'],
   ['users', 'device_id', 'TEXT'],
+  ['users', 'selfie_resubmitted_at', 'TEXT'],
   ['users', 'signup_ip', 'TEXT'],
   ['users', 'ip_duplicate', 'INTEGER DEFAULT 0'],
   ['users', 'selfie', 'TEXT'],
