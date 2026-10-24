@@ -683,6 +683,99 @@ function momoNoteHtml() {
 /* ---------------- views ---------------- */
 
 /** Signed-in home: greeting, search, categories, promo, fresh jobs. */
+/* ---------------- ads banner ----------------
+   Rotating banner of promoted products, jobs and storefronts, shown at
+   the top of Home and Marketplace. Ads are free during the growth phase.
+   Slides come from GET /api/ads, which only ever returns real accounts'
+   live listings, so the banner just renders what it is given. */
+let adsTimer = null;
+function stopAdsRotation() { if (adsTimer) { clearInterval(adsTimer); adsTimer = null; } }
+
+function adsBannerHtml(ads) {
+  return `<div class="ads-banner" role="region" aria-label="Featured ads">
+    ${ads.map((a, i) => `
+    <a class="ad-slide${i === 0 ? ' active' : ''}" href="${esc(a.url)}" data-ad-slide="${i}"${i === 0 ? '' : ' hidden'}>
+      ${a.image_url
+        ? `<img class="ad-img" src="${esc(a.image_url)}" alt="" loading="lazy">`
+        : `<span class="ad-fallback"><span class="ad-initial">${esc((a.title || 'P').charAt(0).toUpperCase())}</span></span>`}
+      <span class="ad-shade"></span>
+      <span class="ad-chip">Ad</span>
+      <span class="ad-text"><b>${esc(a.title)}</b><span>${esc(a.subtitle || '')}</span></span>
+    </a>`).join('')}
+    ${ads.length > 1 ? `<span class="ad-dots">${ads.map((_, i) => `<button type="button" class="ad-dot${i === 0 ? ' active' : ''}" data-ad-dot="${i}" aria-label="Show ad ${i + 1}"></button>`).join('')}</span>` : ''}
+  </div>`;
+}
+
+function wireAdsBanner(root) {
+  const slides = [...root.querySelectorAll('[data-ad-slide]')];
+  if (slides.length < 2) return;
+  const dots = [...root.querySelectorAll('[data-ad-dot]')];
+  let cur = 0;
+  const show = (n) => {
+    cur = (n + slides.length) % slides.length;
+    slides.forEach((s, i) => { s.classList.toggle('active', i === cur); s.hidden = i !== cur; });
+    dots.forEach((d, i) => d.classList.toggle('active', i === cur));
+  };
+  const start = () => { stopAdsRotation(); adsTimer = setInterval(() => show(cur + 1), 5000); };
+  dots.forEach(d => d.addEventListener('click', () => { show(Number(d.dataset.adDot)); start(); }));
+  root.addEventListener('pointerenter', stopAdsRotation);
+  root.addEventListener('pointerleave', start);
+  root.addEventListener('touchstart', stopAdsRotation, { passive: true });
+  root.addEventListener('touchend', start, { passive: true });
+  start();
+}
+
+async function mountAdsBanner(slotId) {
+  try {
+    const d = await api('/api/ads');
+    const slot = document.getElementById(slotId);
+    if (!slot || !d.ads || !d.ads.length) return;
+    slot.innerHTML = adsBannerHtml(d.ads);
+    wireAdsBanner(slot);
+  } catch (e) { /* the banner is a bonus, never break the view */ }
+}
+
+function adUntilText(iso) {
+  try { return new Date(String(iso).replace(' ', 'T') + 'Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); }
+  catch (e) { return iso; }
+}
+
+/** Owner-facing promote box for product, job and business detail pages. */
+function adPromoHtml(activeAd) {
+  if (activeAd) {
+    return `<div class="ad-promo">
+      <span class="ad-promo-text">In the ads banner until ${esc(adUntilText(activeAd.ends_at))}</span>
+      <button class="btn btn-sm btn-outline" data-ad-remove="${activeAd.id}">Remove</button>
+    </div>`;
+  }
+  return `<div class="ad-promo">
+    <span class="ad-promo-text">Get more eyes on this listing in the Home and Marketplace banner.</span>
+    <button class="btn btn-sm btn-primary" data-ad-promote>Promote in the ads banner, FREE</button>
+  </div>`;
+}
+
+function wireAdPromo(root, kind, refId, refresh) {
+  if (!root) return;
+  const promoteBtn = root.querySelector('[data-ad-promote]');
+  if (promoteBtn) promoteBtn.addEventListener('click', async () => {
+    promoteBtn.disabled = true;
+    try {
+      await api('/api/ads', { method: 'POST', body: JSON.stringify({ kind, ref_id: refId }) });
+      toast('Added to the ads banner. It is free right now.');
+      refresh();
+    } catch (e) { toast(e.message, true); promoteBtn.disabled = false; }
+  });
+  const removeBtn = root.querySelector('[data-ad-remove]');
+  if (removeBtn) removeBtn.addEventListener('click', async () => {
+    removeBtn.disabled = true;
+    try {
+      await api('/api/ads/' + removeBtn.dataset.adRemove, { method: 'DELETE' });
+      toast('Removed from the ads banner.');
+      refresh();
+    } catch (e) { toast(e.message, true); removeBtn.disabled = false; }
+  });
+}
+
 async function viewHome() {
   const first = currentUser.name.split(' ')[0];
   app.innerHTML = `
@@ -704,6 +797,7 @@ async function viewHome() {
       <a class="qa-item" href="#/categories"><span class="qa-ico" style="background:#E5E7EB;color:#6B7280">${icon('sliders')}</span>More</a>
     </div>
     <div class="page" style="padding-top:6px">
+      <div id="home-ads"></div>
       <a class="promo-card" href="#/jobs" style="text-decoration:none;color:#fff">
         <img src="/img/landing/hero.jpg" alt="Zambians doing piece work" loading="lazy">
         <div class="promo-text"><h3>Find Opportunities Around You</h3><p>Jobs, products, services and more in ${esc(currentUser.city || 'Zambia')}</p></div>
@@ -737,6 +831,7 @@ async function viewHome() {
   </div>`;
 
   const q = document.getElementById('home-q');
+  mountAdsBanner('home-ads');
   // Giveaway promo — only when a round is active.
   api('/api/giveaways/current').then(({ giveaway }) => {
     const slot = document.getElementById('gw-promo');
@@ -1110,6 +1205,7 @@ async function viewMarket() {
   <div class="view"><div class="page">
     <h1 class="page-title">Marketplace</h1>
     <p class="page-sub">Buy and sell with people near you. You pay the seller directly, PieceWork never handles the money.</p>
+    <div id="market-ads"></div>
     ${currentUser ? `<a class="btn btn-primary" href="#/sell" style="margin-bottom:12px">${icon('plus')} Sell an item</a>
     <a class="btn btn-outline" href="#/selling" style="margin-bottom:12px">My selling</a>` : ''}
     <a class="btn btn-outline" href="#/businesses" style="margin-bottom:12px">Browse businesses</a>
@@ -1140,6 +1236,7 @@ async function viewMarket() {
     <div id="m-more" style="text-align:center;margin-top:10px"></div>
   </div></div>`;
 
+  mountAdsBanner('market-ads');
   const results = document.getElementById('m-results');
   const more = document.getElementById('m-more');
   async function load(reset) {
@@ -1278,6 +1375,7 @@ async function viewProduct(id) {
           ${p.status === 'hidden' ? `<button class="btn btn-outline" id="btn-unhide">Show again</button>` : ''}
           <button class="btn btn-outline" id="btn-delete-product">Remove</button>
         </div>
+        ${adPromoHtml(p.active_ad)}
         <div style="margin-top:14px">
           <h4 style="margin:0 0 6px">Offers received (${(offers || []).length})</h4>
           ${(offers && offers.length) ? offers.map(o => `
@@ -1299,6 +1397,7 @@ async function viewProduct(id) {
       if (cnt) cnt.textContent = (Number(t.dataset.pdIdx || 0) + 1) + '/' + p.photos.length;
       box.querySelectorAll('.pd-thumb').forEach(x => x.classList.toggle('active', x === t));
     }));
+    if (isOwner) wireAdPromo(box, 'product', p.id, () => viewProduct(id));
     const pdMsgBtn = document.getElementById('pd-msg');
     if (pdMsgBtn) pdMsgBtn.addEventListener('click', () => { const b = document.getElementById('btn-msg-seller'); if (b) b.click(); });
     const pdOfferBtn = document.getElementById('pd-offer');
@@ -1730,7 +1829,7 @@ async function viewBusiness(slug) {
           </div>
         </div>
         ${b.description ? `<p style="margin-top:12px;white-space:pre-wrap">${esc(b.description)}</p>` : ''}
-        ${isOwner ? `<div class="btn-row" style="margin-top:12px"><a class="btn btn-outline" href="#/business/${b.id}/manage">${icon('edit')} Manage storefront</a></div>` : `
+        ${isOwner ? `<div class="btn-row" style="margin-top:12px"><a class="btn btn-outline" href="#/business/${b.id}/manage">${icon('edit')} Manage storefront</a></div>${adPromoHtml(b.active_ad)}` : `
         <div class="btn-row" style="margin-top:12px">
           <a class="btn btn-outline" href="#/user/${b.owner_id}">${icon('message')} Message</a>
           ${currentUser ? `<button class="btn ${b.following ? 'btn-outline' : 'btn-primary'}" id="biz-follow">${b.following ? 'Following' : 'Follow'}</button>` : `<a class="btn btn-primary" href="#/login">Follow</a>`}
@@ -1776,6 +1875,7 @@ async function viewBusiness(slug) {
       box.querySelectorAll('[data-btab]').forEach(x => x.classList.toggle('active', x === btn));
       box.querySelectorAll('[data-bpanel]').forEach(pn => { pn.hidden = pn.dataset.bpanel !== btn.dataset.btab; });
     }));
+    if (isOwner) wireAdPromo(box, 'business', b.id, () => viewBusiness(slug));
     const followBtn = document.getElementById('biz-follow');
     if (followBtn) followBtn.addEventListener('click', async () => {
       followBtn.disabled = true;
@@ -2084,6 +2184,7 @@ async function viewJobDetail(id) {
           <button class="btn btn-sm btn-danger" id="btn-cancel">Cancel job</button>
         </div>` : `<p class="small muted" style="margin:8px 0 0">This job is ${job.status}.</p>`}
         ${!job.is_draft ? `<div class="btn-row" style="margin-top:8px"><button class="btn btn-sm btn-outline" id="btn-repost">↻ Repost this job</button></div>` : ''}
+        ${job.active_ad || (job.status === 'open' && !job.is_draft) ? adPromoHtml(job.active_ad) : ''}
       </div>
       <div class="card">
         <h3 style="margin-top:0">Applicants (${applicants.length})</h3>
@@ -2397,6 +2498,7 @@ async function viewJobDetail(id) {
       location.hash = '#/job/' + r.id;
     } catch (e) { toast(e.message, true); repostBtn.disabled = false; }
   });
+  if (isPoster) wireAdPromo(document, 'job', job.id, () => viewJobDetail(id));
   document.querySelectorAll('[data-accept]').forEach(btn => btn.addEventListener('click', () => decideApplication(btn.dataset.accept, 'accepted')));
   document.querySelectorAll('[data-decline]').forEach(btn => btn.addEventListener('click', () => decideApplication(btn.dataset.decline, 'declined')));
   document.querySelectorAll('[data-shortlist]').forEach(btn => btn.addEventListener('click', async () => {
@@ -3097,6 +3199,81 @@ async function viewDashboard() {
   showPostings();
 }
 
+/* ---------------- Web Push notifications ----------------
+ * The server sends the same events as the SMS texts (offers, applications,
+ * acceptances) to subscribed browsers. Opt-in lives on My Profile; the
+ * subscription belongs to this browser, so turning it off here only
+ * affects this device. */
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+async function currentPushSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+async function postPushSubscribe(sub) {
+  await api('/api/push/subscribe', {
+    method: 'POST',
+    body: JSON.stringify({ subscription: sub.toJSON(), userAgent: navigator.userAgent }),
+  });
+}
+/** Silently re-register the existing subscription when permission is
+ * already granted. Never creates one: an explicit Off must stay off. */
+async function syncPushSubscription() {
+  if (!pushSupported() || Notification.permission !== 'granted') return;
+  const sub = await currentPushSubscription().catch(() => null);
+  if (sub) { try { await postPushSubscribe(sub); } catch { /* offline etc. */ } }
+}
+async function refreshPushRow(stateEl) {
+  if (!stateEl) return;
+  if (!pushSupported()) { stateEl.textContent = 'Not supported'; return; }
+  if (Notification.permission === 'denied') { stateEl.textContent = 'Blocked by browser'; return; }
+  const sub = await currentPushSubscription().catch(() => null);
+  stateEl.textContent = sub ? 'On' : 'Off';
+}
+async function togglePush(stateEl) {
+  if (!pushSupported()) { toast('Push notifications are not supported in this browser.', true); return; }
+  if (Notification.permission === 'denied') {
+    toast('Notifications are blocked by your browser. Allow them in the browser settings, then try again.', true);
+    return;
+  }
+  try {
+    const existing = await currentPushSubscription();
+    if (existing) {
+      const endpoint = existing.endpoint;
+      try { await existing.unsubscribe(); } catch { /* already gone */ }
+      try {
+        await api('/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) });
+      } catch { /* server copy expires via 410 pruning if unreachable */ }
+      toast('Notifications off on this device.');
+    } else {
+      const { publicKey } = await api('/api/push/public-key');
+      if (!publicKey) { toast('Notifications are not available yet.'); return; }
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { toast('Permission was not granted, so notifications stay off.', true); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+      await postPushSubscribe(sub);
+      toast('Notifications on: offers, applications and results will reach this device.');
+    }
+  } catch (e) {
+    toast(e.message || 'Could not change notification settings.', true);
+  }
+  refreshPushRow(stateEl);
+}
+
 /** Rich profile: dark hero, stats, tabs, menu. */
 async function viewProfile() {
   if (!requireAuth('#/profile')) return;
@@ -3129,6 +3306,7 @@ async function viewProfile() {
         <a href="#/invite">${icon('sparkles')}<span>Win cash — invite friends</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/how">${icon('help')}<span>Help &amp; support</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/terms">${icon('shield')}<span>Terms and conditions</span><span class="chev">${icon('chevR')}</span></a>
+        <button id="pf-push">${icon('bell')}<span>Notifications</span><span class="small muted" id="pf-push-state" style="margin-left:auto">Off</span></button>
         <button id="pf-logout">${icon('logout')}<span>Sign out</span></button>
       </div>
     </div>
@@ -3137,6 +3315,15 @@ async function viewProfile() {
   document.getElementById('pf-edit').addEventListener('click', () => { location.hash = '#/profile/edit'; });
   document.getElementById('pf-share').addEventListener('click', () => shareProfile(currentUser.id, currentUser.name));
   document.getElementById('pf-logout').addEventListener('click', logout);
+  const pushBtn = document.getElementById('pf-push');
+  const pushState = document.getElementById('pf-push-state');
+  if (pushBtn && pushState) {
+    refreshPushRow(pushState);
+    // Permission already granted in a past visit: quietly re-register the
+    // existing subscription (the account on this device may have changed).
+    syncPushSubscription().then(() => refreshPushRow(pushState)).catch(() => {});
+    pushBtn.addEventListener('click', () => togglePush(pushState));
+  }
   const tabO = document.getElementById('tab-overview');
   const tabR = document.getElementById('tab-reviews');
   const paneO = document.getElementById('pf-overview');
@@ -5406,6 +5593,7 @@ const routes = [
 
 async function router() {
   if (chatTimer) { clearInterval(chatTimer); chatTimer = null; }
+  stopAdsRotation();
   renderChrome();
   const hash = location.hash || '#/';
   window.scrollTo(0, 0);

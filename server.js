@@ -14,6 +14,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const path = require('path');
+const webpush = require('web-push');
 
 const { client, init } = require('./db');
 const { parseLatLng, resolveCoords, haversineKm } = require('./geo');
@@ -598,6 +599,294 @@ function composeSms(build, name, title) {
   return msg.slice(0, 160);
 }
 
+// ---------------------------------------------------------------- Web Push
+// Browser push notifications (2026-10-23): the same events that send an
+// SMS also push to the user's subscribed browsers. Optional: set
+// VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY (+ optional VAPID_SUBJECT) as env
+// vars to enable. Until then subscribe/test answer honestly as disabled
+// and notifyPush is a no-op. VAPID keys are generated once by the server
+// owner (web-push generate-vapid-keys) and never ship in the repo.
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@2911itservices.com';
+const pushEnabled = () => !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+let vapidConfigured = false;
+function ensureVapid() {
+  if (!pushEnabled()) return false;
+  if (!vapidConfigured) {
+    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+    vapidConfigured = true;
+  }
+  return true;
+}
+
+/**
+ * Deliver one payload to every subscription a user has. Prunes endpoints
+ * the push service reports gone (404/410) and stamps last_seen_at on
+ * success. Returns { sent, failed }; never throws.
+ */
+async function deliverPush(userId, payload) {
+  const counts = { sent: 0, failed: 0 };
+  try {
+    if (!ensureVapid()) return counts;
+    const subs = await getAll('SELECT * FROM push_subscriptions WHERE user_id = ?', [userId]);
+    const data = JSON.stringify({
+      title: payload.title || 'PieceWork Zambia',
+      body: payload.body || '',
+      url: payload.url || '#/',
+      tag: payload.tag || 'piecework',
+    });
+    await Promise.all(subs.map(async (sub) => {
+      const subscription = { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } };
+      try {
+        // A stalled push service must not pin the sender (sendSms uses
+        // the same idea: a 15s timeout on the Africa's Talking request).
+        await webpush.sendNotification(subscription, data, { timeout: 10000 });
+        counts.sent++;
+        await runWrite("UPDATE push_subscriptions SET last_seen_at = datetime('now') WHERE id = ?", [sub.id]).catch(() => {});
+      } catch (e) {
+        const code = e && (e.statusCode || e.status);
+        if (code === 404 || code === 410) {
+          await runWrite('DELETE FROM push_subscriptions WHERE id = ?', [sub.id]).catch(() => {});
+        } else {
+          counts.failed++;
+          console.error('notifyPush failed:', e && e.message);
+        }
+      }
+    }));
+  } catch (e) {
+    console.error('notifyPush failed:', e && e.message);
+  }
+  return counts;
+}
+
+/**
+ * Fire-and-forget event push, the twin of notifySms: no-op when push is
+ * not configured, never breaks a request, callers do not await it.
+ */
+async function notifyPush(userId, payload) {
+  try {
+    if (!pushEnabled() || !userId) return;
+    await deliverPush(userId, payload || {});
+  } catch (e) {
+    console.error('notifyPush failed:', e && e.message);
+  }
+}
+
+app.get('/api/push/public-key', (req, res) => {
+  res.json({ publicKey: pushEnabled() ? VAPID_PUBLIC_KEY : null });
+});
+
+app.post('/api/push/subscribe', ah(auth), ah(async (req, res) => {
+  const sub = (req.body && req.body.subscription) || {};
+  const endpoint = typeof sub.endpoint === 'string' ? sub.endpoint.trim() : '';
+  const keys = sub.keys || {};
+  const p256dh = typeof keys.p256dh === 'string' ? keys.p256dh.trim() : '';
+  const authKey = typeof keys.auth === 'string' ? keys.auth.trim() : '';
+  let endpointOk = false;
+  try { endpointOk = new URL(endpoint).protocol === 'https:'; } catch { endpointOk = false; }
+  if (!endpointOk || endpoint.length > 2000 || !p256dh || p256dh.length > 512 || !authKey || authKey.length > 512) {
+    return err(res, 422, 'Invalid push subscription.');
+  }
+  const userAgent = String((req.body && req.body.userAgent) || req.headers['user-agent'] || '').slice(0, 300);
+  // An endpoint belongs to the latest user who subscribed it (shared
+  // devices): upsert by endpoint and hand the row to this account.
+  await runWrite(
+    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET
+       user_id = excluded.user_id, p256dh = excluded.p256dh,
+       auth = excluded.auth, user_agent = excluded.user_agent,
+       last_seen_at = datetime('now')`,
+    [req.user.id, endpoint, p256dh, authKey, userAgent]
+  );
+  res.json({ ok: true });
+}));
+
+app.post('/api/push/unsubscribe', ah(auth), ah(async (req, res) => {
+  const endpoint = req.body && typeof req.body.endpoint === 'string' ? req.body.endpoint.trim() : '';
+  if (!endpoint) return err(res, 422, 'Invalid push subscription.');
+  // Only the caller's own rows: nobody can delete someone else's device.
+  await runWrite('DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?', [req.user.id, endpoint]);
+  res.json({ ok: true });
+}));
+
+app.post('/api/push/test', ah(auth), ah(async (req, res) => {
+  if (!pushEnabled()) return res.json({ sent: 0, failed: 0, skipped: true });
+  const counts = await deliverPush(req.user.id, {
+    title: 'PieceWork Zambia',
+    body: 'Test notification: push is working on this device.',
+    url: '#/profile',
+    tag: 'push-test',
+  });
+  res.json({ sent: counts.sent, failed: counts.failed, skipped: false });
+}));
+
+// ---------------------------------------------------------------- ads banner
+// Owners promote a product, job or storefront into the rotating banner on
+// Home and Marketplace. FREE during the growth phase (until ADS_FREE_UNTIL);
+// every ad still records is_paid/amount so paid placements switch on later
+// with no schema change. Real accounts only: tester accounts (is_tester)
+// are excluded on the server, in the feed query and at creation, so a
+// tester can never appear in the banner even if flagged after creating.
+const ADS_FREE_UNTIL = process.env.ADS_FREE_UNTIL || '2027-01-23T00:00:00Z';
+const AD_KINDS = ['product', 'job', 'business'];
+const AD_PAY_LABEL = { per_job: 'per job', per_hour: 'per hour', per_day: 'per day', per_month: 'per month' };
+function adsAreFree() { return Date.now() < Date.parse(ADS_FREE_UNTIL); }
+function adStamp(d) { return d.toISOString().slice(0, 19).replace('T', ' '); }
+
+function serializeAd(a) {
+  return {
+    id: a.id, owner_id: a.owner_id, kind: a.kind, ref_id: a.ref_id,
+    status: a.status, is_paid: !!a.is_paid, amount: Number(a.amount || 0),
+    starts_at: a.starts_at, ends_at: a.ends_at, created_at: a.created_at,
+  };
+}
+
+// One joined read for the feed, /mine and detail checks: the ad row plus
+// the live entity fields its slide is derived from, so titles, prices and
+// photos are always current rather than copied at creation time.
+const AD_SELECT = `
+  SELECT a.*, u.is_tester AS owner_is_tester,
+    p.title AS p_title, p.price AS p_price, p.city AS p_city, p.status AS p_status,
+    (SELECT ph.id FROM product_photos ph WHERE ph.product_id = p.id ORDER BY ph.sort, ph.id LIMIT 1) AS p_photo_id,
+    j.title AS j_title, j.pay_amount AS j_pay, j.pay_type AS j_pay_type, j.city AS j_city,
+    j.status AS j_status, j.is_draft AS j_is_draft,
+    (SELECT ph.id FROM job_photos ph WHERE ph.job_id = j.id ORDER BY ph.sort, ph.id LIMIT 1) AS j_photo_id,
+    b.name AS b_name, b.tagline AS b_tagline, b.category AS b_category, b.city AS b_city,
+    b.status AS b_status, b.slug AS b_slug, b.cover AS b_cover, b.logo AS b_logo
+  FROM ads a JOIN users u ON u.id = a.owner_id
+  LEFT JOIN products p ON a.kind = 'product' AND p.id = a.ref_id
+  LEFT JOIN jobs j ON a.kind = 'job' AND j.id = a.ref_id
+  LEFT JOIN businesses b ON a.kind = 'business' AND b.id = a.ref_id`;
+
+/** Is the referenced entity still public (so the slide may be shown)? */
+function adEntityPublic(r) {
+  if (r.kind === 'product') return r.p_status === 'active';
+  if (r.kind === 'job') return r.j_status === 'open' && !r.j_is_draft;
+  if (r.kind === 'business') return r.b_status === 'active';
+  return false;
+}
+
+/** Slide payload for one joined ad row, or null when the entity is gone. */
+function adSlide(r) {
+  if (r.kind === 'product') {
+    if (r.p_title == null) return null;
+    return {
+      kind: 'product', ref_id: r.ref_id,
+      title: r.p_title,
+      subtitle: `K${Number(r.p_price || 0).toLocaleString('en-US')} · ${r.p_city || ''}`,
+      image_url: r.p_photo_id ? `/api/products/${r.ref_id}/photos/${r.p_photo_id}` : null,
+      url: `#/product/${r.ref_id}`,
+    };
+  }
+  if (r.kind === 'job') {
+    if (r.j_title == null) return null;
+    return {
+      kind: 'job', ref_id: r.ref_id,
+      title: r.j_title,
+      subtitle: `K${Number(r.j_pay || 0).toLocaleString('en-US')} ${AD_PAY_LABEL[r.j_pay_type] || ''} · ${r.j_city || ''}`,
+      image_url: r.j_photo_id ? `/api/jobs/${r.ref_id}/photos/${r.j_photo_id}` : null,
+      url: `#/job/${r.ref_id}`,
+    };
+  }
+  if (r.kind === 'business') {
+    if (r.b_name == null) return null;
+    return {
+      kind: 'business', ref_id: r.ref_id,
+      title: r.b_name,
+      subtitle: r.b_tagline || `${r.b_category || ''} · ${r.b_city || ''}`,
+      image_url: r.b_cover ? `/api/businesses/${r.ref_id}/image/cover`
+        : (r.b_logo ? `/api/businesses/${r.ref_id}/image/logo` : null),
+      url: `#/business/${r.b_slug}`,
+    };
+  }
+  return null;
+}
+
+/** The live ad (if any) for an entity, for the owner-facing detail views. */
+async function activeAdFor(kind, refId) {
+  const row = await getOne(
+    `SELECT id, ends_at FROM ads
+     WHERE kind = ? AND ref_id = ? AND status = 'active' AND ends_at > datetime('now')
+     ORDER BY id DESC LIMIT 1`, [kind, refId]);
+  return row ? { id: row.id, ends_at: row.ends_at } : null;
+}
+
+app.get('/api/ads', ah(async (req, res) => {
+  const rows = await getAll(
+    `${AD_SELECT}
+     WHERE a.status = 'active' AND a.starts_at <= datetime('now') AND a.ends_at > datetime('now')
+       AND COALESCE(u.is_tester, 0) = 0
+     ORDER BY a.created_at DESC, a.id DESC LIMIT 25`, []);
+  const ads = [];
+  for (const r of rows) {
+    if (!adEntityPublic(r)) continue;
+    const slide = adSlide(r);
+    if (slide) ads.push(slide);
+    if (ads.length >= 10) break;
+  }
+  res.json({ ads });
+}));
+
+app.get('/api/ads/mine', ah(auth), ah(async (req, res) => {
+  const rows = await getAll(
+    `${AD_SELECT} WHERE a.owner_id = ? ORDER BY a.created_at DESC, a.id DESC LIMIT 50`, [req.user.id]);
+  const ads = rows.map((r) => {
+    const slide = adSlide(r);
+    return { ...serializeAd(r), ...(slide || { title: '', subtitle: '', image_url: null, url: '' }) };
+  });
+  res.json({ ads });
+}));
+
+app.post('/api/ads', ah(auth), ah(async (req, res) => {
+  const b = req.body || {};
+  const kind = b.kind;
+  const refId = parseInt(b.ref_id, 10);
+  if (!AD_KINDS.includes(kind) || !refId) {
+    return err(res, 422, 'Choose what to promote: a product, a job or a business.');
+  }
+  let ownerId = null;
+  if (kind === 'product') {
+    const p = await getOne("SELECT seller_id FROM products WHERE id = ? AND status != 'removed'", [refId]);
+    if (!p) return err(res, 404, 'Item not found.');
+    ownerId = p.seller_id;
+  } else if (kind === 'job') {
+    const j = await getOne('SELECT poster_id, is_draft FROM jobs WHERE id = ?', [refId]);
+    if (!j) return err(res, 404, 'Job not found.');
+    if (j.is_draft) return err(res, 422, 'Publish the job before promoting it.');
+    ownerId = j.poster_id;
+  } else {
+    const bz = await getOne('SELECT owner_id FROM businesses WHERE id = ?', [refId]);
+    if (!bz) return err(res, 404, 'Business not found.');
+    ownerId = bz.owner_id;
+  }
+  if (ownerId !== req.user.id) return err(res, 403, 'You can only promote your own listings.');
+  if (req.user.is_tester) return err(res, 403, 'Ads are for real accounts only.');
+  if (!adsAreFree()) return err(res, 403, 'Free ads have ended and paid ads are not open yet.');
+  const dup = await getOne(
+    `SELECT id FROM ads WHERE kind = ? AND ref_id = ? AND status = 'active' AND ends_at > datetime('now')`,
+    [kind, refId]);
+  if (dup) return err(res, 409, 'This listing is already in the ads banner.');
+  const starts = new Date();
+  const ends = new Date(starts.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const info = await runWrite(
+    `INSERT INTO ads (owner_id, kind, ref_id, status, is_paid, amount, starts_at, ends_at)
+     VALUES (?, ?, ?, 'active', 0, 0, ?, ?)`,
+    [req.user.id, kind, refId, adStamp(starts), adStamp(ends)]);
+  const ad = await getOne('SELECT * FROM ads WHERE id = ?', [insertId(info)]);
+  res.status(201).json({ ad: serializeAd(ad) });
+}));
+
+app.delete('/api/ads/:id', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const ad = await getOne('SELECT * FROM ads WHERE id = ?', [id || 0]);
+  if (!ad) return err(res, 404, 'Ad not found.');
+  if (ad.owner_id !== req.user.id) return err(res, 403, 'This is not your ad.');
+  await runWrite("UPDATE ads SET status = 'ended' WHERE id = ?", [ad.id]);
+  res.json({ ok: true, id: ad.id });
+}));
+
 function newResetCode() {
   return String(crypto.randomInt(100000, 1000000));
 }
@@ -1058,6 +1347,7 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
   }
   const isPoster = req.user && req.user.id === j.poster_id;
   job.is_poster = !!isPoster;
+  job.active_ad = isPoster ? await activeAdFor('job', id) : null;
   job.my_application = req.user
     ? (await getOne(
         'SELECT id, status, created_at FROM applications WHERE job_id = ? AND worker_id = ?',
@@ -1369,6 +1659,12 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
       (n, t) => `Hi, this is Zac, your assistant. ${n} applied for your job '${t}'. Open the app to review: pieceworkzambia.com`,
       req.user.name, job.title
     )).catch(() => {});
+      notifyPush(job.poster_id, {
+        title: 'PieceWork Zambia',
+        body: `${req.user.name} applied for your job '${job.title}'.`,
+        url: `#/job/${job.id}`,
+        tag: `application-${job.id}`,
+      }).catch(() => {});
     }
     return res.status(201).json({ id: dup.id });
   }
@@ -1381,6 +1677,12 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
       (n, t) => `Hi, this is Zac, your assistant. ${n} applied for your job '${t}'. Open the app to review: pieceworkzambia.com`,
       req.user.name, job.title
     )).catch(() => {});
+    notifyPush(job.poster_id, {
+      title: 'PieceWork Zambia',
+      body: `${req.user.name} applied for your job '${job.title}'.`,
+      url: `#/job/${job.id}`,
+      tag: `application-${job.id}`,
+    }).catch(() => {});
   }
   res.status(201).json({ id: insertId(info) });
 }));
@@ -1483,6 +1785,12 @@ app.patch('/api/applications/:id', ah(auth), ah(async (req, res) => {
       (n, t) => `Hi, this is Zac, your assistant. Good news, you were accepted for '${t}'. Open the app for the poster's number: pieceworkzambia.com`,
       '', job.title
     )).catch(() => {});
+    notifyPush(appRow.worker_id, {
+      title: 'PieceWork Zambia',
+      body: `Good news, you were accepted for '${job.title}'. Open the job to see the poster's number.`,
+      url: `#/job/${job.id}`,
+      tag: `accepted-${id}`,
+    }).catch(() => {});
   }
   res.json({ ok: true });
 }));
@@ -2640,6 +2948,7 @@ app.get('/api/businesses/:slug', ah(maybeAuth), ah(async (req, res) => {
     return err(res, 404, 'Business not found.');
   }
   const business = serializeBusiness(row, req.user);
+  business.active_ad = isOwner ? await activeAdFor('business', row.id) : null;
   const products = await getAll(
     `${PRODUCT_SELECT} WHERE p.business_id = ? AND p.status = 'active' ORDER BY p.created_at DESC LIMIT 50`, [row.id]
   );
@@ -2970,6 +3279,7 @@ app.get('/api/products/:id', ah(maybeAuth), ah(async (req, res) => {
   }
   if (!isOwner) runWrite('UPDATE products SET view_count = view_count + 1 WHERE id = ?', [id]).catch(() => {});
   const product = serializeProduct(row);
+  product.active_ad = isOwner ? await activeAdFor('product', id) : null;
   const photos = await getAll('SELECT id FROM product_photos WHERE product_id = ? ORDER BY sort, id', [id]);
   product.photos = photos.map((ph) => ({ id: ph.id, url: `/api/products/${id}/photos/${ph.id}` }));
   let myOffer = null;
@@ -3077,6 +3387,12 @@ app.post('/api/products/:id/offers', ah(auth), ah(async (req, res) => {
       (n, t) => `Hi, this is Zac, your assistant. ${n} offered K${amount.toLocaleString('en-US')} for your item '${t}'. Open the app to reply: pieceworkzambia.com`,
       req.user.name, product.title
     )).catch(() => {});
+      notifyPush(product.seller_id, {
+        title: 'PieceWork Zambia',
+        body: `${req.user.name} offered K${amount.toLocaleString('en-US')} for your item '${product.title}'.`,
+        url: `#/product/${product.id}`,
+        tag: `offer-${existing.id}`,
+      }).catch(() => {});
     }
     return res.json({ ok: true, id: existing.id, updated: true });
   }
@@ -3089,6 +3405,12 @@ app.post('/api/products/:id/offers', ah(auth), ah(async (req, res) => {
       (n, t) => `Hi, this is Zac, your assistant. ${n} offered K${amount.toLocaleString('en-US')} for your item '${t}'. Open the app to reply: pieceworkzambia.com`,
       req.user.name, product.title
     )).catch(() => {});
+    notifyPush(product.seller_id, {
+      title: 'PieceWork Zambia',
+      body: `${req.user.name} offered K${amount.toLocaleString('en-US')} for your item '${product.title}'.`,
+      url: `#/product/${product.id}`,
+      tag: `offer-${insertId(info)}`,
+    }).catch(() => {});
   }
   res.status(201).json({ id: insertId(info) });
 }));

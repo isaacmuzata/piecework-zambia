@@ -338,6 +338,39 @@ const SCHEMA = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
   `CREATE INDEX IF NOT EXISTS idx_sms_log_user ON sms_log(user_id)`,
+  // Web Push subscriptions (2026-10-23): one row per browser endpoint.
+  // An endpoint belongs to whoever subscribed it most recently (shared
+  // devices), so subscribing upserts by endpoint. Stale endpoints are
+  // pruned by the sender when the push service answers 404/410.
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint     TEXT NOT NULL UNIQUE,
+    p256dh       TEXT NOT NULL,
+    auth         TEXT NOT NULL,
+    user_agent   TEXT DEFAULT '',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id)`,
+  // Ads banner (2026-10-23): owners promote a product, job or storefront
+  // into the rotating Home/Marketplace banner. Free during the growth
+  // phase; is_paid/amount are recorded from day one so paid placements
+  // (switch-on around 2027-01-23) need no schema change.
+  `CREATE TABLE IF NOT EXISTS ads (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL CHECK (kind IN ('product', 'job', 'business')),
+    ref_id     INTEGER NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended')),
+    is_paid    INTEGER NOT NULL DEFAULT 0,
+    amount     INTEGER NOT NULL DEFAULT 0,
+    starts_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    ends_at    TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_ads_status_ends ON ads(status, ends_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_ads_owner ON ads(owner_id)`,
 ];
 
 // Distance matching: precise coordinates are optional on users and jobs.

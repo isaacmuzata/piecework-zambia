@@ -426,6 +426,25 @@ img.avatar{display:block}
 .promo-card h3{font-size:18px;font-weight:800;letter-spacing:-.02em}
 .promo-card p{font-size:13px;opacity:.9}
 
+/* ---------- ads banner ---------- */
+.ads-banner{position:relative;border-radius:22px;overflow:hidden;margin:0 0 16px;min-height:150px;background:linear-gradient(135deg,#101B35,#2468FD);box-shadow:var(--shadow)}
+#market-ads .ads-banner{margin-top:2px}
+.ad-slide{position:absolute;inset:0;display:flex;align-items:flex-end;color:#fff;text-decoration:none}
+.ad-slide[hidden]{display:none}
+.ad-slide .ad-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.ad-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#101B35,#2468FD)}
+.ad-initial{font-size:64px;font-weight:800;color:rgba(255,255,255,.35);letter-spacing:-.02em}
+.ad-shade{position:absolute;inset:0;background:linear-gradient(transparent 30%,rgba(16,27,53,.88))}
+.ad-chip{position:absolute;top:12px;left:12px;z-index:2;background:var(--amber);color:#101B35;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:3px 10px;border-radius:99px}
+.ad-text{position:relative;z-index:1;padding:16px 18px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.ad-text b{font-size:17px;font-weight:800;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-text span{font-size:13px;opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-dots{position:absolute;right:14px;bottom:14px;z-index:2;display:flex;gap:6px}
+.ad-dot{width:8px;height:8px;border-radius:99px;border:0;padding:0;background:rgba(255,255,255,.45);cursor:pointer}
+.ad-dot.active{background:#fff;width:20px}
+.ad-promo{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;background:#FFF7E8;border:1.5px solid var(--amber);border-radius:14px;padding:10px 12px}
+.ad-promo-text{flex:1;min-width:160px;font-size:13.5px;font-weight:600}
+
 /* ---------- messages placeholder / empty ---------- */
 .empty{text-align:center;padding:48px 24px;color:var(--gray)}
 .empty .empty-ico{
