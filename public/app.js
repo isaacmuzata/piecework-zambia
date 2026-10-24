@@ -50,6 +50,7 @@ const ICONS = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>',
   truck: '<rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>',
   wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  hammer: '<path d="m15 12-8.373 8.373a1 1 0 1 1-3-3L12 9"/><path d="m18 15 4-4"/><path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172V7l-2.26-2.26a6 6 0 0 0-4.202-1.756L9 2.96l.92.82A6.18 6.18 0 0 1 12 8.4V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5"/>',
   sparkles: '<path d="M12 3l1.9 5.7 5.7 1.9-5.7 1.9L12 18.2l-1.9-5.7L4.4 10.6l5.7-1.9z"/><path d="M19 15l.9 2.6 2.6.9-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z"/>',
   utensils: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6a2 2 0 0 0 2 2h3zm0 0v7"/>',
   leaf: '<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>',
@@ -832,11 +833,14 @@ async function viewHome() {
     <div class="page" style="padding-top:6px">
       <div id="home-ads"></div>
       <div class="section-title"><span>Popular Services</span><a href="#/categories">See all</a></div>
-      <div class="pop-strip">
-        ${[['Painting', 'painting.jpg'], ['Gardening', 'gardening.jpg'], ['Cleaning', 'cleaning.jpg'], ['Construction', 'construction.jpg'], ['Delivery & Errands', 'deliveries.jpg'], ['Car Wash', 'carwash.jpg']].map(([c, img]) => `
-          <div class="pop-tile" data-cat-link="${esc(c)}" tabindex="0" role="link" aria-label="Browse ${esc(c)} jobs">
-            <img src="/img/landing/${img}" alt="${esc(c)}" loading="lazy">
-            <b>${esc(c === 'Delivery & Errands' ? 'Delivery' : c)}</b>
+      <div class="svc-strip">
+        ${[['Cleaning', 'Home Cleaning', 'cleaning', 'sparkles', '#E6F7F0', '#0B8562'], ['Gardening', 'Gardening &amp; Landscaping', 'gardening', 'leaf', '#E6F7F0', '#0B8562'], ['Plumbing', 'Plumbing', 'plumbing', 'wrench', '#E3EBFE', '#2563EB'], ['Construction & Labor', 'Construction &amp; Repairs', 'construction', 'hammer', '#FEF3D8', '#B45309'], ['Moving Help', 'Moving &amp; Heavy Lifting', 'moving', 'truck', '#FDE8E8', '#C81E1E'], ['Painting', 'Painting', 'painting', 'paint', '#EFE9FE', '#6D28D9']].map(([cat, label, img, ic, tint, color]) => `
+          <div class="svc-card" data-cat-link="${esc(cat)}" tabindex="0" role="link" aria-label="Browse ${esc(cat)} jobs">
+            <img src="/img/services/${img}.jpg" alt="${esc(cat)}" loading="lazy">
+            <div class="svc-body">
+              <span class="svc-ico" style="background:${tint};color:${color}">${icon(ic)}</span>
+              <span class="svc-text"><b>${label}</b><span class="svc-count" data-svc-count="${esc(cat)}" hidden></span></span>
+            </div>
           </div>`).join('')}
       </div>
       <div id="home-workers"></div>
@@ -897,6 +901,14 @@ async function viewHome() {
   }).catch(() => {});
   // Redesign: Featured Workers from the real open-to-work directory.
   api('/api/workers').then((d) => {
+    // Popular Services counts: real open-to-work directory members whose
+    // own listed skills match the trade. Shown only when at least 1.
+    const SVC_KEYS = { 'Cleaning': ['clean'], 'Gardening': ['garden', 'landscap'], 'Plumbing': ['plumb'], 'Construction & Labor': ['construct', 'build', 'brick', 'carpent', 'weld', 'labour', 'labor', 'mason'], 'Moving Help': ['moving', 'mover', 'lifting', 'loading', 'offload', 'relocat'], 'Painting': ['paint'] };
+    Object.keys(SVC_KEYS).forEach((cat) => {
+      const keys = SVC_KEYS[cat];
+      const n = (d.workers || []).filter((w) => keys.some((k) => String(w.skills || '').toLowerCase().includes(k))).length;
+      if (n > 0) document.querySelectorAll('[data-svc-count="' + cat + '"]').forEach((el) => { el.textContent = n + (n === 1 ? ' worker' : ' workers'); el.hidden = false; });
+    });
     const slot = document.getElementById('home-workers');
     if (!slot) return;
     const ws = (d.workers || []).slice(0, 8);
