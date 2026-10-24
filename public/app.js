@@ -1559,9 +1559,9 @@ function wireSellWizard(form) {
     const title = document.getElementById('pf-title').value.trim();
     const price = Number(document.getElementById('pf-price').value);
     const desc = document.getElementById('pf-desc').value.trim();
-    if (title.length < 3) { toast('Give your item a clear title first.', 'error'); return false; }
-    if (!price || price < 1) { toast('Add a price in Kwacha.', 'error'); return false; }
-    if (desc.length < 10) { toast('Add a short description so buyers trust the listing.', 'error'); return false; }
+    if (title.length < 3) { toast('Give your item a clear title first.', 'error'); const el = document.getElementById('pf-title'); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus(); return false; }
+    if (!price || price < 1) { toast('Add a price in Kwacha.', 'error'); const el = document.getElementById('pf-price'); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus(); return false; }
+    if (desc.length < 10) { toast('Add a short description so buyers trust the listing.', 'error'); const el = document.getElementById('pf-desc'); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus(); return false; }
     return true;
   }
   next.addEventListener('click', () => { if (step === 1 && !validStep1()) return; show(step + 1); });

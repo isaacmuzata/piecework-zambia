@@ -93,6 +93,8 @@ button{font-family:inherit}
 }
 /* class rules below set display, which would otherwise beat the [hidden] attribute */
 .drawer[hidden],.drawer-scrim[hidden]{display:none!important}
+/* The hidden attribute must always win, even over class display rules like .btn (inline-flex) */
+[hidden]{display:none!important}
 .drawer-scrim.show{opacity:1;pointer-events:auto}
 .drawer{
   position:fixed;top:0;bottom:0;z-index:59;
