@@ -632,7 +632,7 @@ app.post('/api/auth/forgot', forgotLimiter, ah(async (req, res) => {
   if (smsEnabled()) {
     try {
       await sendSms(normPhone,
-        `Your PieceWork password reset code is ${code}. It expires in ${RESET_CODE_TTL_MIN} minutes. Do not share it with anyone.`);
+        `Hi, this is Zac, your assistant. Here is your code: ${code}. It expires in ${RESET_CODE_TTL_MIN} minutes. Do not share it. PieceWork Zambia`);
       smsSent = true;
     } catch (e) {
       console.error('Password-reset SMS failed:', e.message);
