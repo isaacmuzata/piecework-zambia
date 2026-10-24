@@ -1362,7 +1362,7 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
     );
     if (job.poster_id !== req.user.id) {
       notifySms(job.poster_id, 'application', composeSms(
-      (n, t) => `PieceWork: ${n} applied for your job '${t}'. Open the app to review: pieceworkzambia.com`,
+      (n, t) => `Hi, this is Zac, your assistant. ${n} applied for your job '${t}'. Open the app to review: pieceworkzambia.com`,
       req.user.name, job.title
     )).catch(() => {});
     }
@@ -1374,7 +1374,7 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
   );
   if (job.poster_id !== req.user.id) {
     notifySms(job.poster_id, 'application', composeSms(
-      (n, t) => `PieceWork: ${n} applied for your job '${t}'. Open the app to review: pieceworkzambia.com`,
+      (n, t) => `Hi, this is Zac, your assistant. ${n} applied for your job '${t}'. Open the app to review: pieceworkzambia.com`,
       req.user.name, job.title
     )).catch(() => {});
   }
@@ -1476,7 +1476,7 @@ app.patch('/api/applications/:id', ah(auth), ah(async (req, res) => {
   }
   if (status === 'accepted' && appRow.worker_id !== req.user.id) {
     notifySms(appRow.worker_id, 'accepted', composeSms(
-      (n, t) => `PieceWork: Good news, you were accepted for '${t}'. Open the app for the poster's number: pieceworkzambia.com`,
+      (n, t) => `Hi, this is Zac, your assistant. Good news, you were accepted for '${t}'. Open the app for the poster's number: pieceworkzambia.com`,
       '', job.title
     )).catch(() => {});
   }
@@ -3070,7 +3070,7 @@ app.post('/api/products/:id/offers', ah(auth), ah(async (req, res) => {
       [amount, message, existing.id]);
     if (product.seller_id !== req.user.id) {
       notifySms(product.seller_id, 'offer', composeSms(
-      (n, t) => `PieceWork: ${n} offered K${amount.toLocaleString('en-US')} for your item '${t}'. Open the app to reply: pieceworkzambia.com`,
+      (n, t) => `Hi, this is Zac, your assistant. ${n} offered K${amount.toLocaleString('en-US')} for your item '${t}'. Open the app to reply: pieceworkzambia.com`,
       req.user.name, product.title
     )).catch(() => {});
     }
@@ -3082,7 +3082,7 @@ app.post('/api/products/:id/offers', ah(auth), ah(async (req, res) => {
   );
   if (product.seller_id !== req.user.id) {
     notifySms(product.seller_id, 'offer', composeSms(
-      (n, t) => `PieceWork: ${n} offered K${amount.toLocaleString('en-US')} for your item '${t}'. Open the app to reply: pieceworkzambia.com`,
+      (n, t) => `Hi, this is Zac, your assistant. ${n} offered K${amount.toLocaleString('en-US')} for your item '${t}'. Open the app to reply: pieceworkzambia.com`,
       req.user.name, product.title
     )).catch(() => {});
   }
