@@ -475,6 +475,10 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   );
   const user = await getOne('SELECT * FROM users WHERE id = ?', [insertId(info)]);
   setAuthCookie(res, signToken(user.id));
+  // Registration confirmation text (fire-and-forget; logged either way).
+  notifySms(user.id, 'welcome', composeSms(
+    (n) => `Hi, this is Zac, your assistant. Welcome to PieceWork Zambia, ${n}. Your account is ready: pieceworkzambia.com`,
+    user.name, ''), user.phone).catch(() => {});
   res.status(201).json({ user: publicUser(user) });
 }));
 
