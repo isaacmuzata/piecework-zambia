@@ -3778,8 +3778,9 @@ const BRAND_OG_IMAGE = SHARE_ORIGIN + '/img/og-brand.jpg';
 const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const excerpt = (v, n) => { const t = String(v || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '...' : t; };
 
-function sharePreviewPage(res, { title, desc, image, target }) {
+function sharePreviewPage(res, { title, desc, image, target, self }) {
   const t = escHtml(title); const d = escHtml(desc); const img = escHtml(image); const url = escHtml(target);
+  const ogUrl = escHtml(self || target);
   res.set('Cache-Control', 'no-cache');
   res.type('html').send(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -3789,7 +3790,7 @@ function sharePreviewPage(res, { title, desc, image, target }) {
 <meta property="og:title" content="${t}">
 <meta property="og:description" content="${d}">
 <meta property="og:image" content="${img}">
-<meta property="og:url" content="${url}">
+<meta property="og:url" content="${ogUrl}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${t}">
 <meta name="twitter:description" content="${d}">
@@ -3801,12 +3802,13 @@ function sharePreviewPage(res, { title, desc, image, target }) {
 </body></html>`);
 }
 
-function genericShare(res, target) {
+function genericShare(res, target, self) {
   return sharePreviewPage(res, {
     title: 'PieceWork Zambia: Quick jobs. Quick cash.',
     desc: 'Find piece work, hire trusted help, buy and sell in the Marketplace, all across Zambia.',
     image: BRAND_OG_IMAGE,
     target,
+    self,
   });
 }
 
@@ -3836,7 +3838,7 @@ app.get('/api/businesses/:id/image/:kind', ah(async (req, res) => {
 
 app.get('/s/business/:slug', ah(async (req, res) => {
   const b = await getOne('SELECT * FROM businesses WHERE slug = ?', [req.params.slug]);
-  if (!b || b.status !== 'active') return genericShare(res, SHARE_ORIGIN + '/#/businesses');
+  if (!b || b.status !== 'active') return genericShare(res, SHARE_ORIGIN + '/#/businesses', `${SHARE_ORIGIN}/s/business/${encodeURIComponent(req.params.slug)}`);
   const image = b.cover
     ? `${SHARE_ORIGIN}/api/businesses/${b.id}/image/cover`
     : (b.logo ? `${SHARE_ORIGIN}/api/businesses/${b.id}/image/logo` : BRAND_OG_IMAGE);
@@ -3845,23 +3847,25 @@ app.get('/s/business/:slug', ah(async (req, res) => {
     desc: excerpt(b.tagline || b.description, 180) || `Visit ${b.name} on PieceWork Zambia.`,
     image,
     target: `${SHARE_ORIGIN}/#/business/${encodeURIComponent(b.slug)}`,
+    self: `${SHARE_ORIGIN}/s/business/${encodeURIComponent(b.slug)}`,
   });
 }));
 
 app.get('/s/product/:id', ah(async (req, res) => {
   const p = await getOne(`SELECT pr.*, (SELECT ph.id FROM product_photos ph WHERE ph.product_id = pr.id ORDER BY ph.sort, ph.id LIMIT 1) AS cover_photo_id FROM products pr WHERE pr.id = ?`, [req.params.id]);
-  if (!p || p.status !== 'active') return genericShare(res, SHARE_ORIGIN + '/#/market');
+  if (!p || p.status !== 'active') return genericShare(res, SHARE_ORIGIN + '/#/market', `${SHARE_ORIGIN}/s/product/${req.params.id}`);
   return sharePreviewPage(res, {
     title: `${p.title} · K${Number(p.price || 0).toLocaleString('en-US')} on PieceWork Zambia`,
     desc: excerpt(p.description, 180) || `${p.condition || ''} · ${p.city || ''} · See it on PieceWork Zambia.`,
     image: p.cover_photo_id ? `${SHARE_ORIGIN}/api/products/${p.id}/photos/${p.cover_photo_id}` : BRAND_OG_IMAGE,
     target: `${SHARE_ORIGIN}/#/product/${p.id}`,
+    self: `${SHARE_ORIGIN}/s/product/${p.id}`,
   });
 }));
 
 app.get('/s/user/:id', ah(async (req, res) => {
   const u = await getOne('SELECT id, name, city, avatar, suspended_at FROM users WHERE id = ?', [req.params.id]);
-  if (!u || u.suspended_at) return genericShare(res, SHARE_ORIGIN + '/');
+  if (!u || u.suspended_at) return genericShare(res, SHARE_ORIGIN + '/', `${SHARE_ORIGIN}/s/user/${req.params.id}`);
   let statsLine = '';
   try {
     const st = await trackRecord(u.id);
@@ -3872,17 +3876,19 @@ app.get('/s/user/:id', ah(async (req, res) => {
     desc: `${u.city || 'Zambia'}${statsLine}. See the profile, ratings and reviews on PieceWork Zambia.`,
     image: u.avatar ? `${SHARE_ORIGIN}/api/users/${u.id}/avatar` : BRAND_OG_IMAGE,
     target: `${SHARE_ORIGIN}/#/user/${u.id}`,
+    self: `${SHARE_ORIGIN}/s/user/${u.id}`,
   });
 }));
 
 app.get('/s/job/:id', ah(async (req, res) => {
   const j = await getOne(`SELECT jb.*, (SELECT ph.id FROM job_photos ph WHERE ph.job_id = jb.id ORDER BY ph.sort, ph.id LIMIT 1) AS cover_photo_id FROM jobs jb WHERE jb.id = ?`, [req.params.id]);
-  if (!j || j.is_draft) return genericShare(res, SHARE_ORIGIN + '/#/jobs');
+  if (!j || j.is_draft) return genericShare(res, SHARE_ORIGIN + '/#/jobs', `${SHARE_ORIGIN}/s/job/${req.params.id}`);
   return sharePreviewPage(res, {
     title: `${j.title} · ${j.city} on PieceWork Zambia`,
     desc: excerpt(j.description, 180) || `${j.category} piece work in ${j.city}. Apply on PieceWork Zambia.`,
     image: j.cover_photo_id ? `${SHARE_ORIGIN}/api/jobs/${j.id}/photos/${j.cover_photo_id}` : BRAND_OG_IMAGE,
     target: `${SHARE_ORIGIN}/#/job/${j.id}`,
+    self: `${SHARE_ORIGIN}/s/job/${j.id}`,
   });
 }));
 
