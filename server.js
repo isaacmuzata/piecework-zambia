@@ -1997,9 +1997,9 @@ app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
   if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
   const [rows, countRow, , , , , rejected, rejectedCount, redoneCount, approvedCount] = await Promise.all([
     getAll(`
-    SELECT id, name, phone, city, selfie, selfie_status, created_at
+    SELECT id, name, phone, city, selfie, selfie_status, created_at, selfie_resubmitted_at
     FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'
-    ORDER BY created_at ASC LIMIT 100`),
+    ORDER BY (selfie_resubmitted_at IS NOT NULL) DESC, selfie_resubmitted_at DESC, created_at ASC LIMIT 100`),
     getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'`),
     getOne('SELECT COUNT(*) AS c FROM products'),
     getOne('SELECT COUNT(*) AS c FROM businesses'),
@@ -2922,6 +2922,9 @@ function serializeBusiness(b, viewer) {
     status: b.status, verified: b.verification_status === 'verified',
     verification_status: b.verification_status,
     verification_note: (isOwner || isAdm) ? (b.verification_note || '') : '',
+    pacra_number: (isOwner || isAdm) ? (b.pacra_number || '') : undefined,
+    tpin: (isOwner || isAdm) ? (b.tpin || '') : undefined,
+    owner_legal_name: (isOwner || isAdm) ? (b.owner_legal_name || '') : undefined,
     product_count: b.product_count != null ? Number(b.product_count) : undefined,
     owner_rating: b.owner_rating != null ? Number(b.owner_rating) : null,
     owner_reviews: b.owner_reviews != null ? Number(b.owner_reviews) : 0,
@@ -2942,6 +2945,10 @@ function validateBusinessInput(b) {
   if (b.category && !marketCategorySet.has(b.category)) f.category = 'Choose a valid category.';
   if (!CITIES.includes(b.city)) f.city = 'Choose a valid town.';
   if (!b.description || String(b.description).trim().length < 10) f.description = 'Describe the business (10+ characters).';
+  if (String(b.pacra_number || '').trim().length < 5) f.pacra_number = 'Enter your PACRA registration number (as printed on the certificate).';
+  if (!/^\d{10}$/.test(String(b.tpin || '').replace(/\s/g, ''))) f.tpin = 'Enter your 10-digit ZRA TPIN.';
+  if (!b.address || String(b.address).trim().length < 5) f.address = 'Enter the business street address.';
+  if (!b.owner_legal_name || String(b.owner_legal_name).trim().length < 5) f.owner_legal_name = "Enter the owner or director's full legal name.";
   for (const key of ['logo', 'cover']) {
     const v = b[key];
     if (v !== undefined && v !== null && v !== '') {
@@ -2956,14 +2963,18 @@ app.post('/api/businesses', ah(auth), businessLimiter, ah(async (req, res) => {
   const b = req.body || {};
   const f = validateBusinessInput(b);
   if (Object.keys(f).length) return err(res, 422, Object.values(f)[0], f);
+  const cert = typeof b.certificate === 'string' ? b.certificate : '';
+  if (!/^data:image\/(jpeg|png|webp);base64,/.test(cert) || cert.length > 2_500_000) {
+    return err(res, 422, 'Attach a clear photo of your PACRA certificate (JPG, PNG or WebP).', { certificate: 'Attach a clear photo of your PACRA certificate.' });
+  }
   const owned = await getOne('SELECT COUNT(*) AS c FROM businesses WHERE owner_id = ?', [req.user.id]);
   if (Number(owned.c || 0) >= 3) return err(res, 422, 'You can run up to 3 business storefronts.');
   const coords = parseLatLng(b);
   if (coords && coords.error) return err(res, 422, coords.error);
   const info = await runWrite(`
     INSERT INTO businesses (owner_id, name, slug, tagline, description, logo, cover, category,
-      city, area, address, phone, whatsapp, email, hours_text, lat, lng)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      city, area, address, phone, whatsapp, email, hours_text, lat, lng, pacra_number, tpin, owner_legal_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     req.user.id, String(b.name).trim(), 'tmp-' + Date.now(),
     String(b.tagline || '').trim().slice(0, 120), String(b.description).trim(),
@@ -2972,10 +2983,15 @@ app.post('/api/businesses', ah(auth), businessLimiter, ah(async (req, res) => {
     String(b.phone || '').trim().slice(0, 30), String(b.whatsapp || '').trim().slice(0, 30),
     String(b.email || '').trim().slice(0, 120), String(b.hours_text || '').trim().slice(0, 200),
     coords ? coords.lat : null, coords ? coords.lng : null,
+    String(b.pacra_number).trim().slice(0, 40), String(b.tpin).replace(/\s/g, ''), String(b.owner_legal_name).trim().slice(0, 120),
   ]);
   const id = insertId(info);
   const slug = slugifyName(b.name) + '-' + id;
   await runWrite('UPDATE businesses SET slug = ? WHERE id = ?', [slug, id]);
+  // The PACRA certificate arrives with the application: file it as the
+  // first verification document and queue the shop for verification.
+  await runWrite('INSERT INTO business_documents (business_id, kind, image) VALUES (?, ?, ?)', [id, 'pacra', cert]);
+  await runWrite("UPDATE businesses SET verification_status = 'pending' WHERE id = ?", [id]);
   res.status(201).json({ id, slug, status: 'pending' });
 }));
 
@@ -3063,20 +3079,35 @@ app.patch('/api/businesses/:id', ah(auth), ah(async (req, res) => {
   if (row.owner_id !== req.user.id) return err(res, 403, 'This is not your business.');
   const b = req.body || {};
   const updates = {};
-  for (const k of ['name', 'tagline', 'description', 'category', 'city', 'area', 'address', 'phone', 'whatsapp', 'email', 'hours_text']) {
+  for (const k of ['name', 'tagline', 'description', 'category', 'city', 'area', 'address', 'phone', 'whatsapp', 'email', 'hours_text', 'pacra_number', 'tpin', 'owner_legal_name']) {
     if (b[k] !== undefined) updates[k] = typeof b[k] === 'string' ? b[k].trim() : b[k];
   }
   if (b.logo !== undefined) updates.logo = b.logo || null;
   if (b.cover !== undefined) updates.cover = b.cover || null;
   const coords = parseLatLng(b);
   if (coords) { updates.lat = coords.lat; updates.lng = coords.lng; }
+  if (updates.tpin !== undefined) updates.tpin = String(updates.tpin).replace(/\s/g, '');
   if (Object.keys(updates).length) {
     const probe = { ...row, ...updates };
     const f = validateBusinessInput(probe);
     if (Object.keys(f).length) return err(res, 422, Object.values(f)[0], f);
+    // Shops opened before the certificate rule must file one at their
+    // next edit (or have one on file already via the documents upload).
+    const docCount = await getOne('SELECT COUNT(*) AS c FROM business_documents WHERE business_id = ?', [id]);
+    const cert = typeof b.certificate === 'string' ? b.certificate : '';
+    const certOk = /^data:image\/(jpeg|png|webp);base64,/.test(cert) && cert.length <= 2_500_000;
+    if (Number(docCount.c || 0) === 0 && !certOk) {
+      return err(res, 422, 'A PACRA certificate photo is required. Upload it in the Verified badge section above, then save again.', { certificate: 'A PACRA certificate photo is required.' });
+    }
     const sets = Object.keys(updates).map((k) => `${k} = ?`).join(', ');
     await runWrite(`UPDATE businesses SET ${sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [...Object.values(updates), id]);
+    if (certOk && Number(docCount.c || 0) === 0) {
+      await runWrite('INSERT INTO business_documents (business_id, kind, image) VALUES (?, ?, ?)', [id, 'pacra', cert]);
+      if (row.verification_status === 'unverified' || row.verification_status === 'rejected') {
+        await runWrite("UPDATE businesses SET verification_status = 'pending', verification_note = '' WHERE id = ?", [id]);
+      }
+    }
   }
   res.json({ ok: true, id });
 }));

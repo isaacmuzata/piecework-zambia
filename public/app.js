@@ -2004,8 +2004,8 @@ function businessFormHtml(prefill, isEdit) {
     <div class="form-2col">
       <div class="field"><label for="bf-area">Area</label>
         <input id="bf-area" maxlength="80" value="${esc(p.area || '')}" placeholder="e.g. Kamwala"></div>
-      <div class="field"><label for="bf-address">Street address</label>
-        <input id="bf-address" maxlength="200" value="${esc(p.address || '')}" placeholder="Shop number, street"></div>
+      <div class="field"><label for="bf-address">Street address *</label>
+        <input id="bf-address" maxlength="200" required value="${esc(p.address || '')}" placeholder="Shop number, street"></div>
     </div>
     <div class="form-2col">
       <div class="field"><label for="bf-phone">Phone</label>
@@ -2013,6 +2013,17 @@ function businessFormHtml(prefill, isEdit) {
       <div class="field"><label for="bf-email">Email</label>
         <input id="bf-email" type="email" maxlength="120" value="${esc(p.email || '')}" placeholder="shop@example.com"></div>
     </div>
+    <div class="form-2col">
+      <div class="field"><label for="bf-pacra">PACRA registration number *</label>
+        <input id="bf-pacra" maxlength="40" required value="${esc(p.pacra_number || '')}" placeholder="As printed on the certificate"></div>
+      <div class="field"><label for="bf-tpin">ZRA TPIN *</label>
+        <input id="bf-tpin" maxlength="12" inputmode="numeric" required value="${esc(p.tpin || '')}" placeholder="10 digits"></div>
+    </div>
+    <div class="field"><label for="bf-ownername">Owner / director full legal name *</label>
+      <input id="bf-ownername" maxlength="120" required value="${esc(p.owner_legal_name || '')}" placeholder="As it appears on the PACRA record"></div>
+    ${isEdit ? '' : `<div class="field"><label for="bf-cert">PACRA certificate photo *</label>
+      <input id="bf-cert" type="file" accept="image/*">
+      <div class="hint" style="margin-top:6px">A clear photo or scan of your PACRA registration certificate. Our team checks it against your numbers for the Verified badge.</div></div>`}
     <div class="field"><label for="bf-hours">Opening hours</label>
       <input id="bf-hours" maxlength="200" value="${esc(p.hours_text || '')}" placeholder="e.g. Mon to Sat, 8:00 to 17:30"></div>
     <div class="form-2col">
@@ -2024,13 +2035,14 @@ function businessFormHtml(prefill, isEdit) {
         ${p.cover ? `<img src="${p.cover}" alt="Current cover" style="width:100%;height:56px;border-radius:14px;object-fit:cover;margin-top:6px">` : ''}</div>
     </div>
     <button class="btn btn-primary btn-block" type="submit">${isEdit ? 'Save changes' : 'Submit for approval'}</button>
-    ${isEdit ? '' : '<p class="small muted" style="margin-top:8px">An admin reviews every new storefront before it goes public. You can upload registration documents after applying to earn the Verified badge.</p>'}
+    ${isEdit ? '' : '<p class="small muted" style="margin-top:8px">An admin reviews every new storefront before it goes public. Your PACRA certificate and numbers are checked by our team for the Verified badge.</p>'}
   </form>`;
 }
 
 async function wireBusinessForm(form, existing) {
   form._logo = undefined;
   form._cover = undefined;
+  form._cert = undefined;
   const bind = (inputId, key, convert) => {
     const input = form.querySelector(inputId);
     if (input) input.addEventListener('change', async () => {
@@ -2042,6 +2054,7 @@ async function wireBusinessForm(form, existing) {
   };
   bind('#bf-logo', '_logo', fileToLogoImage);
   bind('#bf-cover', '_cover', fileToDoc);
+  bind('#bf-cert', '_cert', fileToDoc);
 }
 
 function collectBusinessData(form) {
@@ -2056,7 +2069,11 @@ function collectBusinessData(form) {
     phone: document.getElementById('bf-phone').value.trim(),
     email: document.getElementById('bf-email').value.trim(),
     hours_text: document.getElementById('bf-hours').value.trim(),
+    pacra_number: document.getElementById('bf-pacra').value.trim(),
+    tpin: document.getElementById('bf-tpin').value.trim(),
+    owner_legal_name: document.getElementById('bf-ownername').value.trim(),
   };
+  if (form._cert !== undefined) data.certificate = form._cert;
   if (form._logo !== undefined) data.logo = form._logo;
   if (form._cover !== undefined) data.cover = form._cover;
   return data;
@@ -2195,6 +2212,7 @@ async function viewAdminBusinesses() {
         <div class="card" style="margin-bottom:10px">
           <b>${esc(b.name)}</b> ${bizBadge(b)}
           <span class="small muted" style="display:block">by ${esc(b.owner_name)} · ${esc(b.category)} · ${esc(b.city)} · status ${esc(b.status)} · verification ${esc(b.verification_status)} · ${b.doc_count} documents</span>
+          ${b.pacra_number ? `<span class="small muted" style="display:block">PACRA ${esc(b.pacra_number)} · TPIN ${esc(b.tpin || '')} · Owner ${esc(b.owner_legal_name || '')}</span>` : ''}
           <div class="btn-row" style="margin-top:8px">
             ${b.status === 'pending' ? `<button class="btn btn-sm btn-primary" data-ab-approve="${b.id}">Approve</button><button class="btn btn-sm btn-outline" data-ab-status="rejected" data-ab-id="${b.id}">Reject</button>` : ''}
             ${b.status === 'active' ? `<button class="btn btn-sm btn-outline" data-ab-status="suspended" data-ab-id="${b.id}">Suspend</button>` : ''}
@@ -3493,7 +3511,7 @@ function viewProfileEdit() {
       <div id="sf-preview" style="margin-bottom:8px"></div>
       <input type="file" id="sf-file" accept="image/*" hidden>
       <button type="button" class="btn btn-sm btn-outline" id="sf-btn">${icon('camera')}Upload new selfie</button>
-      <div class="hint" style="margin-top:8px">Saved when you tap Save changes below. A new selfie goes back to the team for review.</div>
+      <div class="hint" style="margin-top:8px">Your new selfie uploads right away and goes back to the team for review.</div>
     </div>
     <div class="card">
       <h3 style="margin-top:0">${icon('utensils')}Food handler's license</h3>
@@ -3582,25 +3600,36 @@ function viewProfileEdit() {
   });
 
   // Verification selfie: status + re-upload, back to the review queue.
-  let newSelfie = null;
+  // Picking a photo uploads it at once; there is no separate Save step
+  // (members were picking a photo and leaving before tapping the form's
+  // Save button, so their new selfie never reached the review queue).
   const sfStatus = document.getElementById('sf-status');
   const sfPreview = document.getElementById('sf-preview');
   const sfFile = document.getElementById('sf-file');
+  const sfBtn = document.getElementById('sf-btn');
   const SF_LABEL = {
     approved: 'Approved. Recruiters can see you are verified.',
     pending: 'Under review by the PieceWork team.',
     rejected: 'Not approved. It is blocking recruiters from moving to the next step with you. Upload a new selfie that follows the guide below.',
   };
-  sfStatus.innerHTML = `<p class="small"><b>Status:</b> ${esc(SF_LABEL[currentUser.selfie_status] || 'Not submitted yet.')}</p>`;
-  document.getElementById('sf-btn').addEventListener('click', () => sfFile.click());
+  const sfShowStatus = () => {
+    sfStatus.innerHTML = `<p class="small"><b>Status:</b> ${esc(SF_LABEL[currentUser.selfie_status] || 'Not submitted yet.')}</p>`;
+  };
+  sfShowStatus();
+  sfBtn.addEventListener('click', () => sfFile.click());
   sfFile.addEventListener('change', async () => {
     const file = sfFile.files[0];
     if (!file) return;
+    sfBtn.disabled = true;
     try {
-      newSelfie = await fileToSizedImage(file, 512, false);
-      sfPreview.innerHTML = `<img src="${newSelfie}" alt="New verification selfie" style="width:120px;height:120px;object-fit:cover;border-radius:12px">`;
-      toast('Selfie ready — tap Save changes to send it for review.');
+      const dataUrl = await fileToSizedImage(file, 512, false);
+      sfPreview.innerHTML = `<img src="${dataUrl}" alt="New verification selfie" style="width:120px;height:120px;object-fit:cover;border-radius:12px">`;
+      const { user } = await api('/api/users/me', { method: 'PATCH', body: JSON.stringify({ selfie: dataUrl }) });
+      currentUser = user;
+      sfShowStatus();
+      toast('Selfie sent for review. The team will check it shortly.');
     } catch (e) { toast(e.message, true); }
+    sfBtn.disabled = false;
     sfFile.value = '';
   });
 
@@ -3661,7 +3690,6 @@ function viewProfileEdit() {
       open_to_work: form.open_to_work.checked,
     };
     if (newAvatar) payload.avatar = newAvatar;
-    if (newSelfie) payload.selfie = newSelfie;
     if (ivState !== 'unchanged') payload.intro_video = ivState === 'removed' ? '' : newIntroVideo;
     if (newFoodLicenseImage || flNumber.value.trim() !== flInitNumber || flExp.value !== flInitExp) {
       payload.food_license_image = newFoodLicenseImage || '';
@@ -3671,7 +3699,7 @@ function viewProfileEdit() {
     try {
       const { user } = await api('/api/users/me', { method: 'PATCH', body: JSON.stringify(payload) });
       currentUser = user; renderChrome();
-      toast(payload.selfie ? 'Profile updated. Your new selfie is in the review queue.' : 'Profile updated.');
+      toast('Profile updated.');
       location.hash = '#/profile';
     } catch (err2) { showFieldErrors(form, err2.fields); toast(err2.message, true); }
     btn.disabled = false;
@@ -5033,7 +5061,7 @@ async function viewVerifications() {
           <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">
             ${u.selfie ? `<img src="${u.selfie}" alt="Selfie" style="width:96px;height:96px;object-fit:cover;border-radius:12px">` : ''}
             <div style="flex:1">
-              <b>${esc(u.name)}</b><br>
+              <b>${esc(u.name)}</b>${u.selfie_resubmitted_at ? ' <span class="badge badge-verified">Re-did selfie</span>' : ''}<br>
               <span class="small muted">${esc(u.phone)} · ${esc(u.city)} · joined ${esc(fmtDate(u.created_at))}</span>
             </div>
           </div>
