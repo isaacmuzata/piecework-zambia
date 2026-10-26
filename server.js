@@ -3795,9 +3795,8 @@ function sharePreviewPage(res, { title, desc, image, target, self }) {
 <meta name="twitter:title" content="${t}">
 <meta name="twitter:description" content="${d}">
 <meta name="twitter:image" content="${img}">
-<meta http-equiv="refresh" content="0; url=${url}">
 </head><body style="font-family:sans-serif;background:#101B35;color:#F5F7FB;text-align:center;padding:40px">
-<p>${t}</p><p><a href="${url}" style="color:#FFB547">Open on PieceWork Zambia</a></p>
+<p>${t}</p><p><img src="${img}" alt="${t}" style="max-width:420px;width:100%;border-radius:12px"></p><p><a href="${url}" style="color:#FFB547">Open on PieceWork Zambia</a></p>
 <script>location.replace(${JSON.stringify(target)});</script>
 </body></html>`);
 }
