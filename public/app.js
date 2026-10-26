@@ -3493,7 +3493,7 @@ function viewProfileEdit() {
       <div id="av-preview" style="display:flex;justify-content:center">${avatarHtml(currentUser, 'lg')}</div>
       <input type="file" id="av-file" accept="image/*" hidden>
       <button class="btn btn-sm btn-outline" id="av-btn" style="margin-top:12px">${icon('camera')}Change photo</button>
-      <div class="hint" style="margin-top:8px">Square photos work best. Kept small automatically.</div>
+      <div class="hint" style="margin-top:8px">Square photos work best. Your new photo saves right away, no extra step.</div>
     </div>
     <div class="card" style="text-align:center">
       <div id="iv-preview"></div>
@@ -3546,17 +3546,22 @@ function viewProfileEdit() {
     </div>
   </div></div>`;
 
-  let newAvatar = null;
   const fileInput = document.getElementById('av-file');
-  document.getElementById('av-btn').addEventListener('click', () => fileInput.click());
+  const avBtn = document.getElementById('av-btn');
+  avBtn.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0];
     if (!file) return;
+    avBtn.disabled = true;
     try {
-      newAvatar = await fileToAvatar(file);
-      document.getElementById('av-preview').innerHTML = `<img class="avatar lg" src="${newAvatar}" alt="New profile photo">`;
-      toast('Photo ready — tap Save changes to keep it.');
+      const dataUrl = await fileToAvatar(file);
+      const { user } = await api('/api/users/me', { method: 'PATCH', body: JSON.stringify({ avatar: dataUrl }) });
+      currentUser = user;
+      renderChrome();
+      document.getElementById('av-preview').innerHTML = `<img class="avatar lg" src="${user.avatar}" alt="New profile photo">`;
+      toast('Profile photo updated.');
     } catch (e) { toast(e.message, true); }
+    avBtn.disabled = false;
     fileInput.value = '';
   });
 
@@ -3689,7 +3694,6 @@ function viewProfileEdit() {
       skills: form.skills.value.trim(),
       open_to_work: form.open_to_work.checked,
     };
-    if (newAvatar) payload.avatar = newAvatar;
     if (ivState !== 'unchanged') payload.intro_video = ivState === 'removed' ? '' : newIntroVideo;
     if (newFoodLicenseImage || flNumber.value.trim() !== flInitNumber || flExp.value !== flInitExp) {
       payload.food_license_image = newFoodLicenseImage || '';
