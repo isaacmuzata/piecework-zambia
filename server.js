@@ -2083,9 +2083,9 @@ async function sweepExpiredNrc() {
 // ---------------------------------------------------------------- selfie verification (admin)
 app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
   if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
-  const [rows, countRow, , , , , rejected, rejectedCount, redoneCount, approvedCount] = await Promise.all([
+  const [queueRows, countRow, , , , , rejected, rejectedCount, redoneCount, approvedCount] = await Promise.all([
     getAll(`
-    SELECT id, name, phone, city, selfie, selfie_status, created_at, selfie_resubmitted_at
+    SELECT id, name, phone, city, selfie_status, created_at, selfie_resubmitted_at
     FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'
     ORDER BY (selfie_resubmitted_at IS NOT NULL) DESC, selfie_resubmitted_at DESC, created_at ASC LIMIT 100`),
     getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie IS NOT NULL AND selfie_status = 'pending'`),
@@ -2100,6 +2100,7 @@ app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
     getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie_resubmitted_at IS NOT NULL`),
     getOne(`SELECT COUNT(*) AS c FROM users WHERE selfie_status = 'approved'`),
   ]);
+  const rows = queueRows.map((r) => ({ ...r, selfie: `/api/admin/verifications/${r.id}/selfie` }));
   res.json({
     pending: rows, pending_count: Number(countRow.c || 0),
     rejected, rejected_count: Number(rejectedCount.c || 0),
@@ -2122,6 +2123,13 @@ function notifySelfieRejected(userId) {
     tag: 'selfie-rejected',
   }).catch(() => {});
 }
+
+app.get('/api/admin/verifications/:userId/selfie', ah(auth), ah(async (req, res) => {
+  if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
+  const u = await getOne('SELECT selfie FROM users WHERE id = ?', [parseInt(req.params.userId, 10) || 0]);
+  if (!u || !u.selfie) return err(res, 404, 'No selfie on file.');
+  return sendDataImage(res, u.selfie, 'private, max-age=600');
+}));
 
 app.post('/api/admin/verifications/:userId', ah(auth), ah(async (req, res) => {
   if (!canModerate(req.user)) return err(res, 403, 'Not authorized.');
@@ -3901,11 +3909,11 @@ function genericShare(res, target, self) {
   });
 }
 
-function sendDataImage(res, value) {
+function sendDataImage(res, value, cacheControl) {
   const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,([\s\S]+)$/.exec(String(value || ''));
   if (!m) return err(res, 404, 'No image.');
   res.set('Content-Type', m[1]);
-  res.set('Cache-Control', 'public, max-age=86400');
+  res.set('Cache-Control', cacheControl || 'public, max-age=86400');
   return res.send(Buffer.from(m[2], 'base64'));
 }
 
