@@ -62,13 +62,35 @@ app.use((req, res, next) => {
 });
 app.use(cookieParser());
 
-// Shared store for the list response cache (see listCache below). Any
-// non-GET request clears it, so a member who posts a job, ends an ad or
-// marks an item sold sees their change at once; only pure browsing
-// bursts are absorbed by the cache.
+// Shared store for the list response cache (see listCache below).
+// Writes bust only the list family they change: v80 busted everything on
+// any write, and with hundreds of members writing all day (logins,
+// applications), the cache never survived its own TTL in production
+// (Oct 27, 2026). Sign-ins and other unrelated writes bust nothing.
 const listCacheStore = new Map();
+const listCacheRefreshing = new Set();
+function bustListCache(path) {
+  const drop = (prefix) => {
+    for (const k of listCacheStore.keys()) if (k.split('|')[1].startsWith(prefix)) listCacheStore.delete(k);
+  };
+  if (path.startsWith('/api/admin/') || path.startsWith('/api/users')) {
+    listCacheStore.clear(); // moderation and profile edits surface everywhere
+  } else if (path.startsWith('/api/jobs') || path.startsWith('/api/applications') || path.startsWith('/api/offers')) {
+    drop('/api/jobs'); drop('/api/workers'); drop('/api/ads');
+  } else if (path.startsWith('/api/products')) {
+    // The ads feed embeds live product state (a sold product leaves the
+    // feed), so product writes bust it too.
+    drop('/api/products'); drop('/api/ads');
+  } else if (path.startsWith('/api/businesses')) {
+    drop('/api/businesses'); drop('/api/ads');
+  } else if (path.startsWith('/api/ads')) {
+    drop('/api/ads');
+  } else if (path.startsWith('/api/reviews')) {
+    drop('/api/jobs'); drop('/api/workers');
+  }
+}
 app.use((req, res, next) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') listCacheStore.clear();
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') bustListCache(req.path);
   next();
 });
 
@@ -841,15 +863,33 @@ function listCache(req, res, next) {
   if (tok) { try { uid = 'u' + String(jwt.verify(tok, JWT_SECRET).sub); } catch { uid = 'anon'; } }
   const key = uid + '|' + req.originalUrl;
   const now = Date.now();
+  const isRefresh = req.headers['x-cache-refresh'] === '1';
   const hit = listCacheStore.get(key);
-  if (hit && hit.expires > now) {
-    res.set('X-Cache', 'HIT');
-    return res.status(hit.status).json(hit.body);
+  if (hit && !isRefresh) {
+    if (hit.expires > now) {
+      res.set('X-Cache', 'HIT');
+      return res.status(hit.status).json(hit.body);
+    }
+    if (hit.staleUntil > now) {
+      // Serve the stale copy instantly and refresh it in the background,
+      // so a slow database path never makes a browsing member wait.
+      res.set('X-Cache', 'STALE');
+      if (!listCacheRefreshing.has(key)) {
+        listCacheRefreshing.add(key);
+        const port = process.env.PORT || 3000;
+        const headers = { 'x-cache-refresh': '1' };
+        if (req.headers.cookie) headers.cookie = req.headers.cookie;
+        fetch(`http://127.0.0.1:${port}${req.originalUrl}`, { headers })
+          .catch(() => {})
+          .finally(() => listCacheRefreshing.delete(key));
+      }
+      return res.status(hit.status).json(hit.body);
+    }
   }
   const origJson = res.json.bind(res);
   res.json = (body) => {
     if (res.statusCode === 200) {
-      listCacheStore.set(key, { status: 200, body, expires: now + 20000 });
+      listCacheStore.set(key, { status: 200, body, expires: now + 60000, staleUntil: now + 300000 });
       if (listCacheStore.size > 300) {
         let n = 0;
         for (const k of listCacheStore.keys()) { listCacheStore.delete(k); if (++n >= 50) break; }
