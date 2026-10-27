@@ -5347,6 +5347,21 @@ async function viewUserActivity() {
             <button class="btn btn-sm btn-outline tester-toggle" data-id="${u.id}" data-flag="${u.is_tester ? '1' : '0'}" style="margin-top:6px">${u.is_tester ? '⭐ Tester (tap to remove)' : '☆ Mark as tester'}</button>
             ${u.id !== currentUser.id ? `<button class="btn btn-sm ${u.suspended ? 'btn-primary' : 'btn-outline'} suspend-toggle" data-id="${u.id}" data-suspended="${u.suspended ? '1' : '0'}" data-name="${esc(u.name)}" style="margin-top:6px;margin-left:6px">${u.suspended ? '✅ Reinstate account' : '🚫 Suspend account'}</button>` : ''}
             ${u.suspended ? '<div class="small" style="color:#b3261e;margin-top:4px">This account is suspended.</div>' : ''}
+            <button class="btn btn-sm btn-outline edit-toggle" data-id="${u.id}" style="margin-top:6px;margin-left:6px">✏️ Edit</button>
+            <button class="btn btn-sm btn-outline doc-toggle" data-id="${u.id}" style="margin-top:6px;margin-left:6px">📩 Request doc</button>
+            <div class="edit-panel" id="edit-panel-${u.id}" style="display:none;margin-top:8px">
+              <div class="field"><label>Full name</label><input class="edit-name" value="${esc(u.name)}"></div>
+              <div class="field"><label>City</label><select class="edit-city">${CITIES.map(c => `<option value="${esc(c)}"${c === u.city ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+              <button class="btn btn-sm btn-primary edit-save" data-id="${u.id}">Save changes</button>
+              <button class="btn btn-sm btn-outline edit-cancel" data-id="${u.id}">Cancel</button>
+              <p class="small muted" style="margin:6px 0 0">Phone numbers are not changed here: the number is the member's sign-in.</p>
+            </div>
+            <div class="doc-panel" id="doc-panel-${u.id}" style="display:none;margin-top:8px">
+              <div class="small muted" style="margin-bottom:6px">Ask ${esc(String(u.name || '').split(' ')[0])} to upload, by text message and app notification:</div>
+              <button class="btn btn-sm btn-outline doc-send" data-id="${u.id}" data-kind="selfie">🤳 Verification selfie</button>
+              <button class="btn btn-sm btn-outline doc-send" data-id="${u.id}" data-kind="photo" style="margin-left:6px">🖼️ Profile photo</button>
+              <button class="btn btn-sm btn-outline doc-send" data-id="${u.id}" data-kind="food_license" style="margin-left:6px">🧾 Food licence</button>
+            </div>
           </div>`;
         }).join('') : '<p class="small muted">' + (currentQ ? 'No member matches that search.' : 'No users yet.') + '</p>'}
       </div>`;
@@ -5360,6 +5375,49 @@ async function viewUserActivity() {
           });
           loadActivity();
         } catch (e2) { btn.disabled = false; alert(e2.message); }
+      });
+    });
+    body.querySelectorAll('.edit-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const p = document.getElementById('edit-panel-' + btn.dataset.id);
+        if (p) p.style.display = p.style.display === 'none' ? '' : 'none';
+      });
+    });
+    body.querySelectorAll('.doc-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const p = document.getElementById('doc-panel-' + btn.dataset.id);
+        if (p) p.style.display = p.style.display === 'none' ? '' : 'none';
+      });
+    });
+    body.querySelectorAll('.edit-cancel').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const p = document.getElementById('edit-panel-' + btn.dataset.id);
+        if (p) p.style.display = 'none';
+      });
+    });
+    body.querySelectorAll('.edit-save').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const p = document.getElementById('edit-panel-' + btn.dataset.id);
+        const name = p.querySelector('.edit-name').value.trim();
+        const city = p.querySelector('.edit-city').value;
+        btn.disabled = true;
+        try {
+          await api('/api/admin/users/' + btn.dataset.id + '/profile', { method: 'PATCH', body: JSON.stringify({ name, city }) });
+          toast('Member updated.');
+          loadActivity();
+        } catch (e2) { btn.disabled = false; alert(e2.message); }
+      });
+    });
+    body.querySelectorAll('.doc-send').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await api('/api/admin/users/' + btn.dataset.id + '/request-doc', { method: 'POST', body: JSON.stringify({ kind: btn.dataset.kind }) });
+          toast('Request sent.');
+          const p = document.getElementById('doc-panel-' + btn.dataset.id);
+          if (p) p.style.display = 'none';
+        } catch (e2) { alert(e2.message); }
+        btn.disabled = false;
       });
     });
     body.querySelectorAll('.suspend-toggle').forEach((btn) => {

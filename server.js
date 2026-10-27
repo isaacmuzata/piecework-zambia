@@ -2645,6 +2645,47 @@ app.patch('/api/admin/users/:id/suspend', ah(auth), ah(async (req, res) => {
   res.json({ ok: true, id, suspended: true });
 }));
 
+// ------------------------------------------------- admin member tools
+// Edit a member's basics from User Management (Oct 27, 2026). Name and
+// city only: the phone number is the member's sign-in identity and is
+// never changed from the admin side.
+app.patch('/api/admin/users/:id/profile', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const id = parseInt(req.params.id, 10);
+  const target = await getOne('SELECT * FROM users WHERE id = ?', [id]);
+  if (!target) return err(res, 404, 'User not found.');
+  const name = String((req.body && req.body.name) || '').trim();
+  const city = String((req.body && req.body.city) || '').trim();
+  if (name.length < 2) return err(res, 422, "Enter the member's full name.");
+  if (!CITIES.includes(city)) return err(res, 422, 'Choose a valid city.');
+  if (name === target.name && city === target.city) return res.json({ ok: true, id, unchanged: true });
+  await runWrite('UPDATE users SET name = ?, city = ? WHERE id = ?', [name, city, id]);
+  logAdmin(req, 'user.edit_profile', 'user', id, `${target.name} (${target.city}) -> ${name} (${city})`);
+  res.json({ ok: true, id, name, city });
+}));
+
+// Ask a member to upload a document: one tap sends an SMS and a push
+// in Zac's voice pointing at Edit Profile, where all three live.
+const DOC_REQUESTS = {
+  selfie: 'Hi, this is Zac, your assistant. PieceWork needs a clear selfie to verify your profile. Open the app, go to Profile, Edit profile, and upload it today.',
+  photo: 'Hi, this is Zac, your assistant. PieceWork needs a clear profile photo on your account. Open the app, go to Profile, Edit profile, and add your photo today.',
+  food_license: 'Hi, this is Zac, your assistant. PieceWork needs your food handlers licence. Open the app, go to Profile, Edit profile, and upload it today. Thank you.',
+};
+app.post('/api/admin/users/:id/request-doc', ah(auth), ah(async (req, res) => {
+  if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  const id = parseInt(req.params.id, 10);
+  const target = await getOne('SELECT * FROM users WHERE id = ?', [id]);
+  if (!target) return err(res, 404, 'User not found.');
+  if (isAdmin(target)) return err(res, 422, 'That is a team account.');
+  const kind = String((req.body && req.body.kind) || '');
+  const text = DOC_REQUESTS[kind];
+  if (!text) return err(res, 422, 'Choose a document to request.');
+  notifySms(id, 'doc_request_' + kind, text).catch(() => {});
+  notifyPush(id, { title: 'PieceWork Zambia', body: text, url: '#/profile/edit', tag: 'doc-request' }).catch(() => {});
+  logAdmin(req, 'user.request_doc', 'user', id, kind);
+  res.json({ ok: true, id, kind });
+}));
+
 // ---------------------------------------------------------------- 2.0 M0: admin audit log
 app.get('/api/admin/audit', ah(auth), ah(async (req, res) => {
   if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
