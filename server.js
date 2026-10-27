@@ -62,6 +62,16 @@ app.use((req, res, next) => {
 });
 app.use(cookieParser());
 
+// Shared store for the list response cache (see listCache below). Any
+// non-GET request clears it, so a member who posts a job, ends an ad or
+// marks an item sold sees their change at once; only pure browsing
+// bursts are absorbed by the cache.
+const listCacheStore = new Map();
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') listCacheStore.clear();
+  next();
+});
+
 // ---------------------------------------------------------------- device id
 // Anti-fraud: one PieceWork account per browser. A long-lived device cookie
 // identifies the browser; registration is refused when the device already
@@ -813,7 +823,45 @@ async function activeAdFor(kind, refId) {
   return row ? { id: row.id, ends_at: row.ends_at } : null;
 }
 
-app.get('/api/ads', ah(async (req, res) => {
+
+// ------------------------------------------------------------------ speed
+// Short-lived response cache for the hot public list endpoints (jobs,
+// products, workers, businesses, ads). Every list read crosses the
+// network to the database; when that path slows down (Oct 27, 2026:
+// data calls taking 30s+ while static files answered in 2s), repeated
+// browse traffic queues behind itself and every screen crawls. Serving
+// repeat views of the same list from memory for 20 seconds removes
+// most of those crossings. Lists can be up to 20s stale; acceptable for
+// browsing, and own-postings views (mine=1) always bypass the cache.
+function listCache(req, res, next) {
+  if (req.method !== 'GET') return next();
+  if (String(req.query.mine || '') === '1') return next();
+  let uid = 'anon';
+  const tok = req.cookies && req.cookies.pw_token;
+  if (tok) { try { uid = 'u' + String(jwt.verify(tok, JWT_SECRET).sub); } catch { uid = 'anon'; } }
+  const key = uid + '|' + req.originalUrl;
+  const now = Date.now();
+  const hit = listCacheStore.get(key);
+  if (hit && hit.expires > now) {
+    res.set('X-Cache', 'HIT');
+    return res.status(hit.status).json(hit.body);
+  }
+  const origJson = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode === 200) {
+      listCacheStore.set(key, { status: 200, body, expires: now + 20000 });
+      if (listCacheStore.size > 300) {
+        let n = 0;
+        for (const k of listCacheStore.keys()) { listCacheStore.delete(k); if (++n >= 50) break; }
+      }
+      res.set('X-Cache', 'MISS');
+    }
+    return origJson(body);
+  };
+  return next();
+}
+
+app.get('/api/ads', listCache, ah(async (req, res) => {
   const rows = await getAll(
     `${AD_SELECT}
      WHERE a.status = 'active' AND a.starts_at <= datetime('now') AND a.ends_at > datetime('now')
@@ -1076,7 +1124,7 @@ app.get('/api/auth/me', ah(auth), ah(async (req, res) => {
 // An explicitly chosen ?city= or ?q= search, and ?mine=1 (the signed-in
 // poster's own dashboard), skip the default radius so matching jobs are
 // never hidden behind it.
-app.get('/api/jobs', ah(maybeAuth), ah(async (req, res) => {
+app.get('/api/jobs', listCache, ah(maybeAuth), ah(async (req, res) => {
   const status = req.query.status || 'open';
   if (!JOB_STATUSES.includes(status)) return err(res, 422, 'Invalid status filter.');
   const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1);
@@ -2116,7 +2164,7 @@ app.delete('/api/vouches/:userId', ah(auth), ah(async (req, res) => {
 }));
 
 // ---------------------------------------------------------------- users
-app.get('/api/workers', ah(async (req, res) => {
+app.get('/api/workers', listCache, ah(async (req, res) => {
   const city = (req.query.city || '').trim();
   const where = city ? 'WHERE open_to_work = 1 AND city = ?' : 'WHERE open_to_work = 1';
   const params = city ? [city] : [];
@@ -3000,7 +3048,7 @@ app.get('/api/businesses/mine', ah(auth), ah(async (req, res) => {
   res.json({ businesses: rows.map((r) => serializeBusiness(r, req.user)) });
 }));
 
-app.get('/api/businesses', ah(maybeAuth), ah(async (req, res) => {
+app.get('/api/businesses', listCache, ah(maybeAuth), ah(async (req, res) => {
   const conds = ["bz.status = 'active'"];
   const params = [];
   if (req.query.category && marketCategorySet.has(req.query.category)) { conds.push('bz.category = ?'); params.push(req.query.category); }
@@ -3257,7 +3305,7 @@ const PRODUCT_SELECT = `
   FROM products p JOIN users u ON u.id = p.seller_id
   LEFT JOIN businesses bz ON bz.id = p.business_id AND bz.status = 'active'`;
 
-app.get('/api/products', ah(maybeAuth), ah(async (req, res) => {
+app.get('/api/products', listCache, ah(maybeAuth), ah(async (req, res) => {
   const mine = req.query.mine === '1' && req.user;
   const conds = [];
   const params = [];
