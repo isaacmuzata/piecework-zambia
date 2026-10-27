@@ -2720,6 +2720,27 @@ app.get('/api/admin/stats', ah(auth), ah(async (req, res) => {
 // latest recorded action, then by signup. Admin only.
 app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
   if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
+  // Member lookup (Oct 27, 2026): with thousands of members, a board of
+  // the 300 most recent cannot find anyone older. ?q= searches everyone
+  // by name or city text, by phone digits (international or local 0
+  // form), or by exact member id.
+  const q = String(req.query.q || '').trim();
+  const qDigits = q.replace(/\D/g, '');
+  const clauses = [];
+  const params = [];
+  if (q) {
+    clauses.push('LOWER(u.name) LIKE ?', 'LOWER(u.city) LIKE ?');
+    params.push('%' + q.toLowerCase() + '%', '%' + q.toLowerCase() + '%');
+    if (qDigits.length >= 3) {
+      clauses.push("REPLACE(u.phone, '+', '') LIKE ?");
+      params.push('%' + qDigits + '%');
+      if (qDigits.startsWith('0')) {
+        clauses.push("REPLACE(u.phone, '+', '') LIKE ?");
+        params.push('%260' + qDigits.slice(1) + '%');
+      }
+    }
+    if (/^\d+$/.test(q)) { clauses.push('u.id = ?'); params.push(parseInt(q, 10)); }
+  }
   const rows = await getAll(`
     SELECT u.id, u.name, u.phone, u.city, u.created_at, u.last_seen_at,
            u.orientation_accepted_at, u.selfie_status, u.open_to_work, u.is_tester, u.suspended_at,
@@ -2737,8 +2758,9 @@ app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
          SELECT MAX(m2.created_at) FROM messages m2 WHERE m2.sender_id = u.id
        ) x) AS last_action_at
     FROM users u
+    ${clauses.length ? 'WHERE (' + clauses.join(' OR ') + ')' : ''}
     ORDER BY COALESCE(u.last_seen_at, last_action_at, u.created_at) DESC
-    LIMIT 300`);
+    LIMIT ${q ? 100 : 300}`, params);
   res.json({
     users: rows.map((r) => ({
       id: Number(r.id),
@@ -2758,6 +2780,7 @@ app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
       messages_sent: Number(r.messages_sent || 0),
       conversations: Number(r.conversations || 0),
     })),
+    q,
   });
 }));
 

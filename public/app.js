@@ -5291,17 +5291,28 @@ async function viewUserActivity() {
   <div class="view"><div class="page">
     <h1 class="page-title">User activity</h1>
     <p class="page-sub"><a href="#/admin">← Back to admin</a></p>
+    <div class="card" style="margin-bottom:12px">
+      <div class="field" style="margin:0"><label for="ua-q">Find a member</label>
+        <div style="display:flex;gap:8px">
+          <input id="ua-q" type="search" placeholder="Name, phone number, or member ID" autocomplete="off" style="flex:1">
+          <button class="btn btn-primary" id="ua-go" type="button">Search</button>
+          <button class="btn btn-outline" id="ua-clear" type="button" style="display:none">Clear</button>
+        </div>
+      </div>
+    </div>
     <div id="activity-body">${loadingHtml('Loading activity…')}</div>
   </div></div>`;
   const body = document.getElementById('activity-body');
+  let currentQ = '';
   const parseTs = (s) => s ? new Date(String(s).replace(' ', 'T') + 'Z') : null;
   const fmtTs = (s) => {
     const d = parseTs(s);
     if (!d || isNaN(d)) return 'not recorded yet';
     return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   };
+  async function loadActivity() {
   try {
-    const s = await api('/api/admin/activity');
+    const s = await api('/api/admin/activity' + (currentQ ? '?q=' + encodeURIComponent(currentQ) : ''));
     const users = s.users || [];
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
@@ -5316,8 +5327,8 @@ async function viewUserActivity() {
         ${stat('Users shown', users.length)}
       </div>
       <div class="card">
-        <h3 style="margin-top:0">Most recently active first</h3>
-        <p class="small muted" style="margin-top:-6px">Last opened is tracked from Oct 22, 2026. Before that, the board shows each person's last recorded action (apply, post, message).</p>
+        <h3 style="margin-top:0">${currentQ ? 'Results for &quot;' + esc(currentQ) + '&quot;' : 'Most recently active first'}</h3>
+        ${currentQ ? '' : '<p class="small muted" style="margin-top:-6px">Last opened is tracked from Oct 22, 2026. Before that, the board shows each person\'s last recorded action (apply, post, message).</p>'}
         ${users.length ? users.map((u) => {
           const d = eff(u);
           const today = d && (now - d.getTime()) < dayMs;
@@ -5337,7 +5348,7 @@ async function viewUserActivity() {
             ${u.id !== currentUser.id ? `<button class="btn btn-sm ${u.suspended ? 'btn-primary' : 'btn-outline'} suspend-toggle" data-id="${u.id}" data-suspended="${u.suspended ? '1' : '0'}" data-name="${esc(u.name)}" style="margin-top:6px;margin-left:6px">${u.suspended ? '✅ Reinstate account' : '🚫 Suspend account'}</button>` : ''}
             ${u.suspended ? '<div class="small" style="color:#b3261e;margin-top:4px">This account is suspended.</div>' : ''}
           </div>`;
-        }).join('') : '<p class="small muted">No users yet.</p>'}
+        }).join('') : '<p class="small muted">' + (currentQ ? 'No member matches that search.' : 'No users yet.') + '</p>'}
       </div>`;
     body.querySelectorAll('.tester-toggle').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -5347,7 +5358,7 @@ async function viewUserActivity() {
             method: 'PATCH',
             body: JSON.stringify({ is_tester: btn.dataset.flag !== '1' }),
           });
-          viewUserActivity();
+          loadActivity();
         } catch (e2) { btn.disabled = false; alert(e2.message); }
       });
     });
@@ -5369,13 +5380,23 @@ async function viewUserActivity() {
             method: 'PATCH',
             body: JSON.stringify(payload),
           });
-          viewUserActivity();
+          loadActivity();
         } catch (e2) { btn.disabled = false; alert(e2.message); }
       });
     });
   } catch (e) {
     body.innerHTML = emptyHtml('info', 'Could not load activity', e.message);
   }
+  }
+  const qInput = document.getElementById('ua-q');
+  const qClear = document.getElementById('ua-clear');
+  let uaTimer = null;
+  const runSearch = () => { currentQ = qInput.value.trim(); qClear.style.display = currentQ ? '' : 'none'; loadActivity(); };
+  document.getElementById('ua-go').addEventListener('click', runSearch);
+  qClear.addEventListener('click', () => { qInput.value = ''; runSearch(); });
+  qInput.addEventListener('input', () => { clearTimeout(uaTimer); uaTimer = setTimeout(runSearch, 400); });
+  qInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); runSearch(); } });
+  loadActivity();
 }
 
 /** 2.0 M0: admin abuse report queue. */
