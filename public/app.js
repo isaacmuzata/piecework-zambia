@@ -1868,22 +1868,26 @@ async function viewBusinesses() {
     <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="bz-q" type="search" placeholder="Search businesses" aria-label="Search businesses"></div>
     <div class="chips" id="bz-chips">
       <button class="chip active" data-bzcat="">All</button>
+      <button class="chip" data-bzfollow="1">⭐ Following</button>
       ${MARKET_CATEGORIES.map(c => `<button class="chip" data-bzcat="${esc(c)}">${esc(c)}</button>`).join('')}
     </div>
     <div id="bz-results" style="margin-top:12px">${skeletonCards(2)}</div>
   </div></div>`;
   const results = document.getElementById('bz-results');
-  let cat = '', q = '';
+  let cat = '', q = '', followOnly = false;
   async function load() {
     results.innerHTML = skeletonCards(2);
     try {
       const params = new URLSearchParams();
       if (cat) params.set('category', cat);
       if (q) params.set('q', q);
+      if (followOnly) params.set('following', '1');
       const data = await api('/api/businesses?' + params.toString());
       results.innerHTML = data.businesses.length
         ? data.businesses.map(businessCard).join('')
-        : emptyHtml('tag', 'No businesses found', 'Try another search, or open the first storefront in this category.', currentUser ? `<a class="btn btn-sm btn-primary" href="#/business/apply">Open a storefront</a>` : '');
+        : (followOnly
+          ? emptyHtml('users', 'No businesses followed yet', 'Open a business and tap Follow. Everything you follow will live here, easy to find.')
+          : emptyHtml('tag', 'No businesses found', 'Try another search, or open the first storefront in this category.', currentUser ? `<a class="btn btn-sm btn-primary" href="#/business/apply">Open a storefront</a>` : ''));
     } catch (e) { results.innerHTML = errorHtml(e.message); }
   }
   let qt;
@@ -1892,8 +1896,17 @@ async function viewBusinesses() {
     qt = setTimeout(() => { q = e.target.value.trim(); load(); }, 400);
   });
   document.getElementById('bz-chips').addEventListener('click', (e) => {
+    const fchip = e.target.closest('[data-bzfollow]');
+    if (fchip) {
+      if (!currentUser) { location.hash = '#/login'; return; }
+      followOnly = true; cat = '';
+      document.querySelectorAll('#bz-chips .chip').forEach(c => c.classList.toggle('active', c === fchip));
+      load();
+      return;
+    }
     const chip = e.target.closest('[data-bzcat]');
     if (!chip) return;
+    followOnly = false;
     cat = chip.dataset.bzcat;
     document.querySelectorAll('#bz-chips .chip').forEach(c => c.classList.toggle('active', c === chip));
     load();

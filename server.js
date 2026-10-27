@@ -3185,6 +3185,13 @@ app.get('/api/businesses', listCache, ah(maybeAuth), ah(async (req, res) => {
     const q = `%${String(req.query.q).trim()}%`;
     params.push(q, q, q);
   }
+  // Following filter (Oct 27, 2026, tester Kudzai's suggestion): only
+  // the businesses the signed-in member follows. Signed out gets none.
+  if (String(req.query.following || '') === '1') {
+    if (!req.user) return res.json({ businesses: [] });
+    conds.push('bz.id IN (SELECT business_id FROM business_follows WHERE follower_id = ?)');
+    params.push(req.user.id);
+  }
   const rows = await getAll(`${BUSINESS_SELECT} WHERE ${conds.join(' AND ')} ORDER BY bz.verification_status = 'verified' DESC, bz.created_at DESC LIMIT 100`, params);
   res.json({ businesses: rows.map((r) => serializeBusiness(r, req.user)) });
 }));
