@@ -442,9 +442,10 @@ async function maybeAuth(req, res, next) {
 }
 
 // ---------------------------------------------------------------- rate limits
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true });
-const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 15, standardHeaders: true });
-const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 600, standardHeaders: true });
+const tooManyTries = (req, res) => err(res, 429, 'Too many tries from this connection. Please wait a few minutes, then try again.');
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, handler: tooManyTries });
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 45, standardHeaders: true, handler: tooManyTries });
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1500, standardHeaders: true, handler: tooManyTries });
 app.use('/api/', apiLimiter);
 
 // ---------------------------------------------------------------- auth routes
@@ -544,8 +545,8 @@ app.post('/api/auth/logout', (req, res) => {
 const SUPPORT_WHATSAPP = process.env.SUPPORT_WHATSAPP || '+14437417068';
 const RESET_CODE_TTL_MIN = 30;
 const RESET_MAX_ATTEMPTS = 5;
-const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, standardHeaders: true });
-const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true });
+const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true, handler: tooManyTries });
+const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, handler: tooManyTries });
 
 // Africa's Talking SMS (optional): set AT_USERNAME + AT_API_KEY (+ AT_SENDER_ID)
 // as env vars and reset codes go out by text automatically. Until then the
@@ -1227,7 +1228,7 @@ app.get('/api/jobs', listCache, ah(maybeAuth), ah(async (req, res) => {
   const rows = await getAll(`
     SELECT j.*, u.name AS poster_name, u.city AS poster_city,
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
-           u.avatar AS poster_avatar, u.selfie_status AS poster_selfie_status,
+           (u.avatar IS NOT NULL AND u.avatar <> '') AS poster_has_avatar, u.selfie_status AS poster_selfie_status,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count,
            (SELECT COUNT(*) FROM job_photos p WHERE p.job_id = j.id) AS photo_count,
@@ -1346,7 +1347,7 @@ function serializeJob(j) {
     poster: {
       id: j.poster_id, name: j.poster_name, city: j.poster_city,
       rating_avg: j.poster_rating || 0, rating_count: j.poster_rating_count || 0,
-      avatar: j.poster_avatar ? '/api/users/' + j.poster_id + '/avatar' : '',
+      avatar: j.poster_has_avatar ? '/api/users/' + j.poster_id + '/avatar' : '',
       verified: j.poster_selfie_status === 'approved',
     },
     applicant_count: j.applicant_count || 0,
@@ -1363,7 +1364,7 @@ app.get('/api/jobs/recommended', ah(auth), ah(async (req, res) => {
   const rows = await getAll(`
     SELECT j.*, u.name AS poster_name, u.city AS poster_city,
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
-           u.avatar AS poster_avatar, u.selfie_status AS poster_selfie_status,
+           (u.avatar IS NOT NULL AND u.avatar <> '') AS poster_has_avatar, u.selfie_status AS poster_selfie_status,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count,
            (SELECT COUNT(*) FROM job_photos p WHERE p.job_id = j.id) AS photo_count,
@@ -1409,7 +1410,7 @@ app.get('/api/jobs/:id', ah(maybeAuth), ah(async (req, res) => {
   const j = await getOne(`
     SELECT j.*, u.name AS poster_name, u.city AS poster_city,
            u.rating_avg AS poster_rating, u.rating_count AS poster_rating_count,
-           u.avatar AS poster_avatar, u.selfie_status AS poster_selfie_status,
+           (u.avatar IS NOT NULL AND u.avatar <> '') AS poster_has_avatar, u.selfie_status AS poster_selfie_status,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count,
            (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id AND a.status = 'accepted') AS accepted_count,
            (SELECT COUNT(*) FROM job_photos p WHERE p.job_id = j.id) AS photo_count,
@@ -2217,7 +2218,12 @@ app.get('/api/workers', listCache, ah(async (req, res) => {
   const where = city ? 'WHERE open_to_work = 1 AND city = ?' : 'WHERE open_to_work = 1';
   const params = city ? [city] : [];
   let rows = await getAll(
-    `SELECT * FROM users ${where} ORDER BY created_at DESC LIMIT 100`, params
+    `SELECT id, name, phone, city, referral_code, bio, skills, avatar,
+            open_to_work, selfie_status, terms_accepted_at, orientation_accepted_at,
+            food_license_status, food_license_expires_at, rating_avg, rating_count,
+            lat, lng, created_at, nrc_verified,
+            (intro_video IS NOT NULL AND intro_video <> '') AS has_intro
+     FROM users ${where} ORDER BY created_at DESC LIMIT 100`, params
   );
   // 2.0 M2: global search filters people by name, skills, bio, or city.
   const q = (req.query.q || '').trim().toLowerCase();
@@ -2231,7 +2237,7 @@ app.get('/api/workers', listCache, ah(async (req, res) => {
     const v = vcMap[r.id] || 0;
     const pu = publicUser(r, false);
     if (r.avatar) pu.avatar = '/api/users/' + r.id + '/avatar';
-    return { ...pu, badges: trustBadges(r, v), vouch_count: v, has_intro_video: !!r.intro_video };
+    return { ...pu, badges: trustBadges(r, v), vouch_count: v, has_intro_video: !!r.has_intro };
   })});
 }));
 
@@ -2993,7 +2999,7 @@ app.post('/api/admin/giveaways/:id/draw', ah(auth), ah(async (req, res) => {
 // (client) can start a conversation, and only with a worker who applied —
 // workers reply once the poster messages first. This keeps unsolicited
 // contact out.
-const msgLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true });
+const msgLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true , handler: tooManyTries });
 
 // ---------------------------------------------------------------- businesses (2.0 M4)
 // Storefronts for formal businesses. Application plus admin approval
@@ -3001,7 +3007,7 @@ const msgLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: tr
 // uploads registration documents (PACRA, TPIN, trading licence) and
 // an admin verifies them. Unverified shops stay public, labelled
 // Unverified (decision recorded in the M4 milestone notes).
-const businessLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true });
+const businessLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true , handler: tooManyTries });
 function slugifyName(name) {
   return String(name || '').toLowerCase().trim()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'business';
@@ -3293,12 +3299,12 @@ app.patch('/api/admin/businesses/:id/verification', ah(auth), ah(async (req, res
 const PRODUCT_CONDITIONS = ['New', 'Like new', 'Good', 'Fair'];
 const MAX_PRODUCT_PHOTOS = 5;
 const MAX_ACTIVE_LISTINGS = 30;
-const productLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 40, standardHeaders: true });
+const productLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 40, standardHeaders: true , handler: tooManyTries });
 
 function serializeProduct(p) {
   return {
     id: p.id, seller_id: p.seller_id,
-    seller_name: p.seller_name || '', seller_avatar: p.seller_avatar ? '/api/users/' + p.seller_id + '/avatar' : '',
+    seller_name: p.seller_name || '', seller_avatar: p.seller_has_avatar ? '/api/users/' + p.seller_id + '/avatar' : '',
     seller_city: p.seller_city || '', seller_verified: p.seller_selfie_status === 'approved',
     seller_since: p.seller_created_at || null,
     title: p.title, description: p.description || '',
@@ -3345,7 +3351,7 @@ function validateProductInput(b) {
 }
 
 const PRODUCT_SELECT = `
-  SELECT p.*, u.name AS seller_name, u.avatar AS seller_avatar, u.city AS seller_city,
+  SELECT p.*, u.name AS seller_name, (u.avatar IS NOT NULL AND u.avatar <> '') AS seller_has_avatar, u.city AS seller_city,
          u.selfie_status AS seller_selfie_status, u.created_at AS seller_created_at,
          u.rating_avg AS seller_rating, u.rating_count AS seller_rating_count,
          bz.name AS business_name, bz.slug AS business_slug,
