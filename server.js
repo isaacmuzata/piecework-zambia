@@ -1019,14 +1019,30 @@ app.post('/api/auth/forgot', forgotLimiter, ah(async (req, res) => {
     [user.id, hashResetCode(code), `+${RESET_CODE_TTL_MIN} minutes`]
   );
   if (smsEnabled()) {
+    // Reset sends are written to sms_log like every other member text,
+    // so the admin SMS log can prove a code was sent (Oct 27, 2026:
+    // this handler used to send direct and stay invisible to support).
+    const resetText = `Hi, this is Zac, your assistant. Here is your code: ${code}. It expires in ${RESET_CODE_TTL_MIN} minutes. Do not share it. PieceWork Zambia`;
     try {
-      await sendSms(normPhone,
-        `Hi, this is Zac, your assistant. Here is your code: ${code}. It expires in ${RESET_CODE_TTL_MIN} minutes. Do not share it. PieceWork Zambia`);
+      await sendSms(normPhone, resetText);
       smsSent = true;
+      await runWrite(
+        'INSERT INTO sms_log (user_id, phone, kind, body, status) VALUES (?, ?, ?, ?, ?)',
+        [user.id, normPhone, 'password_reset', resetText, 'sent']
+      ).catch(() => {});
     } catch (e) {
       console.error('Password-reset SMS failed:', e.message);
+      await runWrite(
+        'INSERT INTO sms_log (user_id, phone, kind, body, status, error) VALUES (?, ?, ?, ?, ?, ?)',
+        [user.id, normPhone, 'password_reset', resetText, 'failed', String((e && e.message) || e).slice(0, 300)]
+      ).catch(() => {});
       // Fall through to the WhatsApp-assisted flow below.
     }
+  } else {
+    await runWrite(
+      'INSERT INTO sms_log (user_id, phone, kind, body, status) VALUES (?, ?, ?, ?, ?)',
+      [user.id, normPhone, 'password_reset', 'Reset code requested (SMS not configured).', 'skipped']
+    ).catch(() => {});
   }
   res.json({
     ok: true,
