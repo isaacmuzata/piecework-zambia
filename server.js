@@ -1346,7 +1346,7 @@ function serializeJob(j) {
     poster: {
       id: j.poster_id, name: j.poster_name, city: j.poster_city,
       rating_avg: j.poster_rating || 0, rating_count: j.poster_rating_count || 0,
-      avatar: j.poster_avatar || '',
+      avatar: j.poster_avatar ? '/api/users/' + j.poster_id + '/avatar' : '',
       verified: j.poster_selfie_status === 'approved',
     },
     applicant_count: j.applicant_count || 0,
@@ -2221,7 +2221,9 @@ app.get('/api/workers', listCache, ah(async (req, res) => {
   const vcMap = Object.fromEntries(vcRows.map(r => [r.vouchee_id, Number(r.c)]));
   res.json({ workers: rows.map(r => {
     const v = vcMap[r.id] || 0;
-    return { ...publicUser(r, false), badges: trustBadges(r, v), vouch_count: v, has_intro_video: !!r.intro_video };
+    const pu = publicUser(r, false);
+    if (r.avatar) pu.avatar = '/api/users/' + r.id + '/avatar';
+    return { ...pu, badges: trustBadges(r, v), vouch_count: v, has_intro_video: !!r.intro_video };
   })});
 }));
 
@@ -3288,7 +3290,7 @@ const productLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 40, standardHe
 function serializeProduct(p) {
   return {
     id: p.id, seller_id: p.seller_id,
-    seller_name: p.seller_name || '', seller_avatar: p.seller_avatar || '',
+    seller_name: p.seller_name || '', seller_avatar: p.seller_avatar ? '/api/users/' + p.seller_id + '/avatar' : '',
     seller_city: p.seller_city || '', seller_verified: p.seller_selfie_status === 'approved',
     seller_since: p.seller_created_at || null,
     title: p.title, description: p.description || '',
