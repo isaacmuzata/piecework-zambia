@@ -442,10 +442,17 @@ async function maybeAuth(req, res, next) {
 }
 
 // ---------------------------------------------------------------- rate limits
-const tooManyTries = (req, res) => err(res, 429, 'Too many tries from this connection. Please wait a few minutes, then try again.');
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, handler: tooManyTries });
-const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 45, standardHeaders: true, handler: tooManyTries });
-const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1500, standardHeaders: true, handler: tooManyTries });
+const tooManyTries = (req, res) => err(res, 429, 'Too many tries. Please wait a few minutes, then try again.');
+function ipBucketKey(ip) {
+  const v = String(ip || '');
+  if (v.includes(':')) return v.split(':').slice(0, 4).join(':') + '::/64';
+  return v;
+}
+const ipPhoneKey = (req) => ipBucketKey(clientIp(req)) + '|' + String((req.body && req.body.phone) || '').replace(/\D/g, '');
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, handler: tooManyTries, keyGenerator: ipPhoneKey });
+const loginIpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, handler: tooManyTries });
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 45, standardHeaders: true, handler: tooManyTries, keyGenerator: ipPhoneKey });
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, standardHeaders: true, handler: tooManyTries });
 app.use('/api/', apiLimiter);
 
 // ---------------------------------------------------------------- auth routes
@@ -516,7 +523,7 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   res.status(201).json({ user: publicUser(user) });
 }));
 
-app.post('/api/auth/login', loginLimiter, ah(async (req, res) => {
+app.post('/api/auth/login', loginIpLimiter, loginLimiter, ah(async (req, res) => {
   const { phone, password } = req.body || {};
   const normPhone = normalizePhone(phone);
   if (!normPhone || !password) return err(res, 422, 'Enter your phone number and password.');
@@ -545,8 +552,8 @@ app.post('/api/auth/logout', (req, res) => {
 const SUPPORT_WHATSAPP = process.env.SUPPORT_WHATSAPP || '+14437417068';
 const RESET_CODE_TTL_MIN = 30;
 const RESET_MAX_ATTEMPTS = 5;
-const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true, handler: tooManyTries });
-const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, handler: tooManyTries });
+const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true, handler: tooManyTries, keyGenerator: ipPhoneKey });
+const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, handler: tooManyTries, keyGenerator: ipPhoneKey });
 
 // Africa's Talking SMS (optional): set AT_USERNAME + AT_API_KEY (+ AT_SENDER_ID)
 // as env vars and reset codes go out by text automatically. Until then the
