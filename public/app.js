@@ -435,6 +435,7 @@ async function api(path, opts = {}) {
   if (!res.ok) {
     const e = new Error((data && data.error) || 'Request failed.');
     e.status = res.status;
+    e.code = data && data.code;
     e.fields = data && data.fields;
     throw e;
   }
@@ -2523,7 +2524,30 @@ async function viewJobDetail(id) {
         });
         toast('Application sent! The poster will review it.');
         viewJobDetail(id); renderChrome();
-      } catch (err2) { toast(err2.message, true); btn.disabled = false; }
+      } catch (err2) {
+      if (err2.code === 'ACCOUNT_DEACTIVATED') {
+        const panel = document.getElementById('login-reactivate');
+        if (panel) {
+          panel.style.display = 'block';
+          const rb = document.getElementById('btn-reactivate');
+          rb.onclick = async () => {
+            rb.disabled = true;
+            try {
+              const { user } = await api('/api/auth/reactivate', {
+                method: 'POST',
+                body: JSON.stringify({ phone: form.phone.value.trim(), password: form.password.value }),
+              });
+              currentUser = user; renderChrome();
+              toast(`Welcome back, ${user.name.split(' ')[0]}! Your account is active again.`);
+              afterAuthRedirect();
+            } catch (e3) { toast(e3.message, true); rb.disabled = false; }
+          };
+        }
+        btn.disabled = false;
+        return;
+      }
+      toast(err2.message, true); btn.disabled = false;
+    }
     });
   }
   const withdraw = document.getElementById('btn-withdraw');
@@ -3557,6 +3581,16 @@ function viewProfileEdit() {
         <button class="btn btn-primary full" type="submit">${icon('check')}Save changes</button>
       </form>
     </div>
+    <div class="card">
+      <h3 style="margin-top:0">${icon('shield')}Account</h3>
+      <p class="small muted" style="margin-top:0"><b>Deactivate my account.</b> Take a break without losing anything. Your profile, listings and storefront are hidden, your open jobs close, and you can reactivate any time just by signing in. Nothing is deleted.</p>
+      <div class="field"><label for="acct-pass-deact">Password to confirm</label><input type="password" id="acct-pass-deact" autocomplete="current-password" placeholder="Your password"></div>
+      <button type="button" class="btn btn-outline full" id="btn-deactivate">Deactivate my account</button>
+      <hr style="margin:22px 0;border:none;border-top:1px solid #e2e8f0">
+      <p class="small muted" style="margin-top:0"><b style="color:#b91c1c">Delete my account permanently.</b> Your profile, jobs, listings, messages and reviews are removed for good and cannot be brought back. If you only need a break, deactivate instead.</p>
+      <div class="field"><label for="acct-pass-del">Password to confirm</label><input type="password" id="acct-pass-del" autocomplete="current-password" placeholder="Your password"></div>
+      <button type="button" class="btn full" id="btn-delete-account" style="background:#b91c1c;color:#fff">Delete my account permanently</button>
+    </div>
   </div></div>`;
 
   const fileInput = document.getElementById('av-file');
@@ -3695,6 +3729,33 @@ function viewProfileEdit() {
     btn.innerHTML = `${icon('pin')}Set my location`;
   });
 
+  const deactBtn = document.getElementById('btn-deactivate');
+  if (deactBtn) deactBtn.addEventListener('click', async () => {
+    const pw = document.getElementById('acct-pass-deact').value;
+    if (!pw) { toast('Enter your password to confirm.', true); return; }
+    if (!confirm('Deactivate your account? Your profile and listings will be hidden and your open jobs closed. You can reactivate any time by signing in again.')) return;
+    deactBtn.disabled = true;
+    try {
+      await api('/api/users/me/deactivate', { method: 'POST', body: JSON.stringify({ password: pw }) });
+      try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+      currentUser = null; closeDrawer(); renderChrome();
+      toast('Your account is deactivated. Sign in any time to reactivate it.');
+      location.hash = '#/login';
+    } catch (e) { toast(e.message, true); deactBtn.disabled = false; }
+  });
+  const delBtn = document.getElementById('btn-delete-account');
+  if (delBtn) delBtn.addEventListener('click', async () => {
+    const pw = document.getElementById('acct-pass-del').value;
+    if (!pw) { toast('Enter your password to confirm.', true); return; }
+    if (!confirm('Delete your account permanently? This removes your profile, jobs, listings, messages and reviews for good. This cannot be undone.')) return;
+    delBtn.disabled = true;
+    try {
+      await api('/api/users/me', { method: 'DELETE', body: JSON.stringify({ password: pw }) });
+      currentUser = null; closeDrawer(); renderChrome();
+      toast('Your account has been deleted. Thank you for being part of PieceWork Zambia.');
+      location.hash = '#/';
+    } catch (e) { toast(e.message, true); delBtn.disabled = false; }
+  });
   const form = document.getElementById('profile-form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -4234,6 +4295,10 @@ function viewLogin() {
         <p style="text-align:right;margin:-4px 0 12px"><a href="#/forgot" class="small" style="font-weight:600">Forgot password?</a></p>
         <button class="btn btn-primary full" type="submit">Sign in</button>
       </form>
+      <div id="login-reactivate" style="display:none;margin-top:14px">
+        <p class="small" style="margin:0 0 10px"><b>This account is deactivated.</b> Reactivate it to sign in again. Your profile and history come back as they were.</p>
+        <button class="btn btn-outline full" type="button" id="btn-reactivate">Reactivate my account</button>
+      </div>
     </div>
     <p style="text-align:center">New here? <a href="#/register" style="font-weight:700">Create an account</a></p>
   </div></div>`;

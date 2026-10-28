@@ -402,6 +402,7 @@ const OPTIONAL_COLUMNS = [
   ['users', 'last_seen_at', 'TEXT'],
   ['users', 'is_tester', 'INTEGER DEFAULT 0'],
   ['users', 'suspended_at', 'TEXT'],
+  ['users', 'deactivated_at', 'TEXT'],
   ['users', 'suspension_reason', 'TEXT'],
   ['users', 'food_license_image', 'TEXT'],
   ['users', 'food_license_status', "TEXT DEFAULT 'none'"],

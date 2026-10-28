@@ -73,7 +73,7 @@ function bustListCache(path) {
   const drop = (prefix) => {
     for (const k of listCacheStore.keys()) if (k.split('|')[1].startsWith(prefix)) listCacheStore.delete(k);
   };
-  if (path.startsWith('/api/admin/') || path.startsWith('/api/users')) {
+  if (path.startsWith('/api/admin/') || path.startsWith('/api/users') || path === '/api/auth/reactivate') {
     listCacheStore.clear(); // moderation and profile edits surface everywhere
   } else if (path.startsWith('/api/jobs') || path.startsWith('/api/applications') || path.startsWith('/api/offers')) {
     drop('/api/jobs'); drop('/api/workers'); drop('/api/ads');
@@ -419,6 +419,9 @@ async function auth(req, res, next) {
     if (user.suspended_at && !isAdmin(user)) {
       return err(res, 403, 'This account has been suspended. Contact PieceWork support if you believe this is a mistake.');
     }
+    if (user.deactivated_at && !isAdmin(user)) {
+      return err(res, 403, 'This account is deactivated. Sign in and choose Reactivate to use it again.');
+    }
     req.user = user;
     touchLastSeen(user.id);
     next();
@@ -533,6 +536,30 @@ app.post('/api/auth/login', loginIpLimiter, loginLimiter, ah(async (req, res) =>
   }
   if (user.suspended_at && !isAdmin(user)) {
     return err(res, 403, 'This account has been suspended. Contact PieceWork support if you believe this is a mistake.');
+  }
+  if (user.deactivated_at && !isAdmin(user)) {
+    return res.status(403).json({ error: 'This account is deactivated.', code: 'ACCOUNT_DEACTIVATED' });
+  }
+  setAuthCookie(res, signToken(user.id));
+  res.json({ user: publicUser(user) });
+}));
+
+// Self-service reactivation: a deactivated member signs back in with their
+// normal credentials and the account wakes up exactly as it was.
+app.post('/api/auth/reactivate', loginIpLimiter, loginLimiter, ah(async (req, res) => {
+  const { phone, password } = req.body || {};
+  const normPhone = normalizePhone(phone);
+  if (!normPhone || !password) return err(res, 422, 'Enter your phone number and password.');
+  const user = await getOne('SELECT * FROM users WHERE phone = ?', [normPhone]);
+  if (!user || !bcrypt.compareSync(String(password), user.password_hash)) {
+    return err(res, 401, 'Wrong number or password.');
+  }
+  if (user.suspended_at && !isAdmin(user)) {
+    return err(res, 403, 'This account has been suspended. Contact PieceWork support if you believe this is a mistake.');
+  }
+  if (user.deactivated_at) {
+    await runWrite('UPDATE users SET deactivated_at = NULL WHERE id = ?', [user.id]);
+    user.deactivated_at = null;
   }
   setAuthCookie(res, signToken(user.id));
   res.json({ user: publicUser(user) });
@@ -2238,7 +2265,7 @@ app.delete('/api/vouches/:userId', ah(auth), ah(async (req, res) => {
 // ---------------------------------------------------------------- users
 app.get('/api/workers', listCache, ah(async (req, res) => {
   const city = (req.query.city || '').trim();
-  const where = city ? 'WHERE open_to_work = 1 AND city = ?' : 'WHERE open_to_work = 1';
+  const where = city ? 'WHERE open_to_work = 1 AND deactivated_at IS NULL AND city = ?' : 'WHERE open_to_work = 1 AND deactivated_at IS NULL';
   const params = city ? [city] : [];
   let rows = await getAll(
     `SELECT id, name, phone, city, referral_code, bio, skills, avatar,
@@ -2333,6 +2360,73 @@ async function trackRecord(userId) {
 
 app.get('/api/users/me/stats', ah(auth), ah(async (req, res) => {
   res.json(await trackRecord(req.user.id));
+}));
+
+// ------------------------------------------------------- account lifecycle
+// Self-service deactivation: profile, listings and storefront disappear
+// from public lists, open jobs close, and sign-in stops until the member
+// reactivates with the same phone and password. Nothing is deleted.
+app.post('/api/users/me/deactivate', ah(auth), ah(async (req, res) => {
+  const { password } = req.body || {};
+  if (!password) return err(res, 422, 'Enter your password to confirm.');
+  if (!bcrypt.compareSync(String(password), req.user.password_hash)) {
+    return err(res, 403, 'That password is not correct.');
+  }
+  if (isAdmin(req.user)) return err(res, 422, 'Admin accounts cannot be deactivated.');
+  await runWrite("UPDATE jobs SET status = 'cancelled' WHERE poster_id = ? AND status = 'open'", [req.user.id]);
+  await runWrite("UPDATE users SET deactivated_at = datetime('now') WHERE id = ?", [req.user.id]);
+  res.clearCookie('pw_token', { path: '/' });
+  res.json({ ok: true });
+}));
+
+// Self-service permanent deletion (also the Google Play account-deletion
+// requirement). Password-confirmed. Rows are removed explicitly table by
+// table so nothing depends on cascade behaviour; sms_log billing history
+// is kept but unlinked, and a recorded giveaway draw win blocks
+// self-deletion so the draw record stays truthful.
+app.delete('/api/users/me', ah(auth), ah(async (req, res) => {
+  const { password } = req.body || {};
+  if (!password) return err(res, 422, 'Enter your password to confirm.');
+  if (!bcrypt.compareSync(String(password), req.user.password_hash)) {
+    return err(res, 403, 'That password is not correct.');
+  }
+  if (isAdmin(req.user)) return err(res, 422, 'Admin accounts cannot be deleted.');
+  const id = req.user.id;
+  const drawWin = await getOne('SELECT id FROM giveaway_draws WHERE winner_user_id = ? LIMIT 1', [id]);
+  if (drawWin) {
+    return err(res, 422, 'This account is recorded as a giveaway winner and cannot be deleted automatically. Contact PieceWork support and we will handle it.');
+  }
+  await runWrite('UPDATE giveaways SET winner_user_id = NULL WHERE winner_user_id = ?', [id]);
+  await runWrite('UPDATE sms_log SET user_id = NULL WHERE user_id = ?', [id]);
+  const childDeletes = [
+    ['DELETE FROM product_photos WHERE product_id IN (SELECT id FROM products WHERE seller_id = ?)', [id]],
+    ['DELETE FROM business_documents WHERE business_id IN (SELECT id FROM businesses WHERE owner_id = ?)', [id]],
+    ['DELETE FROM job_photos WHERE job_id IN (SELECT id FROM jobs WHERE poster_id = ?)', [id]],
+    ['DELETE FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE poster_id = ?)', [id]],
+    ['DELETE FROM messages WHERE sender_id = ?', [id]],
+    ['DELETE FROM conversations WHERE poster_id = ? OR worker_id = ?', [id, id]],
+    ['DELETE FROM applications WHERE worker_id = ?', [id]],
+    ['DELETE FROM reviews WHERE reviewer_id = ? OR reviewee_id = ?', [id, id]],
+    ['DELETE FROM offers WHERE buyer_id = ? OR seller_id = ?', [id, id]],
+    ['DELETE FROM vouches WHERE voucher_id = ? OR vouchee_id = ?', [id, id]],
+    ['DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?', [id, id]],
+    ['DELETE FROM reports WHERE reporter_id = ?', [id]],
+    ['DELETE FROM nrc_views WHERE worker_id = ? OR viewer_id = ?', [id, id]],
+    ['DELETE FROM nrc_docs WHERE worker_id = ?', [id]],
+    ['DELETE FROM business_follows WHERE follower_id = ?', [id]],
+    ['DELETE FROM push_subscriptions WHERE user_id = ?', [id]],
+    ['DELETE FROM password_resets WHERE user_id = ?', [id]],
+    ['DELETE FROM activity_days WHERE user_id = ?', [id]],
+    ['DELETE FROM ads WHERE owner_id = ?', [id]],
+    ['DELETE FROM delivery_tracking WHERE worker_id = ? OR poster_id = ?', [id, id]],
+    ['DELETE FROM products WHERE seller_id = ?', [id]],
+    ['DELETE FROM businesses WHERE owner_id = ?', [id]],
+    ['DELETE FROM jobs WHERE poster_id = ?', [id]],
+  ];
+  for (const [sql, params] of childDeletes) await runWrite(sql, params);
+  await runWrite('DELETE FROM users WHERE id = ?', [id]);
+  res.clearCookie('pw_token', { path: '/' });
+  res.json({ ok: true });
 }));
 
 app.patch('/api/users/me', ah(auth), ah(async (req, res) => {
@@ -2800,7 +2894,7 @@ app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
   }
   const rows = await getAll(`
     SELECT u.id, u.name, u.phone, u.city, u.created_at, u.last_seen_at,
-           u.orientation_accepted_at, u.selfie_status, u.open_to_work, u.is_tester, u.suspended_at,
+           u.orientation_accepted_at, u.selfie_status, u.open_to_work, u.is_tester, u.suspended_at, u.deactivated_at,
       (SELECT COUNT(*) FROM applications a
         WHERE a.worker_id = u.id AND a.status != 'withdrawn') AS applications,
       (SELECT COUNT(*) FROM jobs j WHERE j.poster_id = u.id) AS jobs_posted,
@@ -2832,6 +2926,7 @@ app.get('/api/admin/activity', ah(auth), ah(async (req, res) => {
       open_to_work: !!r.open_to_work,
       is_tester: !!r.is_tester,
       suspended: !!r.suspended_at,
+      deactivated: !!r.deactivated_at,
       applications: Number(r.applications || 0),
       jobs_posted: Number(r.jobs_posted || 0),
       messages_sent: Number(r.messages_sent || 0),
@@ -3192,7 +3287,7 @@ app.get('/api/businesses/mine', ah(auth), ah(async (req, res) => {
 }));
 
 app.get('/api/businesses', listCache, ah(maybeAuth), ah(async (req, res) => {
-  const conds = ["bz.status = 'active'"];
+  const conds = ["bz.status = 'active'", 'bz.owner_id IN (SELECT id FROM users WHERE deactivated_at IS NULL)'];
   const params = [];
   if (req.query.category && marketCategorySet.has(req.query.category)) { conds.push('bz.category = ?'); params.push(req.query.category); }
   if (req.query.city && CITIES.includes(req.query.city)) { conds.push('bz.city = ?'); params.push(req.query.city); }
@@ -3464,6 +3559,7 @@ app.get('/api/products', listCache, ah(maybeAuth), ah(async (req, res) => {
     conds.push("p.status != 'removed'");
   } else {
     conds.push("p.status = 'active'");
+    conds.push('p.seller_id IN (SELECT id FROM users WHERE deactivated_at IS NULL)');
     if (req.query.seller) { conds.push('p.seller_id = ?'); params.push(parseInt(req.query.seller, 10) || 0); }
   }
   if (req.query.category && marketCategorySet.has(req.query.category)) { conds.push('p.category = ?'); params.push(req.query.category); }
