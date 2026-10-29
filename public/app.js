@@ -4802,7 +4802,7 @@ function viewHow() {
 
     <div class="card">
       <h3 style="margin-top:0">Support tickets</h3>
-      <p class="small muted" style="margin-top:0">Tickets are answered by the support team in order. Keep your ticket reference, you can quote it anywhere. You can also email support@pieceworkzambia.com and we will turn it into a ticket.</p>
+      <p class="small muted" style="margin-top:0">Tickets are answered by the support team in order. Keep your ticket reference, you can quote it anywhere. You can also email info@pieceworkzambia.com and we will turn it into a ticket.</p>
       <div id="ticket-body">${loadingHtml('Loading tickets...')}</div>
     </div>
 
