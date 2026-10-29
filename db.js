@@ -371,6 +371,64 @@ const SCHEMA = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_ads_status_ends ON ads(status, ends_at)`,
   `CREATE INDEX IF NOT EXISTS idx_ads_owner ON ads(owner_id)`,
+  // Support hub (2026-10-29): tickets, live chat queue and the FAQ bot's
+  // unanswered-question log. Guests are phone-identified (PieceWork
+  // accounts are phone-based, no email is collected), so user_id is
+  // nullable and guest_name/guest_phone carry the contact instead.
+  `CREATE TABLE IF NOT EXISTS support_tickets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    guest_name  TEXT NOT NULL DEFAULT '',
+    guest_phone TEXT NOT NULL DEFAULT '',
+    category    TEXT NOT NULL DEFAULT 'Other',
+    subject     TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'answered', 'closed')),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status, updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id)`,
+  `CREATE TABLE IF NOT EXISTS support_ticket_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id  INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+    sender     TEXT NOT NULL CHECK (sender IN ('member', 'admin')),
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_support_ticket_msgs ON support_ticket_messages(ticket_id, id)`,
+  `CREATE TABLE IF NOT EXISTS support_chats (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    guest_name  TEXT NOT NULL DEFAULT '',
+    guest_phone TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting', 'active', 'ended')),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at  TEXT,
+    ended_at    TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_support_chats_status ON support_chats(status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_support_chats_user ON support_chats(user_id)`,
+  `CREATE TABLE IF NOT EXISTS support_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id    INTEGER NOT NULL REFERENCES support_chats(id) ON DELETE CASCADE,
+    sender     TEXT NOT NULL CHECK (sender IN ('user', 'admin', 'system')),
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_support_msgs ON support_messages(chat_id, id)`,
+  // Single-row presence flag for live chat: admins heartbeat while the
+  // support console is open; "online" also needs a fresh heartbeat.
+  `CREATE TABLE IF NOT EXISTS support_presence (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    online     INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS bot_questions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    question   TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
 ];
 
 // Distance matching: precise coordinates are optional on users and jobs.

@@ -99,6 +99,10 @@ const topbarAuth = document.getElementById('topbar-auth');
 let currentUser = null;
 let browseState = { q: '', city: '', category: '', page: 1, maxKm: 50, payMin: '', payMax: '', duration: '', urgent: false, sort: '' };
 let chatTimer = null;
+let supportTimer = null;
+let supChatId = null;
+let supAdminChatId = null;
+let supAdminOnline = false;
 let deliveryWatchId = null;
 
 /** Stop any active delivery location sharing (called on navigation). */
@@ -4715,26 +4719,607 @@ function viewTerms() {
   </div></div>`;
 }
 
+/* ---------------- support hub: Zac bot, live chat queue, tickets ---------------- */
+const BOT_FAQ = [
+  { keys: ['post a job', 'post job', 'hire', 'employer', 'advertise a job'], q: 'How do I post a job?',
+    a: `Tap <a href="#/post">Hire Workers</a>, fill in the work, the pay in Kwacha, the date and the place, then publish. Workers near you can apply right away. Posting is free during this launch period.` },
+  { keys: ['apply', 'find work', 'get a job', 'looking for work', 'jobs near'], q: 'How do I find work?',
+    a: `Open <a href="#/jobs">Find Work</a>, turn on Near Me to see jobs around you, and tap Apply on the ones you can do. Complete your orientation and keep your selfie approved, posters trust complete profiles more.` },
+  { keys: ['selfie rejected', 'photo rejected', 'verification rejected', 'rejected'], q: 'My selfie was rejected',
+    a: `It happens, do not give up. Go to Profile, then Edit Profile, and upload a new selfie: face the camera, good light, no sunglasses, no hat, just you alone. Re-done selfies go to the top of the review queue. While your selfie is not approved you cannot be hired, so this is the one to fix first.` },
+  { keys: ['selfie', 'verification taking', 'how long', 'pending', 'approved'], q: 'How long does verification take?',
+    a: `Selfies are reviewed by a real person, in the order they arrive, and re-done selfies are reviewed first. Keep using the app in the meantime and watch for a text from us. If you uploaded a group photo or a photo of someone else, it will not pass, upload a clear photo of just you.` },
+  { keys: ['forgot password', 'reset password', 'password', 'log in', 'login', 'locked out', 'sign in'], q: 'I forgot my password',
+    a: `On the sign in screen tap Forgot password, enter your phone number, and we text you a reset code. Codes last 30 minutes, so stay on that screen and enter the code as soon as it arrives. If the code expires, request a fresh one.` },
+  { keys: ['phone number', 'contact', 'whatsapp', 'call the', 'number hidden', 'reach'], q: 'Why can I not see a phone number?',
+    a: `For safety, phone numbers stay hidden until the poster accepts your application. Once you are accepted, contact unlocks inside the app and you can arrange the work. Never pay anyone who asks you for money outside the app before a job.` },
+  { keys: ['no response', 'not responding', 'application pending', 'applied', 'waiting for poster', 'accepted'], q: 'The poster is not responding',
+    a: `Popular jobs get many applications, and posters accept in their own time. Your chances go up with an approved selfie, a finished orientation, a bio and an intro video. Apply for several jobs instead of waiting on one.` },
+  { keys: ['sell', 'list an item', 'marketplace', 'listing'], q: 'How do I sell on the Marketplace?',
+    a: `Open <a href="#/market">Marketplace</a> and tap Sell. Add clear photos, a fair price in Kwacha, and mark it Negotiable if you are open to offers. Buyers contact you through the app.` },
+  { keys: ['storefront', 'business', 'shop', 'verified badge', 'pacra'], q: 'How do I open a business storefront?',
+    a: `Open <a href="#/businesses">Businesses</a> and apply for a storefront. Have these ready: your PACRA registration number, your 10 digit ZRA TPIN, your street address, the owner or director full legal name, and a clear photo of your PACRA certificate. We check them, then your Verified badge follows. You can still sell in the Marketplace while you wait.` },
+  { keys: ['giveaway', 'draw', 'win', 'prize', 'raffle'], q: 'How does the giveaway work?',
+    a: `Share your invite link from the Win Cash page. Every friend who joins earns you one entry. The K1,500 Round 1 draw happens live on Facebook once PieceWork is live on the Google Play Store, and the winner is paid by mobile money.` },
+  { keys: ['free', 'cost', 'pay to', 'price', 'commission', 'charges', 'fee'], q: 'Is PieceWork free?',
+    a: `Yes, PieceWork is free right now: joining, posting jobs, applying and selling are all free during this growth period. From around 23 January 2027, posting a job becomes a paid feature. PieceWork never takes a cut of the money you earn from a job.` },
+  { keys: ['delete my account', 'delete account', 'deactivate', 'close my account', 'remove my account'], q: 'Delete or deactivate my account',
+    a: `Go to Profile, then Edit Profile, and scroll to the Account section. Deactivate hides your profile and listings and you can come back any time by signing in and tapping Reactivate. Delete removes your account permanently and frees your number. Full details: pieceworkzambia.com/delete-account.html` },
+  { keys: ['scam', 'fraud', 'report', 'fake', 'stole', 'cheated'], q: 'How do I report a problem person?',
+    a: `Stay safe: meet in a public place for first jobs, agree the pay before you start, and never pay any registration fee to get work, real jobs on PieceWork never ask for money up front. To report someone, open a ticket below under Report a problem and tell us what happened, or use the report option on their listing or profile.` },
+  { keys: ['nrc', 'national registration', 'identity document', 'id card'], q: 'Why do you ask for my NRC?',
+    a: `Your NRC is only ever shown to the poster who actually hired you, never publicly. It is watermarked with the viewer's name, every view is logged, and it deletes itself after 10 days. It protects posters from no-shows and protects you by proving who you are.` },
+  { keys: ['google play', 'play store', 'download', 'app store', 'iphone', 'install'], q: 'When is the app on Google Play?',
+    a: `PieceWork is in final closed testing for Google Play right now. The good news: the web app already does everything. Open pieceworkzambia.com in Chrome and choose Add to Home Screen, it works like an app, on Android and iPhone.` },
+  { keys: ['orientation', 'training', 'course'], q: 'What is the worker orientation?',
+    a: `A short in-app orientation that shows you how PieceWork works and how to stay safe and get hired. Posters can see who finished it, and finished profiles get more acceptances. You will find it in your Profile.` },
+  { keys: ['get paid', 'paid', 'momo', 'mobile money', 'airtel money', 'payment for work'], q: 'How do I get paid for work?',
+    a: `The poster pays you directly, most people use MTN Mobile Money or Airtel Money. Agree the amount and when you will be paid before you start. PieceWork does not hold wages, so if a poster does not pay, open a ticket and tell us.` },
+  { keys: ['change my', 'edit profile', 'wrong city', 'update'], q: 'How do I fix my profile?',
+    a: `Go to Profile, then Edit Profile. You can change your name, city, bio, photo and selfie there. Your phone number is your account identity, so it cannot be changed in the app; if you lost that number, open a ticket below and we will help.` },
+];
+
+function botFindAnswer(text) {
+  const t = ' ' + String(text || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ') + ' ';
+  let best = null, bestScore = 0;
+  for (const f of BOT_FAQ) {
+    let score = 0;
+    for (const k of f.keys) { if (t.includes(k)) score += k.length; }
+    if (score > bestScore) { bestScore = score; best = f; }
+  }
+  return bestScore >= 4 ? best : null;
+}
+
+function supBubble(sender, body) {
+  if (sender === 'system') return `<div class="sup-sys">${esc(body)}</div>`;
+  if (sender === 'mine') return `<div class="sup-row mine"><div class="sup-bub mine">${body}</div></div>`;
+  return `<div class="sup-row"><div class="sup-bub">${body}</div></div>`;
+}
+
+let supTicketFilter = 'open';
+
 function viewHow() {
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">How PieceWork works</h1>
-    <p class="page-sub">Help &amp; support — the short version.</p>
+    <h1 class="page-title">Help &amp; Support</h1>
+    <p class="page-sub">Ask Zac the bot, chat with support, or open a ticket.</p>
+
+    <div class="card">
+      <h3 style="margin-top:0">Ask Zac</h3>
+      <p class="small muted" style="margin-top:0">Zac is our support bot. He answers the common questions instantly, day or night. For anything else, live chat and tickets are right below.</p>
+      <div id="bot-log" class="sup-log"></div>
+      <div class="sup-chips" id="bot-chips"></div>
+      <form id="bot-form" class="sup-form">
+        <input id="bot-input" placeholder="Type your question..." autocomplete="off" maxlength="300">
+        <button class="btn btn-primary" type="submit">Ask</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Live chat</h3>
+      <div id="live-body">${loadingHtml('Checking live chat...')}</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Support tickets</h3>
+      <p class="small muted" style="margin-top:0">Tickets are answered by the support team in order. Keep your ticket reference, you can quote it anywhere. You can also email support@pieceworkzambia.com and we will turn it into a ticket.</p>
+      <div id="ticket-body">${loadingHtml('Loading tickets...')}</div>
+    </div>
+
+    <h2 class="page-title" style="font-size:1.25rem;margin-top:26px">How PieceWork works</h2>
     <div class="steps">
       <div class="card"><div class="step-n">1</div><div><h4>Hire workers (or find work)</h4><p>Need hands for an event, a move, cleaning or building? Post the job with the pay in Kwacha. Looking for work? Browse jobs near you.</p></div></div>
-      <div class="card"><div class="step-n">2</div><div><h4>Apply or hire in the app</h4><p>Workers apply with one tap. Posters review applicants, check their ratings, and accept the right people — or chat first on WhatsApp.</p></div></div>
-      <div class="card"><div class="step-n">3</div><div><h4>Get the work done</h4><p>Show up, do great work. The poster marks the job completed when it's finished.</p></div></div>
-      <div class="card"><div class="step-n">4</div><div><h4>Get paid by mobile money</h4><p>Payment happens directly between you — most people use <b>MTN Mobile Money</b> or <b>Airtel Money</b>. Agree the amount before you start.</p></div></div>
+      <div class="card"><div class="step-n">2</div><div><h4>Apply or hire in the app</h4><p>Workers apply with one tap. Posters review applicants, check their ratings, and accept the right people.</p></div></div>
+      <div class="card"><div class="step-n">3</div><div><h4>Get the work done</h4><p>Show up, do great work. The poster marks the job completed when it is finished.</p></div></div>
+      <div class="card"><div class="step-n">4</div><div><h4>Get paid by mobile money</h4><p>Payment happens directly between you. Most people use MTN Mobile Money or Airtel Money. Agree the amount before you start.</p></div></div>
       <div class="card"><div class="step-n">5</div><div><h4>Build your reputation</h4><p>Both sides leave star ratings. Good ratings mean more jobs.</p></div></div>
     </div>
     ${momoNoteHtml()}
     <div class="card" style="text-align:center">
       <h3 style="margin-top:0">Stay safe</h3>
-      <p class="small muted">Meet in public places for first jobs. Never pay any “registration fee” to get work — real jobs on PieceWork never ask for money up front.</p>
-      <a class="btn btn-primary" href="#/register">Get started — it's free</a>
-      <div style="margin-top:10px"><a class="link-btn" href="#/about">Our story — why Zac built this</a></div>
+      <p class="small muted">Meet in public places for first jobs. Never pay any registration fee to get work. Real jobs on PieceWork never ask for money up front.</p>
+      <a class="btn btn-primary" href="#/register">Get started, it is free</a>
+      <div style="margin-top:10px"><a class="link-btn" href="#/about">Our story, why Zac built this</a></div>
     </div>
   </div></div>`;
+  initBot();
+  renderLive();
+  renderTickets();
+}
+
+/* ---- Zac the FAQ bot ---- */
+function botSay(html) {
+  const log = document.getElementById('bot-log');
+  if (!log) return;
+  log.insertAdjacentHTML('beforeend', supBubble('bot', html));
+  log.scrollTop = log.scrollHeight;
+}
+function botAsk(text) {
+  const log = document.getElementById('bot-log');
+  if (!log) return;
+  log.insertAdjacentHTML('beforeend', supBubble('mine', esc(text)));
+  log.scrollTop = log.scrollHeight;
+  const hit = botFindAnswer(text);
+  setTimeout(() => {
+    if (hit) { botSay(hit.a); return; }
+    api('/api/support/bot-miss', { method: 'POST', body: JSON.stringify({ question: text }) }).catch(() => {});
+    botSay(`That one is new for me, and I have passed it to the support team so they can teach me. For a person, join live chat when it is open below, or open a ticket and the team will answer you there.`);
+  }, 350);
+}
+function initBot() {
+  const log = document.getElementById('bot-log');
+  if (!log) return;
+  log.innerHTML = supBubble('bot', `Hi, this is Zac, your assistant. Ask me anything about PieceWork, or tap a topic below.`);
+  const chips = document.getElementById('bot-chips');
+  const picks = ['How do I post a job?', 'My selfie was rejected', 'I forgot my password', 'Why can I not see a phone number?', 'How do I sell on the Marketplace?', 'Delete or deactivate my account'];
+  chips.innerHTML = picks.map(p => `<button type="button" class="sup-chip" data-q="${esc(p)}">${esc(p)}</button>`).join('');
+  chips.querySelectorAll('[data-q]').forEach(b => b.addEventListener('click', () => botAsk(b.dataset.q)));
+  document.getElementById('bot-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const inp = document.getElementById('bot-input');
+    const v = inp.value.trim();
+    if (!v) return;
+    inp.value = '';
+    botAsk(v);
+  });
+}
+
+/* ---- live chat (member side) ---- */
+function supGuestPhone() { try { return localStorage.getItem('pwz_sup_phone') || ''; } catch (e) { return ''; } }
+function supSetGuestPhone(p) { try { if (p) localStorage.setItem('pwz_sup_phone', p); } catch (e) {} }
+function supGuestChatId() { try { return localStorage.getItem('pwz_sup_chat') || ''; } catch (e) { return ''; } }
+function supSetGuestChatId(id) { try { if (id) localStorage.setItem('pwz_sup_chat', String(id)); else localStorage.removeItem('pwz_sup_chat'); } catch (e) {} }
+
+async function renderLive() {
+  const body = document.getElementById('live-body');
+  if (!body) return;
+  if (!supChatId && supGuestChatId()) supChatId = Number(supGuestChatId());
+  if (supChatId) { openSupChatPoll(); return; }
+  try {
+    const s = await api('/api/support/status');
+    if (!s.online) {
+      body.innerHTML = `<p class="small" style="margin:0">Live chat is <b>closed</b> right now. Zac the bot above answers instantly, and tickets are answered in order, so open one below and we will reply there.</p>`;
+      return;
+    }
+    const waitTxt = s.waiting === 0 ? 'Nobody is waiting, you will be first in line.' : `${s.waiting} ${s.waiting === 1 ? 'person is' : 'people are'} waiting, about ${s.estWaitMinutes} minutes.`;
+    body.innerHTML = `
+      <p class="small" style="margin-top:0">Live chat is <b>open</b>. ${waitTxt}</p>
+      ${currentUser ? '' : `
+      <div class="field"><label for="lc-name">Your name</label><input id="lc-name" maxlength="80"></div>
+      <div class="field"><label for="lc-phone">Phone number on your account</label><input id="lc-phone" inputmode="tel" value="${esc(supGuestPhone())}"></div>`}
+      <button class="btn btn-primary full" id="lc-join">Join the queue</button>
+      <p class="small muted" id="lc-err" style="margin-bottom:0"></p>`;
+    document.getElementById('lc-join').addEventListener('click', async () => {
+      const errEl = document.getElementById('lc-err');
+      try {
+        const payload = {};
+        if (!currentUser) {
+          payload.name = document.getElementById('lc-name').value.trim();
+          payload.phone = document.getElementById('lc-phone').value.trim();
+          supSetGuestPhone(payload.phone);
+        }
+        const r = await api('/api/support/chats', { method: 'POST', body: JSON.stringify(payload) });
+        supChatId = r.id;
+        supSetGuestChatId(r.id);
+        openSupChatPoll();
+      } catch (e) { errEl.textContent = e.message; }
+    });
+  } catch (e) {
+    body.innerHTML = `<p class="small muted" style="margin:0">Live chat status could not load. Tickets below still work.</p>`;
+  }
+}
+
+function supChatRender(data) {
+  const body = document.getElementById('live-body');
+  if (!body) return;
+  const c = data.chat;
+  let statusHtml = '';
+  if (c.status === 'waiting') {
+    statusHtml = `<p class="small" style="margin-top:0">You are <b>number ${data.position} in the queue</b>${data.estWaitMinutes ? `, about ${data.estWaitMinutes} minutes` : ', next in line'}. Keep this page open, support will join you here.</p>`;
+  } else if (c.status === 'active') {
+    statusHtml = `<p class="small" style="margin-top:0"><b>Support is with you now.</b> Ask your question below.</p>`;
+  } else {
+    statusHtml = `<p class="small" style="margin-top:0">This chat has ended. If you still need help, open a ticket below any time.</p>`;
+  }
+  const msgs = (data.messages || []).map(m => supBubble(m.sender === 'user' ? 'mine' : m.sender, m.sender === 'system' ? m.body : esc(m.body))).join('');
+  body.innerHTML = `
+    ${statusHtml}
+    <div class="sup-log" id="sup-chat-log">${msgs}</div>
+    ${c.status === 'ended' ? `<button class="btn btn-outline full" id="sup-chat-again">Back to live chat</button>` : `
+    <form id="sup-chat-form" class="sup-form">
+      <input id="sup-chat-input" placeholder="Type a message..." autocomplete="off" maxlength="1000">
+      <button class="btn btn-primary" type="submit">Send</button>
+    </form>
+    <button class="link-btn" id="sup-chat-leave" style="margin-top:8px">Leave the chat</button>`}`;
+  const log = document.getElementById('sup-chat-log');
+  if (log) log.scrollTop = log.scrollHeight;
+  if (c.status === 'ended') {
+    document.getElementById('sup-chat-again').addEventListener('click', () => { supChatId = null; supSetGuestChatId(''); renderLive(); });
+    return;
+  }
+  document.getElementById('sup-chat-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const inp = document.getElementById('sup-chat-input');
+    const v = inp.value.trim();
+    if (!v) return;
+    inp.value = '';
+    try {
+      const payload = { body: v };
+      if (!currentUser) payload.phone = supGuestPhone();
+      await api('/api/support/chats/' + supChatId + '/messages', { method: 'POST', body: JSON.stringify(payload) });
+      pollSupChat();
+    } catch (err) { toast(err.message); }
+  });
+  document.getElementById('sup-chat-leave').addEventListener('click', async () => {
+    try {
+      const payload = {};
+      if (!currentUser) payload.phone = supGuestPhone();
+      await api('/api/support/chats/' + supChatId + '/leave', { method: 'POST', body: JSON.stringify(payload) });
+    } catch (e) {}
+    if (supportTimer) { clearInterval(supportTimer); supportTimer = null; }
+    supChatId = null; supSetGuestChatId('');
+    renderLive();
+  });
+}
+
+async function pollSupChat() {
+  if (!supChatId) return;
+  try {
+    const q = !currentUser && supGuestPhone() ? '?phone=' + encodeURIComponent(supGuestPhone()) : '';
+    const data = await api('/api/support/chats/' + supChatId + q);
+    const body = document.getElementById('live-body');
+    if (!body) return;
+    const log = document.getElementById('sup-chat-log');
+    const newCount = (data.messages || []).length;
+    const curCount = log ? log.children.length : -1;
+    if (!log || curCount !== newCount || data.chat.status === 'ended') supChatRender(data);
+    if (data.chat.status === 'ended' && supportTimer) { clearInterval(supportTimer); supportTimer = null; }
+  } catch (e) { /* keep polling through brief network drops */ }
+}
+function openSupChatPoll() {
+  pollSupChat();
+  if (supportTimer) clearInterval(supportTimer);
+  supportTimer = setInterval(pollSupChat, 4000);
+}
+
+/* ---- tickets (member side) ---- */
+const SUP_CATEGORIES = ['Account help', 'Jobs', 'Marketplace', 'Verification', 'Payments', 'Report a problem', 'Other'];
+function supStatusPill(s) {
+  const map = { open: 'Open', answered: 'Answered', closed: 'Closed' };
+  return `<span class="sup-pill sup-pill-${s}">${map[s] || s}</span>`;
+}
+function supThreadHtml(t, messages) {
+  const msgs = (messages || []).map(m => m.sender === 'system'
+    ? supBubble('system', m.body)
+    : supBubble(m.sender === 'member' || m.sender === 'user' ? 'mine' : 'admin', esc(m.body))).join('');
+  return `
+    <div class="split" style="align-items:flex-start"><div><b>${esc(t.ref)}</b> ${supStatusPill(t.status)}<div class="small muted">${esc(t.subject)}</div></div></div>
+    <div class="sup-log" style="max-height:260px">${msgs}</div>
+    ${t.status === 'closed' ? '<p class="small muted">This ticket is closed. Open a new one if you still need help.</p>' : `
+    <form class="sup-form" data-reply-ticket="${t.id}">
+      <input placeholder="Write a reply..." maxlength="2000" autocomplete="off">
+      <button class="btn btn-primary" type="submit">Reply</button>
+    </form>`}`;
+}
+function wireTicketReplyForms(root, phone) {
+  root.querySelectorAll('[data-reply-ticket]').forEach(f => f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const inp = f.querySelector('input');
+    const v = inp.value.trim();
+    if (!v) return;
+    try {
+      const payload = { body: v };
+      if (!currentUser && phone) payload.phone = phone;
+      await api('/api/support/tickets/' + f.dataset.replyTicket + '/messages', { method: 'POST', body: JSON.stringify(payload) });
+      inp.value = '';
+      toast('Reply sent.');
+      renderTickets();
+    } catch (err) { toast(err.message); }
+  }));
+}
+
+async function renderTickets() {
+  const body = document.getElementById('ticket-body');
+  if (!body) return;
+  const catOpts = SUP_CATEGORIES.map(c => `<option>${c}</option>`).join('');
+  if (currentUser) {
+    body.innerHTML = `
+      <form id="tk-form">
+        <div class="field"><label for="tk-cat">Topic</label><select id="tk-cat">${catOpts}</select></div>
+        <div class="field"><label for="tk-subject">Subject</label><input id="tk-subject" maxlength="120" placeholder="Short summary"></div>
+        <div class="field"><label for="tk-msg">How can we help?</label><textarea id="tk-msg" rows="3" maxlength="2000"></textarea></div>
+        <button class="btn btn-primary full" type="submit">Create ticket</button>
+        <p class="small" id="tk-done" style="margin-bottom:0"></p>
+      </form>
+      <h4 style="margin:18px 0 8px">My tickets</h4>
+      <div id="tk-list">${loadingHtml('Loading...')}</div>
+      <div id="tk-thread" style="margin-top:12px"></div>`;
+    document.getElementById('tk-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const r = await api('/api/support/tickets', { method: 'POST', body: JSON.stringify({
+          category: document.getElementById('tk-cat').value,
+          subject: document.getElementById('tk-subject').value.trim(),
+          message: document.getElementById('tk-msg').value.trim(),
+        }) });
+        document.getElementById('tk-done').innerHTML = `Ticket created: <b>${esc(r.ref)}</b>. We reply here, keep this reference.`;
+        document.getElementById('tk-subject').value = '';
+        document.getElementById('tk-msg').value = '';
+        loadMyTickets();
+      } catch (err) { toast(err.message); }
+    });
+    loadMyTickets();
+    return;
+  }
+  body.innerHTML = `
+    <form id="tk-form">
+      <div class="field"><label for="tk-name">Your name</label><input id="tk-name" maxlength="80"></div>
+      <div class="field"><label for="tk-phone">Phone number on your account</label><input id="tk-phone" inputmode="tel" value="${esc(supGuestPhone())}"></div>
+      <div class="field"><label for="tk-cat">Topic</label><select id="tk-cat">${catOpts}</select></div>
+      <div class="field"><label for="tk-subject">Subject</label><input id="tk-subject" maxlength="120" placeholder="Short summary"></div>
+      <div class="field"><label for="tk-msg">How can we help?</label><textarea id="tk-msg" rows="3" maxlength="2000"></textarea></div>
+      <button class="btn btn-primary full" type="submit">Create ticket</button>
+      <p class="small" id="tk-done" style="margin-bottom:0"></p>
+    </form>
+    <h4 style="margin:18px 0 8px">Follow up on a ticket</h4>
+    <form id="tk-lookup" class="sup-form">
+      <input id="tk-ref" placeholder="Ticket ref, e.g. PWZ-1001" autocomplete="off">
+      <input id="tk-lphone" placeholder="Phone number" inputmode="tel" value="${esc(supGuestPhone())}">
+      <button class="btn btn-outline" type="submit">Find</button>
+    </form>
+    <div id="tk-thread" style="margin-top:12px"></div>`;
+  document.getElementById('tk-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const phone = document.getElementById('tk-phone').value.trim();
+      supSetGuestPhone(phone);
+      const r = await api('/api/support/tickets', { method: 'POST', body: JSON.stringify({
+        name: document.getElementById('tk-name').value.trim(), phone,
+        category: document.getElementById('tk-cat').value,
+        subject: document.getElementById('tk-subject').value.trim(),
+        message: document.getElementById('tk-msg').value.trim(),
+      }) });
+      document.getElementById('tk-done').innerHTML = `Ticket created: <b>${esc(r.ref)}</b>. Use Find below with this reference and your phone to follow up.`;
+    } catch (err) { toast(err.message); }
+  });
+  document.getElementById('tk-lookup').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ref = document.getElementById('tk-ref').value.trim();
+    const phone = document.getElementById('tk-lphone').value.trim();
+    supSetGuestPhone(phone);
+    try {
+      const data = await api('/api/support/tickets/lookup', { method: 'POST', body: JSON.stringify({ ref, phone }) });
+      const th = document.getElementById('tk-thread');
+      th.innerHTML = supThreadHtml(data.ticket, data.messages);
+      wireTicketReplyForms(th, phone);
+    } catch (err) { toast(err.message); }
+  });
+}
+
+async function loadMyTickets() {
+  const list = document.getElementById('tk-list');
+  if (!list) return;
+  try {
+    const { tickets } = await api('/api/support/tickets/mine');
+    if (!tickets.length) { list.innerHTML = '<p class="small muted" style="margin:0">No tickets yet.</p>'; return; }
+    list.innerHTML = tickets.map(t => `
+      <button type="button" class="sup-ticket-row" data-ticket="${t.id}">
+        <span><b>${esc(t.ref)}</b> ${esc(t.subject)}</span>${supStatusPill(t.status)}
+      </button>`).join('');
+    list.querySelectorAll('[data-ticket]').forEach(b => b.addEventListener('click', async () => {
+      const th = document.getElementById('tk-thread');
+      th.innerHTML = loadingHtml('Loading ticket...');
+      try {
+        const data = await api('/api/support/tickets/' + b.dataset.ticket);
+        th.innerHTML = supThreadHtml(data.ticket, data.messages);
+        wireTicketReplyForms(th, null);
+      } catch (err) { th.innerHTML = ''; toast(err.message); }
+    }));
+  } catch (e) { list.innerHTML = '<p class="small muted" style="margin:0">Tickets could not load.</p>'; }
+}
+
+/* ---- support admin ---- */
+async function viewAdminSupport() {
+  if (!requireAuth('#/admin/support')) return;
+  if (!currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'The support desk is for admins only.')}</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Support Desk</h1>
+    <p class="page-sub">Live chat queue, tickets, and what the bot could not answer.</p>
+    <div class="card">
+      <div class="split"><div><b>Live chat</b><div class="small muted" id="sup-presence-note">Checking...</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" id="sup-go-live">Go live</button>
+        <button class="btn btn-outline btn-sm" id="sup-go-off">Go offline</button>
+      </div></div>
+      <div class="small muted" id="sup-overview" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Live chat queue</h3>
+      <div id="sup-queue">${loadingHtml('Loading queue...')}</div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Tickets</h3>
+      <div class="sup-chips" id="sup-ticket-filters" style="margin-bottom:10px">
+        ${['open', 'answered', 'closed'].map(s => `<button type="button" class="sup-chip" data-filter="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
+      </div>
+      <div id="sup-tickets">${loadingHtml('Loading tickets...')}</div>
+    </div>
+    <div class="card" id="sup-thread-card" hidden>
+      <h3 style="margin-top:0" id="sup-thread-title">Thread</h3>
+      <div id="sup-thread"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Zac the bot could not answer</h3>
+      <div id="sup-misses"><p class="small muted" style="margin:0">Loading...</p></div>
+    </div>
+  </div></div>`;
+  document.getElementById('sup-go-live').addEventListener('click', async () => {
+    supAdminOnline = true;
+    await api('/api/admin/support/heartbeat', { method: 'POST', body: JSON.stringify({ online: true }) }).catch(() => {});
+    refreshAdminSupport();
+  });
+  document.getElementById('sup-go-off').addEventListener('click', async () => {
+    supAdminOnline = false;
+    await api('/api/admin/support/heartbeat', { method: 'POST', body: JSON.stringify({ online: false }) }).catch(() => {});
+    refreshAdminSupport();
+  });
+  document.querySelectorAll('#sup-ticket-filters [data-filter]').forEach(b => b.addEventListener('click', () => {
+    supTicketFilter = b.dataset.filter;
+    loadAdminTickets();
+  }));
+  refreshAdminSupport();
+  if (supportTimer) clearInterval(supportTimer);
+  supportTimer = setInterval(() => {
+    if (supAdminOnline) api('/api/admin/support/heartbeat', { method: 'POST', body: JSON.stringify({ online: true }) }).catch(() => {});
+    refreshAdminSupport(true);
+  }, 15000);
+}
+
+async function refreshAdminSupport(soft) {
+  try {
+    const o = await api('/api/admin/support/overview');
+    const note = document.getElementById('sup-presence-note');
+    if (note) note.textContent = o.online ? 'Live chat is OPEN. Members can join the queue.' : 'Live chat is closed. Go live to open it.';
+    const ov = document.getElementById('sup-overview');
+    if (ov) ov.textContent = `${o.openTickets} open tickets · ${o.waitingChats} waiting in live chat · ${o.activeChats} chats active`;
+    const misses = document.getElementById('sup-misses');
+    if (misses) {
+      misses.innerHTML = o.botMisses && o.botMisses.length
+        ? o.botMisses.map(m => `<div class="split" style="padding:6px 0;border-bottom:1px solid var(--line)"><span>${esc(m.question)}</span><span class="small muted">${esc(String(m.created_at).slice(0, 10))}</span></div>`).join('')
+        : '<p class="small muted" style="margin:0">Nothing yet. The bot is handling everything asked so far.</p>';
+    }
+  } catch (e) {}
+  loadAdminQueue();
+  if (!soft) loadAdminTickets();
+  if (supAdminChatId) openAdminChat(supAdminChatId, true);
+}
+
+async function loadAdminQueue() {
+  const el = document.getElementById('sup-queue');
+  if (!el) return;
+  try {
+    const { chats } = await api('/api/admin/support/queue');
+    if (!chats.length) { el.innerHTML = '<p class="small muted" style="margin:0">Nobody waiting. The queue is empty.</p>'; return; }
+    el.innerHTML = chats.map(c => `
+      <div class="split" style="padding:7px 0;border-bottom:1px solid var(--line)">
+        <span><b>${esc(c.name || 'Guest')}</b> <span class="small muted">${esc(c.phone || '')}</span><br>
+        <span class="small muted">${c.status === 'waiting' ? 'Waiting, position ' + c.position : 'Chat active'} · since ${esc(String(c.created_at).slice(11, 16))}</span></span>
+        <span style="display:flex;gap:6px">
+          ${c.status === 'waiting' ? `<button class="btn btn-primary btn-sm" data-accept="${c.id}">Accept</button>` : ''}
+          <button class="btn btn-outline btn-sm" data-openchat="${c.id}">Open</button>
+        </span>
+      </div>`).join('');
+    el.querySelectorAll('[data-accept]').forEach(b => b.addEventListener('click', async () => {
+      await api('/api/admin/support/chats/' + b.dataset.accept + '/accept', { method: 'POST', body: '{}' });
+      openAdminChat(Number(b.dataset.accept));
+      refreshAdminSupport(true);
+    }));
+    el.querySelectorAll('[data-openchat]').forEach(b => b.addEventListener('click', () => openAdminChat(Number(b.dataset.openchat))));
+  } catch (e) { el.innerHTML = '<p class="small muted" style="margin:0">Queue could not load.</p>'; }
+}
+
+async function openAdminChat(id, soft) {
+  supAdminChatId = id;
+  const card = document.getElementById('sup-thread-card');
+  const th = document.getElementById('sup-thread');
+  if (!card || !th) return;
+  card.hidden = false;
+  try {
+    const data = await api('/api/admin/support/chats/' + id);
+    document.getElementById('sup-thread-title').textContent = 'Live chat: ' + (data.chat.name || 'Guest');
+    const msgs = (data.messages || []).map(m => supBubble(m.sender === 'admin' ? 'mine' : m.sender, m.sender === 'system' ? m.body : esc(m.body))).join('');
+    th.innerHTML = `
+      <div class="sup-log" style="max-height:280px">${msgs}</div>
+      ${data.chat.status === 'ended' ? '<p class="small muted">This chat has ended.</p>' : `
+      <form class="sup-form" id="sup-admin-chat-form">
+        <input placeholder="Reply..." maxlength="1000" autocomplete="off">
+        <button class="btn btn-primary" type="submit">Send</button>
+      </form>
+      <button class="link-btn" id="sup-admin-chat-end" style="margin-top:8px">End chat</button>`}`;
+    const log = th.querySelector('.sup-log');
+    if (log) log.scrollTop = log.scrollHeight;
+    if (!soft) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const form = document.getElementById('sup-admin-chat-form');
+    if (form) form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const inp = form.querySelector('input');
+      const v = inp.value.trim();
+      if (!v) return;
+      inp.value = '';
+      await api('/api/admin/support/chats/' + id + '/messages', { method: 'POST', body: JSON.stringify({ body: v }) });
+      openAdminChat(id, true);
+    });
+    const endBtn = document.getElementById('sup-admin-chat-end');
+    if (endBtn) endBtn.addEventListener('click', async () => {
+      await api('/api/admin/support/chats/' + id + '/end', { method: 'POST', body: '{}' });
+      supAdminChatId = null;
+      card.hidden = true;
+      refreshAdminSupport(true);
+    });
+  } catch (e) { if (!soft) toast(e.message); }
+}
+
+async function loadAdminTickets() {
+  const el = document.getElementById('sup-tickets');
+  if (!el) return;
+  try {
+    const { tickets } = await api('/api/admin/support/tickets?status=' + supTicketFilter);
+    if (!tickets.length) { el.innerHTML = '<p class="small muted" style="margin:0">No ' + supTicketFilter + ' tickets.</p>'; return; }
+    el.innerHTML = tickets.map(t => `
+      <button type="button" class="sup-ticket-row" data-aticket="${t.id}">
+        <span><b>${esc(t.ref)}</b> ${esc(t.subject)}<br><span class="small muted">${esc(t.name || 'Guest')} · ${esc(t.phone || '')} · ${esc(t.category)}</span></span>${supStatusPill(t.status)}
+      </button>`).join('');
+    el.querySelectorAll('[data-aticket]').forEach(b => b.addEventListener('click', () => openAdminTicket(Number(b.dataset.aticket))));
+  } catch (e) { el.innerHTML = '<p class="small muted" style="margin:0">Tickets could not load.</p>'; }
+}
+
+async function openAdminTicket(id) {
+  supAdminChatId = null;
+  const card = document.getElementById('sup-thread-card');
+  const th = document.getElementById('sup-thread');
+  if (!card || !th) return;
+  card.hidden = false;
+  try {
+    const data = await api('/api/admin/support/tickets/' + id);
+    const t = data.ticket;
+    document.getElementById('sup-thread-title').textContent = 'Ticket ' + t.ref + ': ' + t.subject;
+    const msgs = (data.messages || []).map(m => supBubble(m.sender === 'admin' ? 'mine' : 'member', esc(m.body))).join('');
+    th.innerHTML = `
+      <p class="small muted" style="margin-top:0">${esc(t.name || 'Guest')} · ${esc(t.phone || '')} · ${esc(t.category)} · ${supStatusPill(t.status)}</p>
+      <div class="sup-log" style="max-height:280px">${msgs}</div>
+      <form class="sup-form" id="sup-admin-ticket-form">
+        <input placeholder="Reply to the member..." maxlength="2000" autocomplete="off">
+        <button class="btn btn-primary" type="submit">Reply</button>
+      </form>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        ${t.status !== 'closed' ? `<button class="btn btn-outline btn-sm" id="sup-ticket-close">Close ticket</button>` : `<button class="btn btn-outline btn-sm" id="sup-ticket-reopen">Reopen ticket</button>`}
+      </div>`;
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('sup-admin-ticket-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const inp = e.target.querySelector('input');
+      const v = inp.value.trim();
+      if (!v) return;
+      await api('/api/admin/support/tickets/' + id + '/messages', { method: 'POST', body: JSON.stringify({ body: v }) });
+      toast('Reply sent.');
+      openAdminTicket(id);
+      loadAdminTickets();
+    });
+    const closeBtn = document.getElementById('sup-ticket-close');
+    if (closeBtn) closeBtn.addEventListener('click', async () => {
+      await api('/api/admin/support/tickets/' + id + '/status', { method: 'POST', body: JSON.stringify({ status: 'closed' }) });
+      openAdminTicket(id); loadAdminTickets();
+    });
+    const reopenBtn = document.getElementById('sup-ticket-reopen');
+    if (reopenBtn) reopenBtn.addEventListener('click', async () => {
+      await api('/api/admin/support/tickets/' + id + '/status', { method: 'POST', body: JSON.stringify({ status: 'open' }) });
+      openAdminTicket(id); loadAdminTickets();
+    });
+  } catch (e) { toast(e.message); }
 }
 
 /** Invite friends — referral link + giveaway. */
@@ -4865,6 +5450,7 @@ async function viewAdmin() {
         </div>
         <div class="dash-menu">
           ${mrow('#/admin/activity', 'users', 'User Management', 0)}
+          ${mrow('#/admin/support', 'message', 'Support Desk', 0)}
           ${mrow('#/admin/verifications', 'id', 'Verification Queue', s.selfies_pending || 0)}
           ${mrow('#/admin/reports', 'shield', 'Marketplace Moderation', s.reports_open || 0)}
           ${mrow('#/admin/businesses', 'grid', 'Business Applications', s.businesses_pending || 0)}
@@ -5999,6 +6585,7 @@ const routes = [
   [/^#\/categories$/, viewCategories],
   [/^#\/messages$/, viewMessages],
   [/^#\/chat\/(\d+)$/, (m) => viewChat(m[1])],
+  [/^#\/admin\/support$/, viewAdminSupport],
   [/^#\/admin$/, viewAdmin],
   [/^#\/terms$/, viewTerms],
   [/^#\/orientation$/, viewOrientation],
@@ -6009,6 +6596,9 @@ const routes = [
 
 async function router() {
   if (chatTimer) { clearInterval(chatTimer); chatTimer = null; }
+  if (supportTimer) { clearInterval(supportTimer); supportTimer = null; }
+  supAdminChatId = null;
+  supAdminOnline = false;
   stopAdsRotation();
   renderChrome();
   const hash = location.hash || '#/';

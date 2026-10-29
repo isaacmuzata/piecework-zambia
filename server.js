@@ -2422,6 +2422,11 @@ app.delete('/api/users/me', ah(auth), ah(async (req, res) => {
     ['DELETE FROM products WHERE seller_id = ?', [id]],
     ['DELETE FROM businesses WHERE owner_id = ?', [id]],
     ['DELETE FROM jobs WHERE poster_id = ?', [id]],
+    ['DELETE FROM support_ticket_messages WHERE ticket_id IN (SELECT id FROM support_tickets WHERE user_id = ?)', [id]],
+    ['DELETE FROM support_tickets WHERE user_id = ?', [id]],
+    ['DELETE FROM support_messages WHERE chat_id IN (SELECT id FROM support_chats WHERE user_id = ?)', [id]],
+    ['DELETE FROM support_chats WHERE user_id = ?', [id]],
+    ['DELETE FROM bot_questions WHERE user_id = ?', [id]],
   ];
   for (const [sql, params] of childDeletes) await runWrite(sql, params);
   await runWrite('DELETE FROM users WHERE id = ?', [id]);
@@ -4215,6 +4220,340 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
   res.type('application/json');
   res.sendFile(path.join(__dirname, 'public', '.well-known', 'assetlinks.json'));
 });
+// ---------------------------------------------------------------- support hub
+// Tickets, a live chat queue and the FAQ bot's unanswered-question log
+// (2026-10-29). Guests are identified by phone: PieceWork accounts are
+// phone-based and no email is collected at signup. Ticket refs are
+// PWZ-(1000 + id) so a member can quote one on any channel.
+const SUPPORT_CATEGORIES = ['Account help', 'Jobs', 'Marketplace', 'Verification', 'Payments', 'Report a problem', 'Other'];
+const supClean = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+const ticketRef = (id) => 'PWZ-' + (1000 + Number(id));
+function refToTicketId(ref) {
+  const m = String(ref || '').toUpperCase().match(/(\d+)/);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return n > 1000 ? n - 1000 : n;
+}
+async function notifySupportAdmins(title, body, tag) {
+  try {
+    const ph = ADMIN_PHONES.map(() => '?').join(',');
+    const admins = await getAll(`SELECT id FROM users WHERE phone IN (${ph})`, ADMIN_PHONES);
+    for (const a of admins) notifyPush(a.id, { title, body, url: '#/admin/support', tag: tag || 'support' });
+  } catch (e) { console.error('notifySupportAdmins failed:', e && e.message); }
+}
+async function supportOnline() {
+  const row = await getOne('SELECT * FROM support_presence WHERE id = 1');
+  if (!row || !row.online) return false;
+  const t = Date.parse(String(row.updated_at).replace(' ', 'T') + 'Z');
+  return Number.isFinite(t) && (Date.now() - t) < 3 * 60 * 1000;
+}
+async function supportQueuePosition(chat) {
+  const r = await getOne(
+    `SELECT COUNT(*) AS c FROM support_chats WHERE status = 'waiting'
+     AND (created_at < ? OR (created_at = ? AND id < ?))`,
+    [chat.created_at, chat.created_at, chat.id]
+  );
+  return Number(r.c) + 1;
+}
+function ticketShape(t) {
+  return {
+    id: Number(t.id), ref: ticketRef(t.id),
+    name: t.user_name || t.guest_name || '', phone: t.user_phone || t.guest_phone || '',
+    category: t.category, subject: t.subject, status: t.status,
+    created_at: t.created_at, updated_at: t.updated_at,
+  };
+}
+const TICKET_SELECT = `SELECT t.*, u.name AS user_name, u.phone AS user_phone
+  FROM support_tickets t LEFT JOIN users u ON u.id = t.user_id`;
+async function loadTicket(id) { return getOne(TICKET_SELECT + ' WHERE t.id = ?', [id]); }
+function canGuestAccess(req, row) {
+  if (!row) return false;
+  if (req.user && row.user_id === req.user.id) return true;
+  const phone = normalizePhone((req.body && req.body.phone) || (req.query && req.query.phone) || '');
+  const stored = row.user_phone || row.guest_phone || '';
+  return !!phone && !!stored && normalizePhone(stored) === phone;
+}
+
+app.get('/api/support/status', ah(async (req, res) => {
+  const online = await supportOnline();
+  const w = await getOne(`SELECT COUNT(*) AS c FROM support_chats WHERE status = 'waiting'`);
+  const waiting = Number(w.c);
+  res.json({ online, waiting, estWaitMinutes: online ? waiting * 5 : null });
+}));
+
+app.post('/api/support/tickets', ah(maybeAuth), ah(async (req, res) => {
+  const b = req.body || {};
+  const category = SUPPORT_CATEGORIES.includes(b.category) ? b.category : 'Other';
+  const subject = supClean(b.subject, 120);
+  const message = supClean(b.message, 2000);
+  if (subject.length < 3) return err(res, 422, 'Please give your ticket a short subject.');
+  if (message.length < 5) return err(res, 422, 'Please describe the problem so we can help.');
+  let userId = null, guestName = '', guestPhone = '';
+  if (req.user) { userId = req.user.id; }
+  else {
+    guestName = supClean(b.name, 80);
+    guestPhone = normalizePhone(b.phone || '');
+    if (guestName.length < 2) return err(res, 422, 'Please tell us your name.');
+    if (!guestPhone) return err(res, 422, 'Please give the phone number on your PieceWork account.');
+  }
+  const ins = await runWrite(
+    'INSERT INTO support_tickets (user_id, guest_name, guest_phone, category, subject) VALUES (?, ?, ?, ?, ?)',
+    [userId, guestName, guestPhone, category, subject]
+  );
+  const ticketId = insertId(ins);
+  await runWrite('INSERT INTO support_ticket_messages (ticket_id, sender, body) VALUES (?, ?, ?)', [ticketId, 'member', message]);
+  notifySupportAdmins('New support ticket ' + ticketRef(ticketId), subject, 'support-ticket');
+  res.status(201).json({ id: ticketId, ref: ticketRef(ticketId) });
+}));
+
+app.get('/api/support/tickets/mine', ah(auth), ah(async (req, res) => {
+  if (!req.user) return err(res, 401, 'Sign in first.');
+  const rows = await getAll(TICKET_SELECT + ' WHERE t.user_id = ? ORDER BY t.updated_at DESC LIMIT 50', [req.user.id]);
+  res.json({ tickets: rows.map(ticketShape) });
+}));
+
+app.post('/api/support/tickets/lookup', ah(async (req, res) => {
+  const id = refToTicketId(req.body && req.body.ref);
+  const phone = normalizePhone((req.body && req.body.phone) || '');
+  if (!id || !phone) return err(res, 422, 'Enter your ticket reference and phone number.');
+  const t = await loadTicket(id);
+  if (!t || normalizePhone(t.user_phone || t.guest_phone || '') !== phone) {
+    return err(res, 404, 'No ticket matches that reference and phone number.');
+  }
+  const messages = await getAll('SELECT sender, body, created_at FROM support_ticket_messages WHERE ticket_id = ? ORDER BY id ASC', [id]);
+  res.json({ ticket: ticketShape(t), messages });
+}));
+
+app.get('/api/support/tickets/:id', ah(auth), ah(async (req, res) => {
+  const t = await loadTicket(Number(req.params.id));
+  if (!t) return err(res, 404, 'Ticket not found.');
+  if (!isAdmin(req.user) && !(req.user && t.user_id === req.user.id)) return err(res, 403, 'Not your ticket.');
+  const messages = await getAll('SELECT sender, body, created_at FROM support_ticket_messages WHERE ticket_id = ? ORDER BY id ASC', [t.id]);
+  res.json({ ticket: ticketShape(t), messages });
+}));
+
+app.post('/api/support/tickets/:id/messages', ah(maybeAuth), ah(async (req, res) => {
+  const t = await loadTicket(Number(req.params.id));
+  if (!t) return err(res, 404, 'Ticket not found.');
+  if (!isAdmin(req.user) && !canGuestAccess(req, t)) return err(res, 403, 'Not your ticket.');
+  const body = supClean(req.body && req.body.body, 2000);
+  if (body.length < 1) return err(res, 422, 'Write a message first.');
+  if (t.status === 'closed') return err(res, 422, 'This ticket is closed. Please open a new one.');
+  await runWrite('INSERT INTO support_ticket_messages (ticket_id, sender, body) VALUES (?, ?, ?)', [t.id, 'member', body]);
+  await runWrite(`UPDATE support_tickets SET status = 'open', updated_at = datetime('now') WHERE id = ?`, [t.id]);
+  notifySupportAdmins('Ticket ' + ticketRef(t.id) + ' updated', t.subject, 'support-ticket');
+  res.json({ ok: true });
+}));
+
+app.post('/api/support/bot-miss', ah(maybeAuth), ah(async (req, res) => {
+  const q = supClean(req.body && req.body.question, 300);
+  if (q.length >= 3) {
+    await runWrite('INSERT INTO bot_questions (user_id, question) VALUES (?, ?)', [req.user ? req.user.id : null, q]);
+  }
+  res.json({ ok: true });
+}));
+
+app.post('/api/support/chats', ah(maybeAuth), ah(async (req, res) => {
+  const b = req.body || {};
+  let userId = null, guestName = '', guestPhone = '';
+  if (req.user) { userId = req.user.id; }
+  else {
+    guestName = supClean(b.name, 80);
+    guestPhone = normalizePhone(b.phone || '');
+    if (guestName.length < 2) return err(res, 422, 'Please tell us your name.');
+    if (!guestPhone) return err(res, 422, 'Please give the phone number on your PieceWork account.');
+  }
+  const existing = userId
+    ? await getOne(`SELECT * FROM support_chats WHERE user_id = ? AND status IN ('waiting', 'active') ORDER BY id DESC LIMIT 1`, [userId])
+    : await getOne(`SELECT * FROM support_chats WHERE guest_phone = ? AND user_id IS NULL AND status IN ('waiting', 'active') ORDER BY id DESC LIMIT 1`, [guestPhone]);
+  if (existing) {
+    return res.json({ id: Number(existing.id), status: existing.status, position: existing.status === 'waiting' ? await supportQueuePosition(existing) : null });
+  }
+  if (!(await supportOnline())) return err(res, 409, 'Live chat is closed right now. Please create a ticket instead and we will reply there.');
+  const ins = await runWrite('INSERT INTO support_chats (user_id, guest_name, guest_phone) VALUES (?, ?, ?)', [userId, guestName, guestPhone]);
+  const chatId = insertId(ins);
+  await runWrite('INSERT INTO support_messages (chat_id, sender, body) VALUES (?, ?, ?)', [chatId, 'system', 'You joined the live chat queue. Keep this page open.']);
+  const chat = await getOne('SELECT * FROM support_chats WHERE id = ?', [chatId]);
+  notifySupportAdmins('Live chat: someone is waiting', (guestName || 'A member') + ' joined the support queue', 'support-chat');
+  res.status(201).json({ id: chatId, status: 'waiting', position: await supportQueuePosition(chat) });
+}));
+
+const CHAT_SELECT = `SELECT c.*, u.name AS user_name, u.phone AS user_phone
+  FROM support_chats c LEFT JOIN users u ON u.id = c.user_id`;
+async function loadChat(id) { return getOne(CHAT_SELECT + ' WHERE c.id = ?', [id]); }
+function canGuestAccessChat(req, row) {
+  if (!row) return false;
+  if (req.user && row.user_id === req.user.id) return true;
+  const phone = normalizePhone((req.body && req.body.phone) || (req.query && req.query.phone) || '');
+  const stored = row.user_phone || row.guest_phone || '';
+  return !!phone && !!stored && normalizePhone(stored) === phone;
+}
+
+app.get('/api/support/chats/:id', ah(maybeAuth), ah(async (req, res) => {
+  const c = await loadChat(Number(req.params.id));
+  if (!c) return err(res, 404, 'Chat not found.');
+  if (!isAdmin(req.user) && !canGuestAccessChat(req, c)) return err(res, 403, 'Not your chat.');
+  const messages = await getAll('SELECT sender, body, created_at FROM support_messages WHERE chat_id = ? ORDER BY id ASC LIMIT 200', [c.id]);
+  const position = c.status === 'waiting' ? await supportQueuePosition(c) : null;
+  res.json({
+    chat: { id: Number(c.id), status: c.status, created_at: c.created_at },
+    position,
+    estWaitMinutes: position ? (position - 1) * 5 : null,
+    messages,
+  });
+}));
+
+app.post('/api/support/chats/:id/messages', ah(maybeAuth), ah(async (req, res) => {
+  const c = await loadChat(Number(req.params.id));
+  if (!c) return err(res, 404, 'Chat not found.');
+  if (!isAdmin(req.user) && !canGuestAccessChat(req, c)) return err(res, 403, 'Not your chat.');
+  if (c.status === 'ended') return err(res, 422, 'This chat has ended.');
+  const body = supClean(req.body && req.body.body, 1000);
+  if (body.length < 1) return err(res, 422, 'Write a message first.');
+  await runWrite('INSERT INTO support_messages (chat_id, sender, body) VALUES (?, ?, ?)', [c.id, 'user', body]);
+  if (c.status === 'active') notifySupportAdmins('Live chat message', body.slice(0, 80), 'support-chat');
+  res.json({ ok: true });
+}));
+
+app.post('/api/support/chats/:id/leave', ah(maybeAuth), ah(async (req, res) => {
+  const c = await loadChat(Number(req.params.id));
+  if (!c) return err(res, 404, 'Chat not found.');
+  if (!isAdmin(req.user) && !canGuestAccessChat(req, c)) return err(res, 403, 'Not your chat.');
+  if (c.status !== 'ended') {
+    await runWrite(`UPDATE support_chats SET status = 'ended', ended_at = datetime('now') WHERE id = ?`, [c.id]);
+    await runWrite('INSERT INTO support_messages (chat_id, sender, body) VALUES (?, ?, ?)', [c.id, 'system', 'The visitor left the chat.']);
+  }
+  res.json({ ok: true });
+}));
+
+// ---- support admin ----
+app.post('/api/admin/support/heartbeat', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const online = req.body && req.body.online === false ? 0 : 1;
+  await runWrite(
+    `INSERT INTO support_presence (id, online, updated_at) VALUES (1, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET online = excluded.online, updated_at = datetime('now')`,
+    [online]
+  );
+  res.json({ ok: true, online: !!online });
+}));
+
+app.get('/api/admin/support/overview', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const [openT, waitC, actC, misses] = await Promise.all([
+    getOne(`SELECT COUNT(*) AS c FROM support_tickets WHERE status = 'open'`),
+    getOne(`SELECT COUNT(*) AS c FROM support_chats WHERE status = 'waiting'`),
+    getOne(`SELECT COUNT(*) AS c FROM support_chats WHERE status = 'active'`),
+    getAll('SELECT question, created_at FROM bot_questions ORDER BY id DESC LIMIT 20'),
+  ]);
+  res.json({
+    online: await supportOnline(),
+    openTickets: Number(openT.c), waitingChats: Number(waitC.c), activeChats: Number(actC.c),
+    botMisses: misses,
+  });
+}));
+
+app.get('/api/admin/support/tickets', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const status = ['open', 'answered', 'closed'].includes(req.query.status) ? req.query.status : null;
+  const rows = status
+    ? await getAll(TICKET_SELECT + ' WHERE t.status = ? ORDER BY t.updated_at DESC LIMIT 100', [status])
+    : await getAll(TICKET_SELECT + ' ORDER BY t.updated_at DESC LIMIT 100');
+  res.json({ tickets: rows.map(ticketShape) });
+}));
+
+app.get('/api/admin/support/tickets/:id', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const t = await loadTicket(Number(req.params.id));
+  if (!t) return err(res, 404, 'Ticket not found.');
+  const messages = await getAll('SELECT sender, body, created_at FROM support_ticket_messages WHERE ticket_id = ? ORDER BY id ASC', [t.id]);
+  res.json({ ticket: ticketShape(t), messages });
+}));
+
+app.post('/api/admin/support/tickets/:id/messages', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const t = await loadTicket(Number(req.params.id));
+  if (!t) return err(res, 404, 'Ticket not found.');
+  const body = supClean(req.body && req.body.body, 2000);
+  if (body.length < 1) return err(res, 422, 'Write a reply first.');
+  await runWrite('INSERT INTO support_ticket_messages (ticket_id, sender, body) VALUES (?, ?, ?)', [t.id, 'admin', body]);
+  await runWrite(`UPDATE support_tickets SET status = 'answered', updated_at = datetime('now') WHERE id = ?`, [t.id]);
+  if (t.user_id) notifyPush(t.user_id, { title: 'Support replied', body: 'Ticket ' + ticketRef(t.id) + ': ' + t.subject, url: '#/how', tag: 'support-reply' });
+  logAdmin(req, 'support_ticket_reply', 'ticket', t.id, ticketRef(t.id));
+  res.json({ ok: true });
+}));
+
+app.post('/api/admin/support/tickets/:id/status', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const status = req.body && req.body.status;
+  if (!['open', 'answered', 'closed'].includes(status)) return err(res, 422, 'Bad status.');
+  const t = await loadTicket(Number(req.params.id));
+  if (!t) return err(res, 404, 'Ticket not found.');
+  await runWrite(`UPDATE support_tickets SET status = ?, updated_at = datetime('now') WHERE id = ?`, [status, t.id]);
+  res.json({ ok: true });
+}));
+
+app.get('/api/admin/support/queue', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const rows = await getAll(CHAT_SELECT + ` WHERE c.status IN ('waiting', 'active') ORDER BY (c.status = 'active') DESC, c.created_at ASC LIMIT 50`);
+  const out = [];
+  for (const c of rows) {
+    out.push({
+      id: Number(c.id), status: c.status,
+      name: c.user_name || c.guest_name || '', phone: c.user_phone || c.guest_phone || '',
+      created_at: c.created_at, position: c.status === 'waiting' ? await supportQueuePosition(c) : null,
+    });
+  }
+  res.json({ chats: out });
+}));
+
+app.post('/api/admin/support/chats/:id/accept', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const c = await loadChat(Number(req.params.id));
+  if (!c) return err(res, 404, 'Chat not found.');
+  if (c.status === 'ended') return err(res, 422, 'This chat has ended.');
+  if (c.status === 'waiting') {
+    await runWrite(`UPDATE support_chats SET status = 'active', started_at = datetime('now') WHERE id = ?`, [c.id]);
+    await runWrite('INSERT INTO support_messages (chat_id, sender, body) VALUES (?, ?, ?)', [c.id, 'system', 'Support joined the chat. Ask your question.']);
+    if (c.user_id) notifyPush(c.user_id, { title: 'Support is ready', body: 'Your live chat with support has started.', url: '#/how', tag: 'support-chat' });
+  }
+  res.json({ ok: true });
+}));
+
+app.get('/api/admin/support/chats/:id', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const c = await loadChat(Number(req.params.id));
+  if (!c) return err(res, 404, 'Chat not found.');
+  const messages = await getAll('SELECT sender, body, created_at FROM support_messages WHERE chat_id = ? ORDER BY id ASC LIMIT 200', [c.id]);
+  res.json({
+    chat: { id: Number(c.id), status: c.status, name: c.user_name || c.guest_name || '', phone: c.user_phone || c.guest_phone || '', created_at: c.created_at },
+    messages,
+  });
+}));
+
+app.post('/api/admin/support/chats/:id/messages', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const c = await loadChat(Number(req.params.id));
+  if (!c) return err(res, 404, 'Chat not found.');
+  if (c.status === 'ended') return err(res, 422, 'This chat has ended.');
+  const body = supClean(req.body && req.body.body, 1000);
+  if (body.length < 1) return err(res, 422, 'Write a message first.');
+  await runWrite('INSERT INTO support_messages (chat_id, sender, body) VALUES (?, ?, ?)', [c.id, 'admin', body]);
+  res.json({ ok: true });
+}));
+
+app.post('/api/admin/support/chats/:id/end', ah(auth), ah(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const c = await loadChat(Number(req.params.id));
+  if (!c) return err(res, 404, 'Chat not found.');
+  if (c.status !== 'ended') {
+    await runWrite(`UPDATE support_chats SET status = 'ended', ended_at = datetime('now') WHERE id = ?`, [c.id]);
+    await runWrite('INSERT INTO support_messages (chat_id, sender, body) VALUES (?, ?, ?)', [c.id, 'system', 'Support ended the chat. If you still need help, create a ticket any time.']);
+  }
+  logAdmin(req, 'support_chat_end', 'chat', c.id, '');
+  res.json({ ok: true });
+}));
+
 // SPA fallback: anything that isn't /api serves index.html.
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
