@@ -755,8 +755,39 @@ function wireAdsBanner(root) {
   dots.forEach(d => d.addEventListener('click', () => { show(Number(d.dataset.adDot)); start(); }));
   root.addEventListener('pointerenter', stopAdsRotation);
   root.addEventListener('pointerleave', start);
-  root.addEventListener('touchstart', stopAdsRotation, { passive: true });
-  root.addEventListener('touchend', start, { passive: true });
+  // Swipe to move between ads instead of waiting out the 5s rotation:
+  // left shows the next ad, right the previous one. A recognised swipe
+  // also swallows the click the browser fires after touchend, or the
+  // slide's own link would still navigate away.
+  let swipeX = null, swipeY = null, justSwiped = false;
+  root.addEventListener('click', (e) => {
+    if (!justSwiped) return;
+    justSwiped = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+  root.addEventListener('touchstart', (e) => {
+    stopAdsRotation();
+    const t = e.touches[0];
+    swipeX = t ? t.clientX : null;
+    swipeY = t ? t.clientY : null;
+  }, { passive: true });
+  root.addEventListener('touchend', (e) => {
+    const t = e.changedTouches[0];
+    if (t && swipeX !== null) {
+      const dx = t.clientX - swipeX;
+      const dy = t.clientY - (swipeY || 0);
+      if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy)) {
+        justSwiped = true;
+        // If no click follows after all, do not eat the next real tap.
+        setTimeout(() => { justSwiped = false; }, 400);
+        show(cur + (dx < 0 ? 1 : -1));
+      }
+    }
+    swipeX = swipeY = null;
+    start();
+  }, { passive: true });
+  root.addEventListener('touchcancel', () => { swipeX = swipeY = null; }, { passive: true });
   start();
 }
 
