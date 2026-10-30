@@ -3883,6 +3883,36 @@ app.get('/api/selling/offers', ah(auth), ah(async (req, res) => {
   });
 }));
 
+// Open (find-or-create) a product conversation from the SELLER side, via a
+// received offer. The buyer-side endpoint above only lets the buyer start
+// the thread, so a seller holding an offer had no way to message the buyer
+// first, even though the accept flow tells them to. The offer row itself is
+// the relationship proof: only its seller may open the thread. The
+// conversation uses the same keying as the buyer-side endpoint (poster_id =
+// seller, worker_id = buyer, product_id set), so both sides land in the one
+// thread and it appears in both message lists.
+app.post('/api/offers/:id/conversation', ah(auth), ah(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const offer = await getOne('SELECT * FROM offers WHERE id = ?', [id]);
+  if (!offer) return err(res, 404, 'Offer not found.');
+  if (offer.seller_id !== req.user.id) return err(res, 403, 'Only the seller can message the buyer from this offer.');
+  if (await blockExists(req.user.id, offer.buyer_id)) {
+    return err(res, 403, 'Messaging is not available between you and this user.');
+  }
+  let conv = await getOne(
+    'SELECT id FROM conversations WHERE product_id = ? AND poster_id = ? AND worker_id = ?',
+    [offer.product_id, offer.seller_id, offer.buyer_id]
+  );
+  if (!conv) {
+    const info = await runWrite(
+      'INSERT INTO conversations (product_id, poster_id, worker_id) VALUES (?, ?, ?)',
+      [offer.product_id, offer.seller_id, offer.buyer_id]
+    );
+    conv = { id: insertId(info) };
+  }
+  res.status(201).json({ conversation_id: conv.id });
+}));
+
 app.post('/api/conversations/product', ah(auth), ah(async (req, res) => {
   const me = req.user.id;
   const pid = parseInt((req.body || {}).product_id, 10);

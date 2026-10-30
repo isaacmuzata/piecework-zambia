@@ -1480,8 +1480,8 @@ async function viewProduct(id) {
               ${o.message ? `<span class="small" style="display:block">${esc(o.message)}</span>` : ''}
               <span class="small muted" style="display:block">${esc(relTime(o.created_at))}</span></span>
               ${o.status === 'pending'
-                ? `<span class="btn-row"><button class="btn btn-sm btn-primary" data-offer-accept="${o.id}">Accept</button><button class="btn btn-sm btn-outline" data-offer-decline="${o.id}">Decline</button></span>`
-                : `<span class="badge badge-app-${o.status === 'accepted' ? 'accepted' : 'declined'}">${esc(o.status)}</span>`}
+                ? `<span class="btn-row"><button class="btn btn-sm btn-primary" data-offer-accept="${o.id}">Accept</button><button class="btn btn-sm btn-outline" data-offer-decline="${o.id}">Decline</button><button class="btn btn-sm btn-outline" data-offer-msg="${o.id}">Message</button></span>`
+                : `<span class="btn-row"><span class="badge badge-app-${o.status === 'accepted' ? 'accepted' : 'declined'}">${esc(o.status)}</span>${o.status === 'accepted' ? `<button class="btn btn-sm btn-outline" data-offer-msg="${o.id}">Message</button>` : ''}</span>`}
             </div>`).join('') : '<p class="small muted">No offers yet.</p>'}
         </div>`}
       ${!isOwner && p.status === 'active' ? `<div class="sticky-cta pd-cta"><button class="btn btn-outline" id="pd-msg">Message</button><button class="btn btn-primary" id="pd-offer">Make Offer</button></div>` : ''}
@@ -1540,6 +1540,13 @@ async function viewProduct(id) {
     box.querySelectorAll('[data-offer-decline]').forEach(b => b.addEventListener('click', async () => {
       try { await api('/api/offers/' + b.dataset.offerDecline, { method: 'PATCH', body: JSON.stringify({ status: 'declined' }) }); viewProduct(id); }
       catch (e2) { toast(e2.message, true); }
+    }));
+    box.querySelectorAll('[data-offer-msg]').forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        const { conversation_id } = await api('/api/offers/' + b.dataset.offerMsg + '/conversation', { method: 'POST' });
+        location.hash = '#/chat/' + conversation_id;
+      } catch (e2) { toast(e2.message, true); b.disabled = false; }
     }));
     const patchStatus = async (status, msg) => {
       try { await api('/api/products/' + p.id, { method: 'PATCH', body: JSON.stringify({ status }) }); toast(msg); viewProduct(id); }
@@ -1828,11 +1835,20 @@ async function viewSelling() {
   }).catch((e) => { const el = document.getElementById('sell-listings'); if (el) el.innerHTML = errorHtml(e.message); });
   api('/api/selling/offers').then((d) => {
     const rEl = document.getElementById('sell-offers');
-    if (rEl) rEl.innerHTML = d.received.length ? d.received.map(o => `
+    if (rEl) {
+      rEl.innerHTML = d.received.length ? d.received.map(o => `
       <div class="offer-row"><span><b>${fmtK(o.amount)}</b> for <a href="#/product/${o.product_id}">${esc(o.product_title)}</a>
         <span class="small muted" style="display:block">from ${esc(o.buyer_name)} · ${esc(relTime(o.created_at))}</span></span>
-        <span class="badge badge-app-${o.status === 'accepted' ? 'accepted' : o.status === 'pending' ? 'pending' : 'declined'}">${esc(o.status)}</span></div>`).join('')
+        <span class="btn-row"><span class="badge badge-app-${o.status === 'accepted' ? 'accepted' : o.status === 'pending' ? 'pending' : 'declined'}">${esc(o.status)}</span>${['pending', 'accepted'].includes(o.status) ? `<button class="btn btn-sm btn-outline" data-offer-msg="${o.id}">Message</button>` : ''}</span></div>`).join('')
       : '<p class="small muted">No offers received yet.</p>';
+      rEl.querySelectorAll('[data-offer-msg]').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          const { conversation_id } = await api('/api/offers/' + b.dataset.offerMsg + '/conversation', { method: 'POST' });
+          location.hash = '#/chat/' + conversation_id;
+        } catch (e) { toast(e.message, true); b.disabled = false; }
+      }));
+    }
     const mEl = document.getElementById('sell-myoffers');
     if (mEl) mEl.innerHTML = d.made.length ? d.made.map(o => `
       <div class="offer-row"><span><b>${fmtK(o.amount)}</b> for <a href="#/product/${o.product_id}">${esc(o.product_title)}</a>
