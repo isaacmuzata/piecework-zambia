@@ -669,27 +669,33 @@ function dedupeJobs(jobs) {
 function jobCard(job) {
   const saved = isSaved(job.id);  const area = job.area && job.area.toLowerCase() !== String(job.city || '').toLowerCase() ? job.area : '';
   const statusBadge = job.status === 'open' ? '' : `<span class="badge badge-status-${esc(job.status)}">${esc(job.status)}</span>`;
-  const urgentBadge = job.is_urgent ? `<span class="badge badge-urgent">Urgent</span>` : '';
+  const urgentBadge = job.is_urgent ? `<span class="badge jc-urgent">⚡ Urgent</span>` : '';
   const draftBadge = job.is_draft ? `<span class="badge badge-draft">Draft</span>` : '';
-  const durText = job.expected_duration || (job.pay_type && job.pay_type !== 'per_job' ? (PAY_LABEL[job.pay_type] || '').replace('per ', '') : '');
+  const [catIc, catBg] = catStyle(job.category);
+  const payPer = PAY_LABEL[job.pay_type] || 'per job';
+  const durText = job.expected_duration || '';
   return `
-  <article class="job-card" data-job="${job.id}" tabindex="0" role="link" aria-label="${esc(job.title)}">
-    ${job.cover_photo ? `<img class="job-cover" src="${esc(job.cover_photo)}" alt="" loading="lazy">` : jobThumb(job.category)}
+  <article class="job-card jc" data-job="${job.id}" tabindex="0" role="link" aria-label="${esc(job.title)}">
+    <div class="jc-media">
+      ${job.cover_photo ? `<img class="jc-img" src="${esc(job.cover_photo)}" alt="" loading="lazy">` : `<div class="jc-fallback" style="background:${catBg}">${icon(catIc)}<span>${esc(job.category)}</span></div>`}
+      <span class="jc-media-badges">${urgentBadge}${statusBadge}${draftBadge}</span>
+      <span class="jc-media-actions">
+        <button class="job-share" data-share="${job.id}" data-title="${esc(job.title)}" aria-label="Share this job">${icon('share')}</button>
+        <button class="job-save ${saved ? 'saved' : ''}" data-save="${job.id}" aria-label="Save this job" aria-pressed="${saved ? 'true' : 'false'}">${icon('heart')}</button>
+      </span>
+    </div>
     <div class="job-body">
       <h3>${esc(job.title)}</h3>
-      <div class="job-meta">
-        <span>${icon('pin')}${esc(job.city)}${area ? ' · ' + esc(area) : ''}${job.distance_km != null ? ` · ${esc(fmtKm(job.distance_km))} away` : ''}</span>
-      </div>
-      <div class="pay">${kwacha(job.pay_amount)}${durText ? `<small style="font-weight:600;color:var(--gray)"> · ${esc(durText)}</small>` : ''} ${statusBadge} ${urgentBadge} ${draftBadge}</div>
+      <div class="jc-pin">${icon('pin')}<span>${esc(job.city)}${area ? ' · ' + esc(area) : ''}${job.distance_km != null ? ` · ${esc(fmtKm(job.distance_km))} away` : ''}</span></div>
+      <div class="jc-pay"><span class="jc-price">${kwacha(job.pay_amount)}</span><span class="jc-per">${esc(payPer)}</span>${durText ? `<span class="jc-dur">${esc(durText)}</span>` : ''}</div>
       <div class="job-meta">
         <span>${icon('tag')}${esc(job.category)}</span>
         <span>${icon('users')}${job.workers_needed || 1} worker${Number(job.workers_needed || 1) === 1 ? '' : 's'}</span>
         <span>${esc(relTime(job.created_at))}</span>
       </div>
-      ${job.poster ? `<div class="job-poster">${avatarHtml(job.poster, 'xs')}<span>Posted by <b>${esc(job.poster.name)}</b></span>${job.poster.verified ? '<span class="verified-inline">✓ Verified Poster</span>' : ''}<span style="margin-left:auto">${stars(job.poster.rating_avg || 0)} <span class="muted">(${job.poster.rating_count || 0})</span></span></div>` : ''}
+      ${job.poster ? `<div class="job-poster">${avatarHtml(job.poster, 'xs')}<span>Posted by <b>${esc(job.poster.name)}</b></span>${job.poster.verified ? '<span class="verified-inline">✓ Verified</span>' : ''}<span style="margin-left:auto">${stars(job.poster.rating_avg || 0)} <span class="muted">(${job.poster.rating_count || 0})</span></span></div>` : ''}
+      <span class="jc-apply">${job.status === 'open' ? 'Apply' : 'View job'}</span>
     </div>
-    <button class="job-share" data-share="${job.id}" data-title="${esc(job.title)}" aria-label="Share this job">${icon('share')}</button>
-    <button class="job-save ${saved ? 'saved' : ''}" data-save="${job.id}" aria-label="Save this job" aria-pressed="${saved ? 'true' : 'false'}">${icon('heart')}</button>
   </article>`;
 }
 
@@ -846,29 +852,26 @@ async function viewHome() {
   const first = currentUser.name.split(' ')[0];
   app.innerHTML = `
   <div class="view">
-    <div class="home-head">
-      <div class="home-town">${icon('pin')}<span>${esc(currentUser.city || 'Zambia')}</span></div>
-      <h1>${daypart()}, ${esc(first)} 👋</h1>
-      <p class="muted" style="margin:0 0 10px">Find work, hire workers, buy and sell. Get things done.</p>
-      <div class="searchbar">${icon('search')}<input id="home-q" type="search" placeholder="Search jobs, products, services" aria-label="Search jobs, products and people"></div>
-    </div>
-    <section class="hero-card">
-      <div class="hero-copy">
-        <h2>Find Reliable Help Near You</h2>
-        <p>Hire trusted workers for everyday tasks, or find work in ${esc(currentUser.city || 'your area')}.</p>
-        <a class="btn btn-primary" href="#/workers">Find Workers</a>
+    <section class="hero95">
+      <div class="home-town">${icon('pin')}<span>${esc(currentUser.city || 'Zambia')}</span><span class="hero95-hello">${daypart()}, ${esc(first)} 👋</span></div>
+      <h1><span id="hero-rot">Find work</span> near you.</h1>
+      <p>Piece work and a local marketplace for Zambia. Free for workers, always.</p>
+      <div class="searchbar">${icon('search')}<input id="home-q" type="search" placeholder="Try cleaning, painting or phones" aria-label="Search jobs, products and people"></div>
+      <div class="hero95-photos">
+        <div class="hero95-photo"><img src="/img/landing/cleaner-pro.jpg" alt="Cleaning work" fetchpriority="high"><span>Cleaning</span></div>
+        <div class="hero95-photo"><img src="/img/landing/construction.jpg" alt="Construction work" loading="lazy"><span>Construction &amp; labour</span></div>
+        <div class="hero95-photo"><img src="/img/landing/gardening.jpg" alt="Gardening work" loading="lazy"><span>Gardening</span></div>
+        <div class="hero95-photo"><img src="/img/landing/zambia-man.jpg" alt="A Zambian worker" loading="lazy"><span>People open to work</span></div>
       </div>
-      <img class="hero-img" src="/img/landing/hero-pro.jpg" alt="A trusted PieceWork professional" loading="lazy">
     </section>
-    <div class="qa4">
-      <a class="qa4-item" href="#/post"><span class="qa4-ico" style="background:#E6F7F0;color:#0B8562">${icon('plus')}</span>Post a Job</a>
-      <a class="qa4-item" href="#/workers"><span class="qa4-ico" style="background:#E3EBFE;color:#2563EB">${icon('users')}</span>Find Workers</a>
-      <a class="qa4-item" href="#/market"><span class="qa4-ico" style="background:#FEF3D8;color:#B45309">${icon('tag')}</span>Marketplace</a>
-      <a class="qa4-item" href="#/saved"><span class="qa4-ico" style="background:#FDE8E8;color:#C81E1E">${icon('heart')}</span>Saved</a>
+    <div class="entry-cards">
+      <a class="entry-card" href="#/jobs"><span class="entry-ico">${icon('briefcase')}</span><span class="entry-text"><b>Find work</b><span>Piece work a few kilometres from home</span></span>${icon('chevR')}</a>
+      <a class="entry-card" href="#/post"><span class="entry-ico">${icon('users')}</span><span class="entry-text"><b>Hire help</b><span>Post a job. People nearby apply</span></span>${icon('chevR')}</a>
+      <a class="entry-card" href="#/market"><span class="entry-ico">${icon('tag')}</span><span class="entry-text"><b>Buy &amp; sell</b><span>Phones, furniture, produce and more</span></span>${icon('chevR')}</a>
     </div>
     <div class="page" style="padding-top:6px">
       <div id="home-ads"></div>
-      <div class="section-title"><span>Popular Services</span><a href="#/categories">See all</a></div>
+      <div class="section-title"><span>Browse by kind of work</span><a href="#/categories">All categories</a></div>
       <div class="svc-strip">
         ${[['Cleaning', 'Home Cleaning', 'cleaning', 'sparkles', '#E6F7F0', '#0B8562'], ['Gardening', 'Gardening &amp; Landscaping', 'gardening', 'leaf', '#E6F7F0', '#0B8562'], ['Plumbing', 'Plumbing', 'plumbing', 'wrench', '#E3EBFE', '#2563EB'], ['Construction & Labor', 'Construction &amp; Repairs', 'construction', 'hammer', '#FEF3D8', '#B45309'], ['Moving Help', 'Moving &amp; Heavy Lifting', 'moving', 'truck', '#FDE8E8', '#C81E1E'], ['Painting', 'Painting', 'painting', 'paint', '#EFE9FE', '#6D28D9']].map(([cat, label, img, ic, tint, color]) => `
           <div class="svc-card" data-cat-link="${esc(cat)}" tabindex="0" role="link" aria-label="Browse ${esc(cat)} jobs">
@@ -885,23 +888,41 @@ async function viewHome() {
       <div class="section-title"><span>${getLoc() ? 'Jobs Near You' : 'Recent Jobs'}</span><a href="#/jobs">See all</a></div>
       <div id="home-jobs">${skeletonCards(3)}</div>
       <div id="home-picks"></div>
-      <div class="card safety-card" style="margin-top:18px">
-        <div class="safety-ico">${icon('shield')}</div>
-        <div>
-          <b>Stay safe on PieceWork</b>
-          <ul>
-            <li>Meet in a public or familiar place first</li>
-            <li>Agree the pay before any work starts</li>
-            <li>Never send money in advance to a stranger</li>
-          </ul>
-          <a class="small" href="#/how">Help and safety</a>
-        </div>
+      <div class="section-title"><span>How it works</span><a href="#/how">More detail</a></div>
+      <div class="steps">
+        <div class="card"><div class="step-n">1</div><div><h4>Sign up free</h4><p>Your name, phone, a photo and a selfie.</p></div></div>
+        <div class="card"><div class="step-n">2</div><div><h4>Find work or hire</h4><p>Apply in one tap, or post a job with photos.</p></div></div>
+        <div class="card"><div class="step-n">3</div><div><h4>Get it done, then rate</h4><p>Both sides rate each other. Good work gets noticed.</p></div></div>
+      </div>
+      <div class="safety-dark">
+        <span class="sd-kicker">Stay safe</span>
+        <h3>Three rules that keep everyone safe.</h3>
+        <div class="sd-row">${icon('users')}<div><b>Meet in public for first jobs</b><span>And for viewing items you buy</span></div></div>
+        <div class="sd-row">${icon('wallet')}<div><b>Never pay to get work</b><span>Signing up is free for workers, always</span></div></div>
+        <div class="sd-row">${icon('shield')}<div><b>Report anything that feels wrong</b><span>Real jobs never ask for money up front</span></div></div>
+        <a class="small" href="#/how">Help and safety</a>
+      </div>
+      <div class="cta-final">
+        <h3>Your next job is a few kilometres away.</h3>
+        <p>Post a job in about two minutes, or find work near you today.</p>
+        <div class="btn-row"><a class="btn btn-primary" href="#/post">Post a job</a><a class="btn btn-outline" href="#/jobs">Find work</a></div>
       </div>
     </div>
   </div>`;
 
   const q = document.getElementById('home-q');
   mountAdsBanner('home-ads');
+  // Rotating hero headline (deed demo): Find work / Hire help / Buy & sell.
+  const rotEl = document.getElementById('hero-rot');
+  if (rotEl) {
+    const words = ['Find work', 'Hire help', 'Buy & sell'];
+    let ri = 0;
+    const rotTimer = setInterval(() => {
+      if (!document.body.contains(rotEl)) { clearInterval(rotTimer); return; }
+      ri = (ri + 1) % words.length;
+      rotEl.textContent = words[ri];
+    }, 2600);
+  }
   // Giveaway promo — only when a round is active.
   api('/api/giveaways/current').then(({ giveaway }) => {
     const slot = document.getElementById('gw-promo');
@@ -1006,8 +1027,7 @@ async function viewSearch() {
   const q = (new URLSearchParams((location.hash.split('?')[1] || '')).get('q') || '').trim();
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Search</h1>
-    <p class="page-sub">${q ? `Results for "${esc(q)}"` : 'Search jobs and people.'}</p>
+    <div class="page-band"><h1 class="page-title">Search</h1><p class="page-sub">${q ? `Results for "${esc(q)}"` : 'Search jobs and people.'}</p></div>
     <form class="search-again" id="search-form">
       <div class="searchbar">${icon('search')}<input id="search-q" type="search" value="${esc(q)}" placeholder="Search jobs, skills or people" aria-label="Search again"></div>
       <button class="btn btn-primary" type="submit">Search</button>
@@ -1238,15 +1258,19 @@ async function viewBrowse() {
 /** Looking for Work — public directory of opted-in worker profiles. */
 function workerCard(w) {
   const skillList = String(w.skills || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 4);
+  const verified = (w.badges || []).includes('verified');
+  const otherBadges = (w.badges || []).filter(b => b !== 'verified');
   return `
-  <article class="job-card" data-worker="${w.id}" tabindex="0" role="link" aria-label="${esc(w.name)}">
-    ${avatarHtml(w, 'md')}
+  <article class="job-card worker-card" data-worker="${w.id}" tabindex="0" role="link" aria-label="${esc(w.name)}">
+    ${avatarHtml(w, 'lg')}
+    <span class="wk-open">${icon('check')} Open to work</span>
     <div class="job-body">
       <h3>${esc(w.name)}</h3>
-      <div class="job-meta"><span>${icon('pin')}<b>${esc(w.city)}</b></span>${w.rating_count ? `<span>${stars(w.rating_avg)} <b>${Number(w.rating_avg).toFixed(1)}</b></span>` : ''}</div>
-      ${trustBadgesHtml(w.badges, w.vouch_count)}
-      ${w.has_intro_video ? `<div class="job-meta"><span class="tbadge tb-vouched">▶ Intro video</span></div>` : ''}
-      ${skillList.length ? `<div class="job-meta"><span>${icon('tag')}${skillList.map(esc).join(' · ')}</span></div>` : ''}
+      <div class="wk-line">${verified ? '<span class="verified-inline">✓ Verified Member</span>' : ''}${w.rating_count ? `<span class="wk-rate">${stars(w.rating_avg)} <b>${Number(w.rating_avg).toFixed(1)}</b> <span class="muted">(${w.rating_count} reviews)</span></span>` : ''}</div>
+      <div class="wk-line muted">${icon('pin')}<span>${esc(w.city)}</span></div>
+      ${trustBadgesHtml(otherBadges, w.vouch_count)}
+      ${w.has_intro_video ? `<div class="job-meta" style="justify-content:center"><span class="tbadge tb-vouched">▶ Intro video</span></div>` : ''}
+      ${skillList.length ? `<div class="wk-skills">${skillList.map(s => `<span class="tag">${esc(s)}</span>`).join('')}</div>` : ''}
       ${w.bio ? `<p class="worker-bio">${esc(w.bio)}</p>` : ''}
     </div>
   </article>`;
@@ -1255,8 +1279,7 @@ function workerCard(w) {
 async function viewWorkers() {
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Find Workers</h1>
-    <p class="page-sub">Workers who marked themselves open to work. Search by name or skill, and tap a card for the full profile.</p>
+    <div class="page-band"><h1 class="page-title">Find Workers</h1><p class="page-sub">Workers who marked themselves open to work. Search by name or skill, and tap a card for the full profile.</p></div>
     <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="wk-q" type="search" placeholder="Search name, skill or town" aria-label="Search workers"></div>
     <div class="field" style="max-width:320px">
       <select id="wk-city" aria-label="Filter by city"><option value="">All cities</option>${CITIES.map(c => `<option>${esc(c)}</option>`).join('')}</select>
@@ -1314,6 +1337,8 @@ function productCard(p) {
       ${p.cover_photo
         ? `<img src="${esc(p.cover_photo)}" alt="${esc(p.title)}" loading="lazy">`
         : `<div class="job-thumb product-thumb">${icon('tag')}</div>`}
+      <span class="pg-cond">${esc(p.condition)}</span>
+      ${p.view_count ? `<span class="pg-views">${icon('eye')}${p.view_count}</span>` : ''}
       <button class="job-save product-share" data-share-product="${p.id}" data-title="${esc(p.title)}" aria-label="Share this item">${icon('share')}</button>
       <button class="job-save ${savedP ? 'saved' : ''}" data-psave="${p.id}" aria-label="Save this item" aria-pressed="${savedP ? 'true' : 'false'}">${icon('heart')}</button>
     </div>
@@ -1321,8 +1346,9 @@ function productCard(p) {
       <h3>${esc(p.title)}</h3>
       <div class="product-price">${fmtK(p.price)}${p.negotiable ? ' <span class="neg-pill">Negotiable</span>' : ''}</div>
       <div class="pg-meta">${icon('pin')}<span>${esc(p.city)}${p.area ? ' · ' + esc(p.area) : ''}${p.distance_km != null ? ' · ' + p.distance_km + ' km away' : ''}</span></div>
-      <div class="pg-meta"><span class="badge badge-cond">${esc(p.condition)}</span>${p.status !== 'active' ? `<span class="badge badge-status-${p.status === 'sold' ? 'completed' : 'cancelled'}">${esc(p.status)}</span>` : ''}</div>
+      ${p.status !== 'active' ? `<div class="pg-meta"><span class="badge badge-status-${p.status === 'sold' ? 'completed' : 'cancelled'}">${esc(p.status)}</span></div>` : ''}
       ${p.business ? `<div class="pg-meta">by <b>${esc(p.business.name)}</b>${p.business.verified ? ' ✓' : ''}</div>` : ''}
+      ${currentUser && currentUser.id === p.seller_id ? '<span class="pg-msg mine">Your listing</span>' : '<span class="pg-msg">Message seller</span>'}
     </div>
   </article>`;
 }
@@ -1330,8 +1356,7 @@ function productCard(p) {
 async function viewMarket() {
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Marketplace</h1>
-    <p class="page-sub">Buy and sell with people near you. You pay the seller directly, PieceWork never handles the money.</p>
+    <div class="page-band"><h1 class="page-title">Marketplace</h1><p class="page-sub">Buy and sell with people near you. You pay the seller directly, PieceWork never handles the money.</p></div>
     <div id="market-ads"></div>
     ${currentUser ? `<a class="btn btn-primary" href="#/sell" style="margin-bottom:12px">${icon('plus')} Sell an item</a>
     <a class="btn btn-outline" href="#/selling" style="margin-bottom:12px">My selling</a>` : ''}
@@ -3103,8 +3128,7 @@ async function viewPost() {
   if (!requireAuth('#/post')) return;
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Post a Job</h1>
-    <p class="page-sub">Have work that needs doing? Describe it here and nearby workers will apply. <b>Looking for work yourself?</b> Do not post here — <a href="#/profile">tick &ldquo;I&rsquo;m looking for work&rdquo; in your profile</a> instead.</p>
+    <div class="page-band"><h1 class="page-title">Post a Job</h1><p class="page-sub">Have work that needs doing? Describe it here and nearby workers will apply. <b>Looking for work yourself?</b> Do not post here — <a href="#/profile">tick &ldquo;I&rsquo;m looking for work&rdquo; in your profile</a> instead.</p></div>
     <div class="card">${jobFormHtml()}</div>
     ${momoNoteHtml()}
   </div></div>`;
@@ -3992,6 +4016,7 @@ async function viewUser(id) {
         ${avatarHtml(user, 'lg')}
         <h2>${esc(user.name)}</h2>
         <div class="sub">${esc(user.city)} · ${stars(user.rating_avg)} (${user.rating_count} reviews)</div>
+        ${user.open_to_work ? '<div style="margin-top:8px"><span class="wk-open light">● Open to work</span></div>' : ''}
         ${trustBadgesHtml(user.badges, user.vouch_count)}
         <div style="margin-top:12px"><button class="btn btn-sm btn-outline" id="share-profile-btn">${icon('share')}Share profile</button></div>
       </div>
@@ -4119,8 +4144,7 @@ async function viewUser(id) {
 function viewCategories() {
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Explore Categories</h1>
-    <p class="page-sub">Find piece work that matches your skills.</p>
+    <div class="page-band"><h1 class="page-title">Explore Categories</h1><p class="page-sub">Find piece work that matches your skills.</p></div>
     <div class="cat-grid">
       ${CATEGORIES.map(c => {
         const [ic, bg] = catStyle(c);
@@ -4148,8 +4172,7 @@ async function viewSaved() {
   const ids = getSaved();
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Saved</h1>
-    <p class="page-sub">Jobs and items you saved for later, kept on this device.</p>
+    <div class="page-band"><h1 class="page-title">Saved</h1><p class="page-sub">Jobs and items you saved for later, kept on this device.</p></div>
     <div class="section-title"><span>Saved jobs</span></div>
     <div id="saved-list">${loadingHtml()}</div>
     <div class="section-title"><span>Saved items</span></div>
@@ -4828,8 +4851,7 @@ let supTicketFilter = 'open';
 function viewHow() {
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">Help &amp; Support</h1>
-    <p class="page-sub">Ask Zac the bot, chat with support, or open a ticket.</p>
+    <div class="page-band"><h1 class="page-title">Help &amp; Support</h1><p class="page-sub">Ask Zac the bot, chat with support, or open a ticket.</p></div>
 
     <div class="card">
       <h3 style="margin-top:0">Ask Zac</h3>
