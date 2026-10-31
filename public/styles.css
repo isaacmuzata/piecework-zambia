@@ -15,6 +15,7 @@
   --gray:#5B6B82;
   --gray-soft:#8CA0B5;
   --amber:#F59E0B;--cta:#1E8A44;
+  --error:#B91C1C;
   --line:#E2E8F0;
   --radius:22px;
   --shadow:0 6px 24px rgba(11,31,59,.09);
@@ -375,7 +376,8 @@ img.avatar{display:block}
 .stars svg.on{fill:var(--amber);stroke:var(--amber)}
 .hint{font-size:12.5px;color:var(--gray);margin-top:6px}
 .hint-inline{font-weight:400;color:var(--gray);font-size:12.5px}
-.field-error{color:#b91c1c;font-size:13px;margin-top:6px;font-weight:600}
+.field-error{color:var(--error);font-size:13px;margin-top:6px;font-weight:600}
+.code-input{font-size:22px;font-weight:800;letter-spacing:.35em;text-align:center}
 .field .invalid,.field input.invalid,.field textarea.invalid,.field select.invalid{border-color:#fca5a5;box-shadow:0 0 0 3px rgba(185,28,28,.08)}
 
 /* ---------- profile ---------- */
@@ -624,6 +626,7 @@ img.avatar{display:block}
   --green-tint:#132E4D;
   --fill:#1B3358;
   --amber-tint:#2A2113;
+  --error:#FCA5A5;
   --line:#22385C;
   --shadow:0 6px 24px rgba(0,0,0,.45);
   --shadow-sm:0 2px 10px rgba(0,0,0,.35);

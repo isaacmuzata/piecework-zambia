@@ -324,6 +324,33 @@ const SCHEMA = [
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
   `CREATE INDEX IF NOT EXISTS idx_resets_user ON password_resets(user_id)`,
+  // Signup phone verification (v97): registration is stored here first and
+  // only becomes a users row after the code texted to the phone is redeemed.
+  // The code itself is sha256-hashed, single use, short-lived and limited to
+  // five attempts, mirroring password_resets. One pending signup per phone;
+  // starting again for the same phone overwrites the previous attempt.
+  `CREATE TABLE IF NOT EXISTS pending_registrations (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone          TEXT NOT NULL UNIQUE,
+    name           TEXT NOT NULL,
+    password_hash  TEXT NOT NULL,
+    city           TEXT NOT NULL,
+    open_to_work   INTEGER NOT NULL DEFAULT 0,
+    ref_code       TEXT DEFAULT '',
+    device_id      TEXT DEFAULT '',
+    signup_ip      TEXT DEFAULT '',
+    ip_duplicate   INTEGER NOT NULL DEFAULT 0,
+    avatar         TEXT NOT NULL,
+    selfie         TEXT NOT NULL,
+    code_hash      TEXT NOT NULL,
+    expires_at     TEXT NOT NULL,
+    used_at        TEXT,
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    last_sent_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_pending_registrations_phone ON pending_registrations(phone)`,
   // SMS notification log (2026-10-23): every event notification attempt is
   // recorded. 'skipped' when no Africa's Talking creds are configured,
   // 'sent'/'failed' from the provider result when they are.

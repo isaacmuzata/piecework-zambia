@@ -4503,7 +4503,7 @@ function viewRegister() {
   app.innerHTML = `
   <div class="view"><div class="page" style="max-width:420px;margin:0 auto">
     <h1 class="page-title">Join PieceWork</h1>
-    <p class="page-sub">Free to join. Find work or find workers in minutes.</p>
+    <p class="page-sub">Free to join. First we text you a code to prove the number is yours, then your account opens.</p>
     ${invRef ? `<div class="card" style="border:2px solid var(--green);background:var(--green-tint)">
       <b>🎉 You were invited by a friend!</b>
       <p class="small muted" style="margin:6px 0 0">Create your account and they earn entries into the giveaway draw.</p>
@@ -4554,8 +4554,25 @@ function viewRegister() {
             </div>
           </div>
         </div>
-        <button class="btn btn-primary full" type="submit">Create account</button>
+        <button class="btn btn-primary full" type="submit">Text me my signup code</button>
       </form>
+      <div id="reg-verify" style="display:none;margin-top:18px;border-top:1px solid var(--line);padding-top:18px">
+        <h2 style="margin:0 0 6px;font-size:var(--fs-lg)">Check your phone</h2>
+        <p class="small muted" style="margin:0 0 14px">We sent a 6-digit code to <b id="reg-code-phone" style="color:var(--ink)"></b>. It expires in 30 minutes. Enter it here to finish creating your account.</p>
+        <form id="reg-verify-form" novalidate>
+          <div class="field">
+            <label for="rg-code">6-digit signup code</label>
+            <input name="code" id="rg-code" class="code-input" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code">
+          </div>
+          <button class="btn btn-primary full" type="submit">Verify and create account</button>
+        </form>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-outline" type="button" id="reg-resend" disabled>Resend code</button>
+          <button class="btn btn-outline" type="button" id="reg-change-number">Change number</button>
+        </div>
+        <p class="small muted" id="reg-resend-note" style="text-align:center;margin:10px 0 0" aria-live="polite"></p>
+        <p class="small muted" id="reg-sms-note" style="text-align:center;margin:8px 0 0;display:none">No text arrived? <a id="reg-wa-link" href="#" target="_blank" rel="noopener" style="font-weight:700">Message us on WhatsApp</a></p>
+      </div>
     </div>
     <p style="text-align:center">Already registered? <a href="#/login" style="font-weight:700">Sign in</a></p>
   </div></div>`;
@@ -4578,6 +4595,50 @@ function viewRegister() {
   };
   wirePhotoPicker('rg-av-btn', 'rg-av-file', 'rg-av-preview', (v) => { regAvatar = v; }, 256, true);
   wirePhotoPicker('rg-sf-btn', 'rg-sf-file', 'rg-sf-preview', (v) => { regSelfie = v; }, 512, false);
+
+  // Step 2 state: the number the pending signup (and its code) belongs to.
+  const verifyWrap = document.getElementById('reg-verify');
+  const verifyForm = document.getElementById('reg-verify-form');
+  const resendBtn = document.getElementById('reg-resend');
+  const resendNote = document.getElementById('reg-resend-note');
+  let pendingPhone = '';
+  let resendTimer = null;
+  function startResendCountdown(seconds) {
+    let remaining = Math.max(0, parseInt(seconds, 10) || 0);
+    if (resendTimer) clearInterval(resendTimer);
+    const tick = () => {
+      if (remaining > 0) {
+        resendBtn.disabled = true;
+        resendNote.textContent = `You can request another code in ${remaining} second${remaining === 1 ? '' : 's'}.`;
+        remaining--;
+      } else {
+        resendBtn.disabled = false;
+        resendNote.textContent = 'No code yet? Check your texts, then request another code.';
+        if (resendTimer) clearInterval(resendTimer);
+        resendTimer = null;
+      }
+    };
+    tick();
+    if (remaining >= 0 && !resendBtn.disabled) return;
+    resendTimer = setInterval(tick, 1000);
+  }
+  function showVerifyStep(start) {
+    pendingPhone = start.phone || '';
+    document.getElementById('reg-code-phone').textContent = pendingPhone;
+    const smsNote = document.getElementById('reg-sms-note');
+    if (start.whatsapp) {
+      document.getElementById('reg-wa-link').href = waLink(start.whatsapp,
+        'Hello PieceWork, I need a signup code for ' + pendingPhone);
+      smsNote.style.display = 'block';
+    } else {
+      smsNote.style.display = 'none';
+    }
+    form.style.display = 'none';
+    verifyWrap.style.display = 'block';
+    startResendCountdown(start.resend_after_seconds || 60);
+    document.getElementById('rg-code').focus();
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = form.querySelector('button[type=submit]');
@@ -4590,18 +4651,68 @@ function viewRegister() {
       if (!regSelfie) throw { message: 'Please take a verification selfie.', fields: { selfie: 'A verification selfie is required.' } };
       payload.avatar = regAvatar;
       payload.selfie = regSelfie;
-      const { user } = await api('/api/auth/register', {
+      const start = await api('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      currentUser = user; renderChrome();
-      toast(`Welcome to PieceWork, ${user.name.split(' ')[0]}!`);
-      afterAuthRedirect();
+      btn.disabled = false;
+      showVerifyStep(start);
+      toast(start.message || 'Signup code sent. Check your texts.');
     } catch (err2) {
       showFieldErrors(form, err2.fields);
       toast(err2.message, true);
       btn.disabled = false;
     }
+  });
+
+  verifyForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = verifyForm.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const { user } = await api('/api/auth/register/verify', {
+        method: 'POST',
+        body: JSON.stringify({ phone: pendingPhone, code: verifyForm.code.value.trim() }),
+      });
+      if (resendTimer) clearInterval(resendTimer);
+      currentUser = user; renderChrome();
+      toast(`Welcome to PieceWork, ${user.name.split(' ')[0]}!`);
+      afterAuthRedirect();
+    } catch (err2) {
+      showFieldErrors(verifyForm, err2.fields || { code: err2.message });
+      toast(err2.message, true);
+      btn.disabled = false;
+    }
+  });
+
+  resendBtn.addEventListener('click', async () => {
+    if (!pendingPhone) return;
+    resendBtn.disabled = true;
+    try {
+      const start = await api('/api/auth/register/resend', {
+        method: 'POST',
+        body: JSON.stringify({ phone: pendingPhone }),
+      });
+      const smsNote = document.getElementById('reg-sms-note');
+      if (start.whatsapp) {
+        document.getElementById('reg-wa-link').href = waLink(start.whatsapp,
+          'Hello PieceWork, I need a signup code for ' + pendingPhone);
+        smsNote.style.display = 'block';
+      }
+      toast(start.message || 'A new signup code is on its way.');
+      startResendCountdown(start.resend_after_seconds || 60);
+    } catch (err2) {
+      toast(err2.message, true);
+      if (err2.status === 429) startResendCountdown(60);
+      else resendBtn.disabled = false;
+    }
+  });
+
+  document.getElementById('reg-change-number').addEventListener('click', () => {
+    if (resendTimer) clearInterval(resendTimer);
+    verifyWrap.style.display = 'none';
+    form.style.display = 'block';
+    document.getElementById('rg-phone').focus();
   });
 }
 

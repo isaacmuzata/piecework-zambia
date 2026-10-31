@@ -459,6 +459,11 @@ const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, standardHead
 app.use('/api/', apiLimiter);
 
 // ---------------------------------------------------------------- auth routes
+// Signup is two steps since v97: this endpoint validates the registration
+// exactly as the old one-step signup did, stores it as a pending
+// registration, and texts a code to the phone. NO users row is created
+// here. The account is created only by POST /api/auth/register/verify
+// after the code is redeemed (see the signup verification section below).
 app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   const { name, phone, password, city, avatar, selfie } = req.body || {};
   const fields = {};
@@ -473,6 +478,8 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   if (selfieErr) fields.selfie = selfieErr;
   if (Object.keys(fields).length) return err(res, 422, 'Please fix the highlighted fields.', fields);
 
+  // Duplicate numbers are refused BEFORE any code is generated or sent:
+  // no SMS cost for numbers that already have an account.
   const exists = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
   if (exists) return err(res, 409, 'This number is already registered. Try signing in.');
 
@@ -481,13 +488,22 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   const devExists = await getOne('SELECT id FROM users WHERE device_id = ?', [deviceId]);
   if (devExists) return err(res, 409, 'This device already has a PieceWork account. Please sign in instead.');
 
-  // Referral: ?ref=CODE captured on the signup page.
-  let referredBy = null;
-  const refCode = req.body && typeof req.body.ref === 'string' ? req.body.ref.trim().toUpperCase() : '';
-  if (refCode) {
-    const referrer = await getOne('SELECT id, referral_code FROM users WHERE referral_code = ?', [refCode]);
-    if (referrer) referredBy = Number(referrer.id);
+  // A code was just sent to this number: make the sender wait out the
+  // resend cooldown instead of overwriting the pending signup.
+  const pending = await getPendingRegistration(normPhone);
+  if (pending) {
+    const waitSeconds = signupResendWaitSeconds(pending);
+    if (waitSeconds > 0) {
+      return res.status(429).json({
+        error: 'We just sent a signup code to this number. Please wait a minute, then try again.',
+        retry_after_seconds: waitSeconds,
+      });
+    }
   }
+
+  // Referral: ?ref=CODE captured on the signup page. Stored with the
+  // pending signup and resolved when the account is actually created.
+  const refCode = req.body && typeof req.body.ref === 'string' ? req.body.ref.trim().toUpperCase() : '';
 
   // Same IP as an existing account: allowed to register, but flagged and
   // disqualified from giveaways (mobile networks share IPs, so no hard block).
@@ -498,32 +514,44 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
     if (ipExists) ipDuplicate = 1;
   }
 
-  // Unique referral code for the new account.
-  let myCode = generateReferralCode();
-  for (let i = 0; i < 5; i++) {
-    const clash = await getOne('SELECT id FROM users WHERE referral_code = ?', [myCode]);
-    if (!clash) break;
-    myCode = generateReferralCode();
-  }
-
+  const code = newResetCode();
   const hash = bcrypt.hashSync(String(password), 12);
   const openToWork = (req.body && req.body.open_to_work) ? 1 : 0;
-  const info = await runWrite(
-    `INSERT INTO users (name, phone, password_hash, city, open_to_work,
-      referral_code, referred_by, device_id, signup_ip, ip_duplicate,
-      avatar, selfie, selfie_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-    [String(name).trim(), normPhone, hash, city, openToWork,
-     myCode, referredBy, deviceId, ip || '', ipDuplicate,
-     String(avatar), String(selfie)]
+  // One live pending signup per device: starting a signup for a different
+  // number on this browser retires the earlier unfinished attempt.
+  await runWrite('DELETE FROM pending_registrations WHERE device_id = ? AND phone != ?', [deviceId, normPhone]);
+  await runWrite(
+    `INSERT INTO pending_registrations
+       (name, phone, password_hash, city, open_to_work, ref_code,
+        device_id, signup_ip, ip_duplicate, avatar, selfie,
+        code_hash, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', ?))
+     ON CONFLICT(phone) DO UPDATE SET
+       name = excluded.name, password_hash = excluded.password_hash,
+       city = excluded.city, open_to_work = excluded.open_to_work,
+       ref_code = excluded.ref_code, device_id = excluded.device_id,
+       signup_ip = excluded.signup_ip, ip_duplicate = excluded.ip_duplicate,
+       avatar = excluded.avatar, selfie = excluded.selfie,
+       code_hash = excluded.code_hash,
+       expires_at = datetime('now', ?), used_at = NULL, attempts = 0,
+       last_sent_at = datetime('now'), updated_at = datetime('now')`,
+    [String(name).trim(), normPhone, hash, city, openToWork, refCode,
+     deviceId, ip || '', ipDuplicate, String(avatar), String(selfie),
+     hashResetCode(code), `+${SIGNUP_CODE_TTL_MIN} minutes`, `+${SIGNUP_CODE_TTL_MIN} minutes`]
   );
-  const user = await getOne('SELECT * FROM users WHERE id = ?', [insertId(info)]);
-  setAuthCookie(res, signToken(user.id));
-  // Registration confirmation text (fire-and-forget; logged either way).
-  notifySms(user.id, 'welcome', composeSms(
-    (n) => `Hi, this is Zac, your assistant. Welcome to PieceWork Zambia, ${n}. Your account is ready: pieceworkzambia.com`,
-    user.name, ''), user.phone).catch(() => {});
-  res.status(201).json({ user: publicUser(user) });
+  const smsSent = await sendSignupCodeSms(normPhone, code);
+  res.status(200).json({
+    ok: true,
+    verification_required: true,
+    phone: normPhone,
+    sms_sent: smsSent,
+    expires_minutes: SIGNUP_CODE_TTL_MIN,
+    resend_after_seconds: SIGNUP_CODE_RESEND_COOLDOWN_SECONDS,
+    whatsapp: smsSent ? null : SUPPORT_WHATSAPP,
+    message: smsSent
+      ? `We sent a 6-digit signup code to ${normPhone} by SMS. Enter it to finish creating your account.`
+      : 'Request received. If the text does not arrive, message us on WhatsApp and we will send your signup code.',
+  });
 }));
 
 app.post('/api/auth/login', loginIpLimiter, loginLimiter, ah(async (req, res) => {
@@ -579,6 +607,11 @@ app.post('/api/auth/logout', (req, res) => {
 const SUPPORT_WHATSAPP = process.env.SUPPORT_WHATSAPP || '+14437417068';
 const RESET_CODE_TTL_MIN = 30;
 const RESET_MAX_ATTEMPTS = 5;
+// Signup phone verification (v97) deliberately mirrors the reset-code
+// policy: same 6-digit codes, same 30-minute expiry, same 5-attempt limit.
+const SIGNUP_CODE_TTL_MIN = RESET_CODE_TTL_MIN;
+const SIGNUP_CODE_MAX_ATTEMPTS = RESET_MAX_ATTEMPTS;
+const SIGNUP_CODE_RESEND_COOLDOWN_SECONDS = 60;
 const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true, handler: tooManyTries, keyGenerator: ipPhoneKey });
 const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, handler: tooManyTries, keyGenerator: ipPhoneKey });
 
@@ -665,6 +698,196 @@ function composeSms(build, name, title) {
   while (msg.length > 160 && n.length) { n = n.slice(0, -1).trimEnd(); msg = build(n, t); }
   return msg.slice(0, 160);
 }
+
+// ------------------------------------------------- signup phone verification
+// v97: a pending registration (created by POST /api/auth/register) becomes
+// an account only when the code texted to that phone is redeemed here.
+// Codes mirror the password-reset machinery: crypto-random 6 digits,
+// sha256-hashed at rest, 30-minute expiry, burned after 5 wrong attempts,
+// and every send is written to sms_log under kind 'signup_code'.
+function signupCodeMessage(code) {
+  return `Hi, this is Zac, your assistant. Your PieceWork Zambia signup code is ${code}. It expires in ${SIGNUP_CODE_TTL_MIN} minutes. Do not share it.`;
+}
+
+/** Send a signup code over the Africa's Talking transport and log the
+ * attempt in sms_log, mirroring the forgot-password sender. Returns true
+ * only when the provider accepted the text. Never throws. */
+async function sendSignupCodeSms(phone, code) {
+  const message = signupCodeMessage(code);
+  if (!smsEnabled()) {
+    await runWrite(
+      'INSERT INTO sms_log (user_id, phone, kind, body, status) VALUES (?, ?, ?, ?, ?)',
+      [null, phone, 'signup_code', message, 'skipped']
+    ).catch(() => {});
+    return false;
+  }
+  try {
+    await sendSms(phone, message);
+    await runWrite(
+      'INSERT INTO sms_log (user_id, phone, kind, body, status) VALUES (?, ?, ?, ?, ?)',
+      [null, phone, 'signup_code', message, 'sent']
+    ).catch(() => {});
+    return true;
+  } catch (e) {
+    console.error('Signup SMS failed:', e && e.message);
+    await runWrite(
+      'INSERT INTO sms_log (user_id, phone, kind, body, status, error) VALUES (?, ?, ?, ?, ?, ?)',
+      [null, phone, 'signup_code', message, 'failed', String((e && e.message) || e).slice(0, 300)]
+    ).catch(() => {});
+    return false;
+  }
+}
+
+/** Fetch the pending signup for a phone, with the seconds since its code
+ * was last sent computed by SQLite (whose clock wrote the timestamps). */
+async function getPendingRegistration(phone) {
+  return getOne(
+    `SELECT *, CAST((julianday('now') - julianday(last_sent_at)) * 86400 AS INTEGER) AS seconds_since_sent
+     FROM pending_registrations WHERE phone = ?`,
+    [phone]
+  );
+}
+
+/** Seconds left on the resend cooldown for a pending signup (0 = may send). */
+function signupResendWaitSeconds(pending) {
+  const elapsed = Number(pending && pending.seconds_since_sent);
+  if (!Number.isFinite(elapsed)) return 0;
+  return Math.max(0, SIGNUP_CODE_RESEND_COOLDOWN_SECONDS - elapsed);
+}
+
+// Step 2: redeem the signup code. Creates the users row exactly as the old
+// one-step registration did, burns the pending signup (single use), and
+// signs the new member in with the usual pw_token cookie.
+app.post('/api/auth/register/verify', resetLimiter, ah(async (req, res) => {
+  const { phone, code } = req.body || {};
+  const normPhone = normalizePhone(phone);
+  if (!normPhone) return err(res, 422, 'Enter a valid phone number.', { phone: 'Enter a valid phone number.' });
+  if (!/^\d{6}$/.test(String(code || '').trim())) {
+    return err(res, 422, 'Enter the 6-digit code we sent you.', { code: 'Enter the 6-digit code we sent you.' });
+  }
+  const pending = await getPendingRegistration(normPhone);
+  if (!pending) {
+    return err(res, 401, 'That code is not valid. Start signup again.', { code: 'That code is not valid. Start signup again.' });
+  }
+  if (Number(pending.attempts || 0) >= SIGNUP_CODE_MAX_ATTEMPTS) {
+    if (!pending.used_at) {
+      await runWrite("UPDATE pending_registrations SET used_at = datetime('now') WHERE id = ?", [pending.id]);
+    }
+    return err(res, 401, 'Too many wrong tries. Request a new code.', { code: 'Too many wrong tries. Request a new code.' });
+  }
+  if (new Date(pending.expires_at).getTime() < Date.now()) {
+    await runWrite("UPDATE pending_registrations SET used_at = datetime('now') WHERE id = ?", [pending.id]);
+    return err(res, 401, 'That code has expired. Request a new one.', { code: 'That code has expired. Request a new one.' });
+  }
+  if (pending.used_at) {
+    return err(res, 401, 'That code is not valid. Request a new one.', { code: 'That code is not valid. Request a new one.' });
+  }
+  if (!timingSafeEqual(pending.code_hash, hashResetCode(String(code).trim()))) {
+    const attempts = Number(pending.attempts || 0) + 1;
+    if (attempts >= SIGNUP_CODE_MAX_ATTEMPTS) {
+      await runWrite("UPDATE pending_registrations SET attempts = ?, used_at = datetime('now') WHERE id = ?", [attempts, pending.id]);
+      return err(res, 401, 'Too many wrong tries. Request a new code.', { code: 'Too many wrong tries. Request a new code.' });
+    }
+    await runWrite('UPDATE pending_registrations SET attempts = ? WHERE id = ?', [attempts, pending.id]);
+    return err(res, 401, 'Wrong code. Check the text and try again.', { code: 'Wrong code. Check the text and try again.' });
+  }
+
+  // The code is right. Re-run the account-creation guards against the
+  // live users table: the number (or this browser) may have registered
+  // through another path while the code was in flight.
+  const exists = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
+  if (exists) {
+    await runWrite('DELETE FROM pending_registrations WHERE id = ?', [pending.id]);
+    return err(res, 409, 'This number is already registered. Try signing in.');
+  }
+  const deviceId = req.deviceId;
+  const devExists = await getOne('SELECT id FROM users WHERE device_id = ?', [deviceId]);
+  if (devExists) return err(res, 409, 'This device already has a PieceWork account. Please sign in instead.');
+
+  // Referral: resolve the code stored with the pending signup.
+  let referredBy = null;
+  if (pending.ref_code) {
+    const referrer = await getOne('SELECT id, referral_code FROM users WHERE referral_code = ?', [pending.ref_code]);
+    if (referrer) referredBy = Number(referrer.id);
+  }
+
+  // Same IP as an existing account: allowed, but flagged and
+  // disqualified from giveaways (mobile networks share IPs).
+  const ip = clientIp(req);
+  let ipDuplicate = 0;
+  if (ip) {
+    const ipExists = await getOne('SELECT id FROM users WHERE signup_ip = ? AND signup_ip != ?', [ip, '']);
+    if (ipExists) ipDuplicate = 1;
+  }
+
+  // Unique referral code for the new account.
+  let myCode = generateReferralCode();
+  for (let i = 0; i < 5; i++) {
+    const clash = await getOne('SELECT id FROM users WHERE referral_code = ?', [myCode]);
+    if (!clash) break;
+    myCode = generateReferralCode();
+  }
+
+  const info = await runWrite(
+    `INSERT INTO users (name, phone, password_hash, city, open_to_work,
+      referral_code, referred_by, device_id, signup_ip, ip_duplicate,
+      avatar, selfie, selfie_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    [pending.name, normPhone, pending.password_hash, pending.city, pending.open_to_work,
+     myCode, referredBy, deviceId, ip || '', ipDuplicate,
+     pending.avatar, pending.selfie]
+  );
+  const user = await getOne('SELECT * FROM users WHERE id = ?', [insertId(info)]);
+  // Single use: the pending signup (and its code) is gone for good.
+  await runWrite('DELETE FROM pending_registrations WHERE id = ?', [pending.id]);
+  setAuthCookie(res, signToken(user.id));
+  // Registration confirmation text (fire-and-forget; logged either way).
+  notifySms(user.id, 'welcome', composeSms(
+    (n) => `Hi, this is Zac, your assistant. Welcome to PieceWork Zambia, ${n}. Your account is ready: pieceworkzambia.com`,
+    user.name, ''), user.phone).catch(() => {});
+  res.status(201).json({ user: publicUser(user) });
+}));
+
+// Resend: issue a fresh code for a pending signup. The new code replaces
+// the old hash, so only the newest code can ever be redeemed. Guarded by
+// the register rate limiter plus a per-signup cooldown.
+app.post('/api/auth/register/resend', registerLimiter, ah(async (req, res) => {
+  const normPhone = normalizePhone(req.body && req.body.phone);
+  if (!normPhone) return err(res, 422, 'Enter a valid phone number.', { phone: 'Enter a valid phone number.' });
+  const exists = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
+  if (exists) return err(res, 409, 'This number is already registered. Try signing in.');
+  const pending = await getPendingRegistration(normPhone);
+  if (!pending) {
+    return err(res, 404, 'No signup is waiting for that number. Start signup again.', { phone: 'No signup is waiting for that number. Start signup again.' });
+  }
+  const waitSeconds = signupResendWaitSeconds(pending);
+  if (waitSeconds > 0) {
+    return res.status(429).json({
+      error: 'We just sent a signup code to this number. Please wait a minute, then try again.',
+      retry_after_seconds: waitSeconds,
+    });
+  }
+  const code = newResetCode();
+  await runWrite(
+    `UPDATE pending_registrations
+     SET code_hash = ?, expires_at = datetime('now', ?), used_at = NULL,
+         attempts = 0, last_sent_at = datetime('now'), updated_at = datetime('now')
+     WHERE id = ?`,
+    [hashResetCode(code), `+${SIGNUP_CODE_TTL_MIN} minutes`, pending.id]
+  );
+  const smsSent = await sendSignupCodeSms(normPhone, code);
+  res.status(200).json({
+    ok: true,
+    phone: normPhone,
+    sms_sent: smsSent,
+    expires_minutes: SIGNUP_CODE_TTL_MIN,
+    resend_after_seconds: SIGNUP_CODE_RESEND_COOLDOWN_SECONDS,
+    whatsapp: smsSent ? null : SUPPORT_WHATSAPP,
+    message: smsSent
+      ? `We sent a new 6-digit signup code to ${normPhone} by SMS.`
+      : 'Request received. If the text does not arrive, message us on WhatsApp and we will send your signup code.',
+  });
+}));
 
 // ---------------------------------------------------------------- Web Push
 // Browser push notifications (2026-10-23): the same events that send an
