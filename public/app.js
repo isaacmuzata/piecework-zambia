@@ -1104,8 +1104,8 @@ async function viewBrowse() {
       ${CATEGORIES.map(c => `<button class="chip ${browseState.category === c ? 'active' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
     </div>
     <div class="filters" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
-      <input id="f-paymin" type="number" min="0" inputmode="numeric" placeholder="Min K" value="${esc(browseState.payMin)}" aria-label="Minimum pay" style="width:92px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
-      <input id="f-paymax" type="number" min="0" inputmode="numeric" placeholder="Max K" value="${esc(browseState.payMax)}" aria-label="Maximum pay" style="width:92px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
+      <input id="f-paymin" type="number" min="0" inputmode="numeric" placeholder="Min K" value="${esc(browseState.payMin)}" aria-label="Minimum pay" style="width:92px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
+      <input id="f-paymax" type="number" min="0" inputmode="numeric" placeholder="Max K" value="${esc(browseState.payMax)}" aria-label="Maximum pay" style="width:92px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
       <select id="f-duration" aria-label="Filter by expected duration" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
         <option value="">Any duration</option>
         ${JOB_DURATIONS.map(d => `<option ${browseState.duration === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
@@ -1185,7 +1185,7 @@ async function viewBrowse() {
         }
       });
     } else {
-      slot.innerHTML = `<select id="f-maxkm" aria-label="Maximum distance" style="flex:1;padding:11px 14px;border-radius:14px;border:1.5px solid var(--line);font-family:inherit;font-weight:700;font-size:14px;background:#fff;color:var(--ink)">
+      slot.innerHTML = `<select id="f-maxkm" aria-label="Maximum distance" style="flex:1;padding:11px 14px;border-radius:14px;border:1.5px solid var(--line);font-family:inherit;font-weight:700;font-size:14px;background:var(--card);color:var(--ink)">
           ${[5, 10, 25, 50, 100].map(d => `<option value="${d}" ${browseState.maxKm === d ? 'selected' : ''}>within ${d} km</option>`).join('')}
           <option value="any" ${browseState.maxKm === 'any' ? 'selected' : ''}>any distance</option>
         </select>
@@ -4504,7 +4504,7 @@ function viewRegister() {
   <div class="view"><div class="page" style="max-width:420px;margin:0 auto">
     <h1 class="page-title">Join PieceWork</h1>
     <p class="page-sub">Free to join. Find work or find workers in minutes.</p>
-    ${invRef ? `<div class="card" style="border:2px solid var(--green);background:#f0faf4">
+    ${invRef ? `<div class="card" style="border:2px solid var(--green);background:var(--green-tint)">
       <b>🎉 You were invited by a friend!</b>
       <p class="small muted" style="margin:6px 0 0">Create your account and they earn entries into the giveaway draw.</p>
     </div>` : ''}
