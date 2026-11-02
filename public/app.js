@@ -1521,9 +1521,10 @@ async function viewProduct(id) {
         </div>` : '<p class="small muted" style="margin-top:10px">This item is not on sale right now.</p>'}
         ` : `
         <div class="btn-row owner-actions" style="margin-top:12px">
+          ${p.status === 'active' ? `<button class="btn btn-primary btn-sold" id="btn-mark-sold">Mark as sold</button>` : ''}
           <button class="btn btn-outline" data-share-product="${p.id}" data-title="${esc(p.title)}">${icon('share')} Share</button>
           <a class="btn btn-outline" href="#/product/${p.id}/edit">${icon('edit')} Edit listing</a>
-          ${p.status === 'active' ? `<button class="btn btn-outline" id="btn-mark-sold">Mark as sold</button><button class="btn btn-outline" id="btn-hide">Hide</button>` : ''}
+          ${p.status === 'active' ? `<button class="btn btn-outline" id="btn-hide">Hide</button>` : ''}
           ${p.status === 'hidden' ? `<button class="btn btn-outline" id="btn-unhide">Show again</button>` : ''}
           <button class="btn btn-outline" id="btn-delete-product">Remove</button>
         </div>

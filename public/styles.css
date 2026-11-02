@@ -933,9 +933,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 .form-actions .btn-primary{flex:1}
 [data-theme="dark"] .form-actions{background:rgba(8,20,40,.94)}
 
-/* Redesign: product owner actions wrap neatly instead of squeezing into ovals */
-.owner-actions{flex-wrap:wrap}
-.owner-actions .btn{flex:1 1 28%;padding:10px 12px;font-size:13.5px;white-space:nowrap}
+/* Product owner actions: two-column grid so every label stays readable;
+   "Mark as sold" is the primary action and spans the full width on top */
+.owner-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.owner-actions .btn{width:100%;padding:12px 10px;font-size:14px;white-space:normal;line-height:1.25}
+.owner-actions .btn-sold{grid-column:1/-1}
 
 /* Password visibility eye */
 .pw-wrap{position:relative;display:block}
