@@ -30,6 +30,7 @@ const ICONS = {
   star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
   chevL: '<path d="M15 18l-6-6 6-6"/>',
   chevR: '<path d="M9 18l6-6-6-6"/>',
+  chevD: '<path d="M6 9l6 6 6-6"/>',
   back: '<path d="M19 12H5M12 19l-7-7 7-7"/>',
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
   x: '<path d="M18 6L6 18M6 6l12 12"/>',
@@ -525,18 +526,6 @@ function wirePasswordEyes(scope) {
   });
 }
 
-/** Dark mode: <html data-theme> is set early in index.html; this keeps the
- * topbar toggle in sync and persists the choice on the device. */
-function currentTheme() {
-  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
-}
-function setTheme(t) {
-  document.documentElement.dataset.theme = t;
-  try { localStorage.setItem('pwz-theme', t); } catch { /* private mode */ }
-  const btn = document.getElementById('theme-btn');
-  if (btn) btn.textContent = t === 'dark' ? '☀️' : '🌙';
-}
-
 function renderChrome() {
   const menuBtn = document.getElementById('menu-btn');
   if (menuBtn && !menuBtn.dataset.wired) {
@@ -544,74 +533,86 @@ function renderChrome() {
     menuBtn.dataset.wired = '1';
     menuBtn.addEventListener('click', openDrawer);
   }
-  const themeBtn = document.getElementById('theme-btn');
-  if (themeBtn && !themeBtn.dataset.wired) {
-    themeBtn.dataset.wired = '1';
-    themeBtn.addEventListener('click', () => setTheme(currentTheme() === 'dark' ? 'light' : 'dark'));
-  }
-  if (themeBtn) themeBtn.textContent = currentTheme() === 'dark' ? '☀️' : '🌙';
-  if (currentUser) {
-    topbarAuth.innerHTML =
-      `<a href="#/profile" style="display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:700;font-size:14px">${avatarHtml(currentUser, 'sm')}<span>${esc(currentUser.name.split(' ')[0])}</span></a>`;
-  } else {
-    topbarAuth.innerHTML = `<a class="btn btn-sm btn-outline" href="#/login">Sign in</a>`;
-  }
   const h = location.hash || '#/';
-  const nav = document.getElementById('drawer-nav');
-  const items = [
-    ['#/', 'home', 'Home'],
-    ['#/jobs', 'briefcase', 'Find Work'],
-    ['#/workers', 'users', 'Looking for Work'],
-    ['#/post', 'plus', 'Hire Workers'],
-    ['#/categories', 'grid', 'Categories'],
-    ['#/market', 'tag', 'Marketplace'],
-    ['#/businesses', 'grid', 'Businesses'],
-    ['#/messages', 'message', 'Messages'],
-  ];
+  const staff = currentUser && (currentUser.is_admin || currentUser.is_support);
+  document.body.classList.toggle('signed-in', !!currentUser);
+
+  // Top bar, right side. "Hire workers" shows at desktop width only (CSS);
+  // phones reach it from the drawer and the home screen. Signed in, phones
+  // get the avatar as a link to the profile and desktops get an account
+  // menu holding the pages that no longer fit in the nav row.
+  const hireBtn = `<a class="btn btn-sm tb-cta" href="#/post">${icon('plus')}<span>Hire workers</span></a>`;
   if (currentUser) {
-    items.push(['#/dashboard', 'clipboard', 'My Gigs']);
-    items.push(['#/profile', 'user', 'Profile']);
-    if (currentUser.is_admin || currentUser.is_support) items.push(['#/admin', 'shield', 'Admin']);
+    topbarAuth.innerHTML = `${hireBtn}
+      <a class="acct-link" href="#/profile" aria-label="Your profile">${chromeAvatar(currentUser)}</a>
+      <div class="acct">
+        <button class="acct-btn" id="acct-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="acct-menu">${chromeAvatar(currentUser)}<span class="acct-name">${esc(currentUser.name.split(' ')[0])}</span>${icon('chevD')}</button>
+        <div class="acct-menu" id="acct-menu" hidden>
+          <div class="acct-menu-head"><b>${esc(currentUser.name)}</b>${currentUser.city ? `<span>${esc(currentUser.city)}</span>` : ''}</div>
+          <a href="#/profile">${icon('user')}<span>Profile</span></a>
+          <a href="#/dashboard">${icon('clipboard')}<span>My Gigs</span></a>
+          <a href="#/saved">${icon('bookmark')}<span>Saved jobs</span></a>
+          ${staff ? `<a href="#/admin">${icon('shield')}<span>Admin</span></a>` : ''}
+          <a href="#/how">${icon('help')}<span>Help &amp; Support</span></a>
+          <button type="button" id="acct-logout">${icon('logout')}<span>Log out</span></button>
+        </div>
+      </div>`;
+    const acctBtn = document.getElementById('acct-btn');
+    const acctMenu = document.getElementById('acct-menu');
+    acctBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setAcctMenu(acctMenu.hidden);
+    });
+    acctMenu.addEventListener('click', (e) => { if (e.target.closest('a')) setAcctMenu(false); });
+    document.getElementById('acct-logout').addEventListener('click', logout);
+  } else {
+    topbarAuth.innerHTML = `${hireBtn}<a class="btn btn-sm btn-outline" href="#/login">Sign in</a>`;
   }
-  items.push(['#/how', 'help', 'Help & Support']);
-  nav.innerHTML = items.map(([href, ic, label]) =>
-    `<a href="${href}" class="${h === href ? 'active' : ''}">${icon(ic)}<span>${label}</span></a>`
-  ).join('') + (currentUser
-    ? `<button class="drawer-logout" id="drawer-logout">${icon('logout')}<span>Log out</span></button>`
-    : '');
+
+  // Drawer (phones and tablets): account first, then the pages in groups.
+  const nav = document.getElementById('drawer-nav');
+  const link = (href, ic, label, extra = '') =>
+    `<a href="${href}" class="${h === href ? 'active' : ''}">${icon(ic)}<span>${label}</span>${extra}</a>`;
+  const group = (title, links) => `<div class="drawer-group"><h4>${title}</h4>${links.join('')}</div>`;
+  nav.innerHTML =
+    (currentUser
+      ? `<a class="drawer-user" href="#/profile">${chromeAvatar(currentUser)}<span><b>${esc(currentUser.name)}</b><small>View your profile</small></span>${icon('chevR')}</a>`
+      : `<div class="drawer-auth"><a class="btn btn-primary" href="#/register">Create account</a><a class="btn drawer-btn-light" href="#/login">Sign in</a></div>`)
+    + `<a class="drawer-cta" href="#/post">${icon('plus')}<span>Hire workers</span></a>`
+    + group('Work', [
+      link('#/', 'home', 'Home'),
+      link('#/jobs', 'briefcase', 'Find Work'),
+      link('#/workers', 'users', 'Looking for Work'),
+      link('#/categories', 'grid', 'Categories'),
+    ])
+    + group('Buy and sell', [link('#/market', 'tag', 'Marketplace'), link('#/businesses', 'grid', 'Businesses')])
+    + (currentUser ? group('Your account', [
+      link('#/messages', 'message', 'Messages', '<span class="drawer-badge js-msg-badge" hidden></span>'),
+      link('#/dashboard', 'clipboard', 'My Gigs'),
+      link('#/saved', 'bookmark', 'Saved jobs'),
+      ...(staff ? [link('#/admin', 'shield', 'Admin')] : []),
+    ]) : '')
+    + group('Support', [link('#/how', 'help', 'Help & Support'), link('#/about', 'info', 'About 2911 Jobs')])
+    + (currentUser ? `<button class="drawer-logout" id="drawer-logout">${icon('logout')}<span>Log out</span></button>` : '');
   const lo = document.getElementById('drawer-logout');
   if (lo) lo.addEventListener('click', logout);
 
-  // Desktop top nav (visible at >=900px via CSS).
+  // Desktop top nav (visible at >=900px via CSS). The logo goes home, and
+  // "Hire workers" is the button beside the account controls.
   const dnav = document.getElementById('desktop-nav');
   if (dnav) {
     const dMatch = (href) => {
-      if (href === '#/') return h === '#/' || h === '';
-      if (href === '#/jobs') return h === '#/jobs' || h.startsWith('#/job/') || h.startsWith('#/categories') || h.startsWith('#/saved');
+      if (href === '#/jobs') return h === '#/jobs' || h.startsWith('#/job/') || h.startsWith('#/categories') || h.startsWith('#/search');
       if (href === '#/messages') return h.startsWith('#/messages') || h.startsWith('#/chat/');
       if (href === '#/market') return h.startsWith('#/market') || h.startsWith('#/product/') || h.startsWith('#/sell') || h.startsWith('#/selling');
-      if (href === '#/profile') return h.startsWith('#/profile') || h.startsWith('#/user/') || h.startsWith('#/dashboard') || h.startsWith('#/login') || h.startsWith('#/register');
       return h.startsWith(href);
     };
-    const ditems = [
-      ['#/', 'Home'],
-      ['#/jobs', 'Find Work'],
-      ['#/workers', 'Looking for Work'],
-      ['#/post', 'Hire Workers'],
-      ['#/market', 'Marketplace'],
-      ['#/messages', 'Messages'],
-    ];
-    if (currentUser) {
-      ditems.push(['#/dashboard', 'My Gigs']);
-      ditems.push(['#/profile', 'Profile']);
-      if (currentUser.is_admin || currentUser.is_support) ditems.push(['#/admin', 'Admin']);
-    }
-    ditems.push(['#/how', 'Help']);
+    const ditems = currentUser
+      ? [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/messages', 'Messages'], ['#/dashboard', 'My Gigs']]
+      : [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/how', 'Help']];
     dnav.innerHTML = ditems.map(([href, label]) =>
-      `<a href="${href}" class="${dMatch(href) ? 'active' : ''}">${label}</a>`
-    ).join('') + (currentUser ? `<button class="dnav-logout" id="dnav-logout">Log out</button>` : '');
-    const dlo = document.getElementById('dnav-logout');
-    if (dlo) dlo.addEventListener('click', logout);
+      `<a href="${href}" class="${dMatch(href) ? 'active' : ''}">${label}${href === '#/messages' ? '<span class="dnav-badge js-msg-badge" hidden></span>' : ''}</a>`
+    ).join('');
   }
 
   // Tab bar: Home, Find Work, Marketplace (live since 2.0 M3),
@@ -628,17 +629,42 @@ function renderChrome() {
     },
   ];
   tabbar.innerHTML = tabs.map(t =>
-    `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}">${icon(t.ic)}<span>${t.label}</span>${t.href === '#/messages' ? '<span class="tab-badge" id="msg-badge" hidden></span>' : ''}</a>`
+    `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}">${icon(t.ic)}<span>${t.label}</span>${t.href === '#/messages' ? '<span class="tab-badge js-msg-badge" id="msg-badge" hidden></span>' : ''}</a>`
   ).join('');
   if (currentUser) {
     api('/api/messages/unread').then(({ unread }) => {
-      const b = document.getElementById('msg-badge');
-      if (!b) return;
-      if (unread > 0) { b.textContent = unread > 9 ? '9+' : unread; b.hidden = false; }
-      else b.hidden = true;
+      document.querySelectorAll('.js-msg-badge').forEach((b) => {
+        if (unread > 0) { b.textContent = unread > 9 ? '9+' : unread; b.hidden = false; }
+        else b.hidden = true;
+      });
     }).catch(() => {});
   }
 }
+
+/** Avatar for the menus: like avatarHtml but without the tap-to-zoom hook,
+ * so tapping it follows the link or opens the account menu. */
+function chromeAvatar(user) {
+  if (user.avatar) return `<img class="avatar sm" src="${esc(user.avatar)}" alt="">`;
+  return `<span class="avatar sm" aria-hidden="true">${esc((user.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+}
+
+function setAcctMenu(open) {
+  const menu = document.getElementById('acct-menu');
+  const btn = document.getElementById('acct-btn');
+  if (!menu || !btn) return;
+  menu.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+}
+// The account menu closes on any click outside it; Escape closes it and
+// the drawer.
+document.addEventListener('click', (e) => { if (!e.target.closest('.acct')) setAcctMenu(false); });
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const menu = document.getElementById('acct-menu');
+  if (menu && !menu.hidden) { setAcctMenu(false); document.getElementById('acct-btn').focus(); }
+  const drawer = document.getElementById('drawer');
+  if (drawer && !drawer.hidden) closeDrawer();
+});
 
 function requireAuth(next) {
   if (!currentUser) {
@@ -4717,68 +4743,381 @@ function viewRegister() {
   });
 }
 
-/** Landing page (signed-out home). */
-function viewLanding() {
-  const cats = ['Cleaning', 'Construction & Labor', 'Gardening', 'Painting', 'Delivery & Errands', 'Cooking & Catering'];
-  app.innerHTML = `
-  <div class="view">
-    <section class="hero">
-      <img class="bg" src="/img/landing/cleaner-pro.jpg" alt="A 2911 Jobs cleaning professional" fetchpriority="high">
-      <div class="hero-overlay"></div>
-      <div class="hero-content">
-        <span class="kicker">Zambia's piece-work marketplace</span>
-        <h1>Quick jobs.<br><span class="hl">Quick cash.</span></h1>
-        <p>Need a quick gig done today? Post it in minutes and hire helping hands near you. Looking for work? Find piece work and get paid by mobile money — as soon as the job is done.</p>
-        <div class="hero-ctas">
-          <a class="btn btn-primary" href="#/jobs">${icon('search')}Find work</a>
-          <a class="btn btn-outline" href="#/post">${icon('plus')}Hire workers</a>
-        </div>
-      </div>
-    </section>
-    <div class="landing">
-      <h2>Popular piece work</h2>
-      <p class="lede">Tap a category to see open jobs.</p>
-      <div class="cat-grid">
-        ${cats.map(c => {
-          const [ic, bg] = catStyle(c);
-          return `<div class="cat-card" data-cat-link="${esc(c)}" tabindex="0" role="link" aria-label="Browse ${esc(c)} jobs"><div class="cat-ico" style="background:${bg}">${icon(ic)}</div><b>${esc(c)}</b></div>`;
-        }).join('')}
-      </div>
-      <h2 style="margin-top:26px">How it works</h2>
-      <div class="steps">
-        <div class="card"><div class="step-n">1</div><div><h4>Browse gigs near you</h4><p>Jobs are matched by kilometres — nearest first. Or post a gig in minutes.</p></div></div>
-        <div class="card"><div class="step-n">2</div><div><h4>Apply in one tap</h4><p>Posters review applicants, check ratings, and hire.</p></div></div>
-        <div class="card"><div class="step-n">3</div><div><h4>Get paid by mobile money</h4><p>MTN Mobile Money or Airtel Money — the amount is agreed before you start.</p></div></div>
-      </div>
-      <div class="split" style="align-items:stretch">
-        <div class="card" style="flex:1">
-          <h3 style="margin-top:0">For workers</h3>
-          <p class="small muted">Free for workers, always. Create an account, find piece work near you, build your rating.</p>
-          <a class="btn btn-sm btn-primary" href="#/register">Join free</a>
-        </div>
-        <div class="card" style="flex:1">
-          <h3 style="margin-top:0">For posters</h3>
-          <p class="small muted">Need hands? Post the job with the pay in Kwacha and hire today.</p>
-          <a class="btn btn-sm btn-outline" href="#/post">Hire workers</a>
-        </div>
-      </div>
-      <div class="card" style="margin-top:14px;text-align:center">
-        <h3 style="margin-top:0">Built for Zambia's youth</h3>
-        <p class="small muted">2911 Jobs is a product of Isaac “Zac” Muzata — complementing government's efforts on unemployment, one job at a time.</p>
-        <a class="link-btn" href="#/about">Our story</a>
-      </div>
-      <p class="landing-foot">2911 Jobs · A product of Isaac Muzata (Zac), <a href="https://2911itservices.com" target="_blank" rel="noopener">2911 IT Services</a></p>
-    </div>
-  </div>`;
+/** Landing categories: [category, label, photo in /img/photos]. The photos
+ * are professional stock photos from Pexels (free to use, no credit needed). */
+const LANDING_CATS = [
+  ['Construction & Labor', 'Construction', 'construction'],
+  ['Cleaning', 'Cleaning', 'cleaning'],
+  ['Gardening', 'Gardening', 'gardening'],
+  ['Painting', 'Painting', 'painting'],
+  ['Bricklaying', 'Bricklaying', 'bricklaying'],
+  ['Delivery & Errands', 'Delivery', 'delivery'],
+  ['Carpentry', 'Carpentry', 'carpentry'],
+  ['Electrical', 'Electrical', 'electrical'],
+  ['Moving Help', 'Moving help', 'moving'],
+  ['Welding', 'Welding', 'welding'],
+  ['Plumbing', 'Plumbing', 'plumbing'],
+  ['Cooking & Catering', 'Cooking', 'cooking'],
+  ['Security & Ushering', 'Security', 'security'],
+];
+
+/** Category tiles on either landing open Find Work filtered to that category. */
+function wireLandingCats() {
   document.querySelectorAll('[data-cat-link]').forEach(el => {
-    const go = () => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
       browseState.category = el.dataset.catLink;
       browseState.q = ''; browseState.city = ''; browseState.page = 1;
       location.hash = '#/jobs';
-    };
-    el.addEventListener('click', go);
-    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    });
   });
+}
+
+/** The moving category strip. The tiles are listed twice so the strip can
+ * loop; the copy is hidden from screen readers and the keyboard. */
+function catStrip(id) {
+  const tiles = (copy) => LANDING_CATS.map(([cat, label, photo], i) => `
+    <a class="cat-tile" href="#/jobs" data-cat-link="${esc(cat)}"${copy ? ' tabindex="-1" aria-hidden="true"' : ''}${copy && i === 0 ? ' data-loop-start' : ''}>
+      <img src="/img/photos/${photo}.jpg" alt="" loading="lazy" width="360" height="360">
+      <span class="cat-tile-name">${label}${icon('chevR')}</span>
+    </a>`).join('');
+  return `
+    <div class="cat-strip-auto" id="${id}" aria-label="Job categories">
+      <div class="cat-track">${tiles(false)}${tiles(true)}</div>
+    </div>`;
+}
+
+/** Scrolls a catStrip() slowly sideways in a loop. Touch, hover and
+ * keyboard focus pause it, people can still swipe or scroll it, and it
+ * stays still for anyone who has reduced motion turned on. Returns a
+ * function that moves the strip one tile left (-1) or right (1). */
+function autoScrollStrip(el, speed = 0.03) {
+  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let hold = false, resumeAt = 0, last = 0, pos = el.scrollLeft, setTo = pos;
+  const tile = el.querySelector('.cat-tile');
+  const loopStart = el.querySelector('[data-loop-start]');
+  const period = () => (loopStart ? loopStart.offsetLeft - tile.offsetLeft : 0);
+  const tileStep = () => tile.offsetWidth + parseFloat(getComputedStyle(tile).marginRight);
+  const rest = (ms) => { resumeAt = performance.now() + ms; };
+  el.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') hold = true; });
+  el.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') { hold = false; rest(800); } });
+  el.addEventListener('touchstart', () => { hold = true; }, { passive: true });
+  el.addEventListener('touchend', () => { hold = false; rest(3000); }, { passive: true });
+  el.addEventListener('focusin', () => { hold = true; });
+  el.addEventListener('focusout', () => { hold = false; rest(1500); });
+  el.addEventListener('wheel', () => rest(3000), { passive: true });
+  const step = (t) => {
+    if (!el.isConnected) return;
+    const dt = last ? Math.min(t - last, 64) : 0;
+    last = t;
+    const p = period();
+    if (!still && !hold && t > resumeAt && !document.hidden && p > 0) {
+      // Pick up any scroll made some other way (keyboard, scrollbar, arrows).
+      if (Math.abs(el.scrollLeft - setTo) > 2) pos = el.scrollLeft;
+      pos += dt * speed;
+      if (pos >= p) pos -= p;
+      el.scrollLeft = pos;
+      setTo = el.scrollLeft;
+    } else {
+      // Someone is in control: follow them, and wrap once they are a tile
+      // past a full loop (the margin leaves room for the arrow's hop below).
+      pos = el.scrollLeft;
+      if (!hold && p > 0 && pos >= p + tileStep()) { pos -= p; el.scrollLeft = pos; }
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  return (dir) => {
+    const by = tileStep();
+    rest(4000);
+    // At the very start there is nothing to the left, so hop to the copy.
+    if (dir < 0 && el.scrollLeft < by) el.scrollLeft += period();
+    el.scrollBy({ left: dir * by, behavior: still ? 'auto' : 'smooth' });
+  };
+}
+
+/** True inside the installed app (Play Store app or home-screen install)
+ * or on a phone or tablet sized screen. Desktop browsers get the website. */
+function isAppView() {
+  const installed = window.matchMedia('(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)').matches
+    || window.navigator.standalone === true;
+  return installed || !window.matchMedia('(min-width: 900px)').matches;
+}
+
+/** Landing page (signed-out home): app screen or full website. */
+function viewLanding() {
+  if (isAppView()) viewLandingApp();
+  else viewLandingWeb();
+}
+
+/** Landing copy has no en or em dashes, even in job titles people type:
+ * "10:00\u201314:00" shows as "10:00 to 14:00", "house \u2014 truck" as "house, truck". */
+function noDash(s) {
+  return String(s ?? '')
+    .replace(/(\d)\s*(?:[\u2013\u2014]|--+)\s*(\d)/g, '$1 to $2')
+    .replace(/\s*(?:[\u2013\u2014]|--+)\s*/g, ', ')
+    .replace(/^,\s*|,\s*$/g, '');
+}
+
+/** Search box on either landing: a query goes to search, empty to Find Work. */
+function wireLandingSearch(formId, inputId) {
+  document.getElementById(formId).addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = document.getElementById(inputId).value.trim();
+    location.hash = v ? '#/search?q=' + encodeURIComponent(v) : '#/jobs';
+  });
+}
+
+/** Website landing for desktop browsers: hero with search, moving
+ * categories, how it works, recent jobs, safety, about, call to action and
+ * a full footer. */
+function viewLandingWeb() {
+  app.innerHTML = `
+  <div class="view lw">
+    <section class="lw-hero">
+      <div>
+        <p class="lw-eyebrow">Piece work and local services in Zambia</p>
+        <h1>Hire local workers or find piece work near you</h1>
+        <p class="lw-lead">Post a job with the pay in Kwacha, choose from the people who apply, and pay by mobile money once the work is done.</p>
+        <form class="lw-search" id="lw-search" role="search">
+          ${icon('search')}
+          <input id="lw-q" type="search" placeholder="What work are you looking for?" aria-label="Search jobs">
+          <button class="btn btn-primary" type="submit">Search jobs</button>
+        </form>
+        <div class="lw-hire">
+          <span>Need a job done?</span>
+          <a class="btn btn-outline" href="#/post">Post a job</a>
+          <a class="lw-more" href="#/workers">Browse workers${icon('chevR')}</a>
+        </div>
+        <ul class="lw-checks">
+          <li>${icon('check')}Free for workers</li>
+          <li>${icon('check')}Pay agreed before work starts</li>
+          <li>${icon('check')}MTN MoMo and Airtel Money</li>
+        </ul>
+      </div>
+      <figure class="lw-hero-media">
+        <img src="/img/photos/hero-tall.jpg" alt="A smiling builder in a hard hat at a construction site" width="960" height="1040" fetchpriority="high">
+      </figure>
+    </section>
+
+    <section class="lw-section">
+      <div class="lw-head">
+        <div>
+          <h2>Browse work by category</h2>
+          <p>Open jobs posted by households and businesses near you.</p>
+        </div>
+        <div class="lw-head-tools">
+          <a class="lw-more" href="#/categories">All categories${icon('chevR')}</a>
+          <button class="lw-arrow" type="button" id="lw-cats-prev" aria-label="Previous categories">${icon('chevL')}</button>
+          <button class="lw-arrow" type="button" id="lw-cats-next" aria-label="Next categories">${icon('chevR')}</button>
+        </div>
+      </div>
+      ${catStrip('lw-cats')}
+    </section>
+
+    <section class="lw-section">
+      <div class="lw-head">
+        <div>
+          <h2>How 2911 Jobs works</h2>
+          <p>Three steps, whether you are looking for work or hiring.</p>
+        </div>
+      </div>
+      <div class="lw-how">
+        <div class="lw-how-col">
+          <h3><span class="lw-how-ico">${icon('briefcase')}</span>Looking for work</h3>
+          <ol class="lw-steps">
+            <li><b>Create a free account</b><span>Add your name, phone number, a profile photo and a selfie so people know who they are hiring.</span></li>
+            <li><b>Apply for jobs near you</b><span>Jobs are sorted by distance, so the closest work is listed first.</span></li>
+            <li><b>Do the work and get paid</b><span>Agree the amount before you start. The person who hired you pays by mobile money.</span></li>
+          </ol>
+          <a class="btn btn-primary" href="#/register">Create a free account</a>
+        </div>
+        <div class="lw-how-col">
+          <h3><span class="lw-how-ico">${icon('users')}</span>Hiring</h3>
+          <ol class="lw-steps">
+            <li><b>Post the job</b><span>Describe the work, set the pay in Kwacha, and add the date and place.</span></li>
+            <li><b>Choose a worker</b><span>Compare applicants by their ratings, reviews and verified profile.</span></li>
+            <li><b>Pay and leave a rating</b><span>Pay what you agreed, then rate the worker so others can hire with confidence.</span></li>
+          </ol>
+          <a class="btn btn-outline" href="#/post">Post a job</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="lw-section" id="lw-jobs-wrap" hidden>
+      <div class="lw-head">
+        <div>
+          <h2>Recently posted jobs</h2>
+          <p>A few of the jobs open on 2911 Jobs right now.</p>
+        </div>
+        <a class="lw-more" href="#/jobs">See all jobs${icon('chevR')}</a>
+      </div>
+      <div class="lw-jobs" id="lw-jobs"></div>
+    </section>
+
+    <section class="lw-section">
+      <div class="lw-trust">
+        <div class="lw-trust-intro">
+          <h2>Safety comes first</h2>
+          <p>Every account is checked, and both sides can see who they are dealing with before any work starts.</p>
+          <a href="#/how">Read our safety advice${icon('chevR')}</a>
+        </div>
+        <div class="lw-trust-grid">
+          <div class="lw-trust-item">${icon('camera')}<div><b>Selfie check on every profile</b><span>A member of our team reviews each verification selfie before that person can be hired.</span></div></div>
+          <div class="lw-trust-item">${icon('star')}<div><b>Ratings from both sides</b><span>Workers and hirers rate each other after every job.</span></div></div>
+          <div class="lw-trust-item">${icon('phone')}<div><b>Phone numbers stay private</b><span>Contact details are shared only after a hirer accepts an application.</span></div></div>
+          <div class="lw-trust-item">${icon('shield')}<div><b>ID shown only to the hirer</b><span>A worker's NRC is visible only to the person who hired them and is deleted after 10 days.</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lw-section lw-about">
+      <img src="/img/photos/community.jpg" alt="A team of workers in hard hats and safety vests working together" width="960" height="720" loading="lazy">
+      <div>
+        <h2>Built for Zambia</h2>
+        <p>2911 Jobs is a product of 2911 IT Services, founded by Isaac Muzata. It was started to help young people across the country earn from their skills, and to support the national effort against unemployment, one job at a time.</p>
+        <a class="lw-more" href="#/about">Read our story${icon('chevR')}</a>
+      </div>
+    </section>
+
+    <section class="lw-section lw-cta">
+      <div>
+        <h2>Join 2911 Jobs</h2>
+        <p>Creating an account is free for workers. Posting a job takes about two minutes.</p>
+      </div>
+      <div class="lw-cta-btns">
+        <a class="btn btn-primary" href="#/register">Create a free account</a>
+        <a class="btn btn-outline" href="#/login">Sign in</a>
+      </div>
+    </section>
+
+    <footer class="lw-foot">
+      <div class="lw-foot-grid">
+        <div class="lw-foot-brand">
+          <div class="lw-foot-logo"><img src="/img/logo-tile.png" alt=""><b>2911 Jobs</b></div>
+          <p>A marketplace for piece work, day jobs and local services across Zambia.</p>
+          <a href="mailto:info@pieceworkzambia.com">info@pieceworkzambia.com</a>
+        </div>
+        <nav aria-label="Work">
+          <h4>Work</h4>
+          <a href="#/jobs">Find work</a>
+          <a href="#/post">Post a job</a>
+          <a href="#/workers">Browse workers</a>
+          <a href="#/categories">Categories</a>
+        </nav>
+        <nav aria-label="Marketplace">
+          <h4>Marketplace</h4>
+          <a href="#/market">Buy and sell</a>
+          <a href="#/businesses">Businesses</a>
+        </nav>
+        <nav aria-label="Company">
+          <h4>Company</h4>
+          <a href="#/about">About us</a>
+          <a href="#/how">Help and safety</a>
+          <a href="#/terms">Terms</a>
+          <a href="/privacy.html">Privacy</a>
+        </nav>
+      </div>
+      <div class="lw-foot-base">
+        <span>&copy; ${new Date().getFullYear()} 2911 Jobs. A product of <a href="https://2911itservices.com" target="_blank" rel="noopener">2911 IT Services</a>.</span>
+      </div>
+    </footer>
+  </div>`;
+  wireLandingSearch('lw-search', 'lw-q');
+  wireLandingCats();
+  const nudge = autoScrollStrip(document.getElementById('lw-cats'));
+  document.getElementById('lw-cats-prev').addEventListener('click', () => nudge(-1));
+  document.getElementById('lw-cats-next').addEventListener('click', () => nudge(1));
+  // Real open jobs as compact text cards; the section stays hidden when there are none.
+  api('/api/jobs').then((d) => {
+    const jobs = dedupeJobs(d.jobs).slice(0, 3);
+    const wrap = document.getElementById('lw-jobs-wrap');
+    const slot = document.getElementById('lw-jobs');
+    if (!wrap || !slot || !jobs.length) return;
+    slot.innerHTML = jobs.map((j) => {
+      const area = j.area && j.area.toLowerCase() !== String(j.city || '').toLowerCase() ? j.area : '';
+      return `
+      <a class="lw-job" href="#/job/${j.id}">
+        <span class="lw-job-cat">${esc(j.category)}</span>
+        <b class="lw-job-title">${esc(noDash(j.title))}</b>
+        <span class="lw-job-place">${icon('pin')}${esc(noDash(j.city))}${area ? ', ' + esc(noDash(area)) : ''}</span>
+        <span class="lw-job-foot">
+          <span class="lw-job-pay">${kwacha(j.pay_amount)} <small>${esc(PAY_LABEL[j.pay_type] || 'per job')}</small></span>
+          <span class="lw-job-time">${esc(relTime(j.created_at))}</span>
+        </span>
+      </a>`;
+    }).join('');
+    wrap.hidden = false;
+  }).catch(() => {});
+}
+
+/** App landing for phones and the installed app: one short screen. */
+function viewLandingApp() {
+  app.innerHTML = `
+  <div class="view lp">
+    <section class="lp-banner">
+      <img src="/img/photos/hero-wide.jpg" alt="A team of workers in hard hats and safety vests working together" width="1200" height="680" fetchpriority="high">
+      <div class="lp-banner-text">
+        <h1>Find work or hire help near you</h1>
+        <p>Pay is agreed up front and paid by mobile money.</p>
+      </div>
+    </section>
+
+    <form class="searchbar lp-search" id="lp-search" role="search">
+      ${icon('search')}<input id="lp-q" type="search" placeholder="Search jobs, e.g. cleaning" aria-label="Search jobs">
+    </form>
+
+    <div class="lp-actions">
+      <a class="lp-action" href="#/jobs"><span class="lp-action-ico">${icon('briefcase')}</span><b>Find work</b><span>Jobs near you</span></a>
+      <a class="lp-action" href="#/post"><span class="lp-action-ico">${icon('users')}</span><b>Hire workers</b><span>Post a job in minutes</span></a>
+    </div>
+
+    <div class="lp-title"><h2>Popular categories</h2><a href="#/categories">See all</a></div>
+    ${catStrip('lp-cats')}
+
+    <div id="lp-jobs-wrap" hidden>
+      <div class="lp-title"><h2>Latest jobs</h2><a href="#/jobs">See all</a></div>
+      <div class="lp-list" id="lp-jobs"></div>
+    </div>
+
+    <div class="lp-title"><h2>Why people use 2911 Jobs</h2></div>
+    <ul class="lp-trust">
+      <li><span class="lp-trust-ico">${icon('shield')}</span><span><b>Checked profiles</b>Every worker's selfie is reviewed by our team.</span></li>
+      <li><span class="lp-trust-ico">${icon('star')}</span><span><b>Ratings both ways</b>Workers and hirers rate each other after each job.</span></li>
+      <li><span class="lp-trust-ico">${icon('wallet')}</span><span><b>Mobile money</b>Pay or get paid with MTN MoMo or Airtel Money.</span></li>
+    </ul>
+
+    <section class="lp-join">
+      <h2>New to 2911 Jobs?</h2>
+      <p>Create a free account to apply for jobs or hire workers.</p>
+      <div class="lp-join-btns">
+        <a class="btn btn-primary" href="#/register">Create account</a>
+        <a class="btn lp-btn-light" href="#/login">Sign in</a>
+      </div>
+    </section>
+
+    <footer class="lp-foot">
+      <nav aria-label="About 2911 Jobs"><a href="#/about">About</a><a href="#/how">Help</a><a href="#/terms">Terms</a><a href="/privacy.html">Privacy</a></nav>
+      <p>&copy; ${new Date().getFullYear()} 2911 Jobs</p>
+    </footer>
+  </div>`;
+  wireLandingSearch('lp-search', 'lp-q');
+  wireLandingCats();
+  autoScrollStrip(document.getElementById('lp-cats'));
+  // Latest open jobs as list rows; the section stays hidden when there are none.
+  api('/api/jobs').then((d) => {
+    const jobs = dedupeJobs(d.jobs).slice(0, 3);
+    const wrap = document.getElementById('lp-jobs-wrap');
+    const slot = document.getElementById('lp-jobs');
+    if (!wrap || !slot || !jobs.length) return;
+    slot.innerHTML = jobs.map((j) => `
+      <a class="lp-row" href="#/job/${j.id}">
+        <span class="lp-row-main"><b>${esc(noDash(j.title))}</b><span>${esc(noDash(j.city))} · ${esc(relTime(j.created_at))}</span></span>
+        <span class="lp-row-pay"><b>${kwacha(j.pay_amount)}</b><small>${esc(PAY_LABEL[j.pay_type] || 'per job')}</small></span>
+        ${icon('chevR')}
+      </a>`).join('');
+    wrap.hidden = false;
+  }).catch(() => {});
 }
 
 function viewAbout() {
@@ -6796,6 +7135,11 @@ async function router() {
 }
 
 window.addEventListener('hashchange', router);
+// The signed-out landing swaps between the app screen and the website
+// when a browser window crosses the desktop width.
+window.matchMedia('(min-width: 900px)').addEventListener('change', () => {
+  if (!currentUser && /^#?\/?$/.test(location.hash)) viewLanding();
+});
 
 /* ---------------- global click delegation ---------------- */
 document.addEventListener('click', (e) => {

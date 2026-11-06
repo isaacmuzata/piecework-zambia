@@ -54,7 +54,7 @@ async function main() {
       lat: -15.3923, lng: 28.3281,
     },
     {
-      poster_id: bwalya, title: 'Help moving a 2-bedroom house — truck provided',
+      poster_id: bwalya, title: 'Help moving a 2-bedroom house, truck provided',
       category: 'Moving Help',
       description: 'Moving from Nkana East to Parklands this Saturday. Truck and driver provided; I need 3 strong people to load and offload furniture, boxes and appliances. Roughly 6 hours of work.',
       city: 'Kitwe', area: 'Nkana East', date_needed: inDays(2),
