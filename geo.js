@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Geography helpers for PieceWork Zambia.
+ * Geography helpers for 2911 Jobs.
  *
  * Jobs are matched by DISTANCE IN KILOMETRES. Every job and every user can
  * carry precise coordinates (lat/lng). When they don't, we fall back to the

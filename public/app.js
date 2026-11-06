@@ -1,5 +1,5 @@
 'use strict';
-/* PieceWork Zambia — vanilla JS single-page app. Hash-routed, no dependencies. */
+/* 2911 Jobs — vanilla JS single-page app. Hash-routed, no dependencies. */
 
 const CATEGORIES = [
   'Events Setup', 'Moving Help', 'Cleaning', 'Construction & Labor',
@@ -30,7 +30,6 @@ const ICONS = {
   star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
   chevL: '<path d="M15 18l-6-6 6-6"/>',
   chevR: '<path d="M9 18l6-6-6-6"/>',
-  chevD: '<path d="M6 9l6 6 6-6"/>',
   back: '<path d="M19 12H5M12 19l-7-7 7-7"/>',
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
   x: '<path d="M18 6L6 18M6 6l12 12"/>',
@@ -250,7 +249,7 @@ function openShareSheet({ heading, url, text, copiedMessage }) {
   });
   const more = overlay.querySelector('[data-act="share"]');
   if (more) more.addEventListener('click', () => {
-    navigator.share({ title: 'PieceWork Zambia', text, url }).catch(() => {});
+    navigator.share({ title: '2911 Jobs', text, url }).catch(() => {});
     close();
   });
   document.body.appendChild(overlay);
@@ -261,7 +260,7 @@ function shareJob(id, title) {
   openShareSheet({
     heading: 'Share this job',
     url,
-    text: '"' + title + '" — see this job on PieceWork Zambia',
+    text: '"' + title + '" — see this job on 2911 Jobs',
     copiedMessage: 'Job link copied. Paste it anywhere to share.',
   });
 }
@@ -271,7 +270,7 @@ function shareProduct(id, title) {
   openShareSheet({
     heading: 'Share this item',
     url,
-    text: '"' + title + '" — see this item on PieceWork Zambia',
+    text: '"' + title + '" — see this item on 2911 Jobs',
     copiedMessage: 'Product link copied. Paste it anywhere to share.',
   });
 }
@@ -281,7 +280,7 @@ function shareBusiness(slug, name) {
   openShareSheet({
     heading: 'Share this storefront',
     url,
-    text: '"' + name + '" — visit this storefront on PieceWork Zambia',
+    text: '"' + name + '" — visit this storefront on 2911 Jobs',
     copiedMessage: 'Storefront link copied. Paste it anywhere to share.',
   });
 }
@@ -291,7 +290,7 @@ function shareProfile(id, name) {
   openShareSheet({
     heading: 'Share this profile',
     url,
-    text: '"' + name + '" · see this profile on PieceWork Zambia',
+    text: '"' + name + '" · see this profile on 2911 Jobs',
     copiedMessage: 'Profile link copied. Paste it anywhere to share.',
   });
 }
@@ -526,6 +525,18 @@ function wirePasswordEyes(scope) {
   });
 }
 
+/** Dark mode: <html data-theme> is set early in index.html; this keeps the
+ * topbar toggle in sync and persists the choice on the device. */
+function currentTheme() {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('pwz-theme', t); } catch { /* private mode */ }
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.textContent = t === 'dark' ? '☀️' : '🌙';
+}
+
 function renderChrome() {
   const menuBtn = document.getElementById('menu-btn');
   if (menuBtn && !menuBtn.dataset.wired) {
@@ -533,86 +544,74 @@ function renderChrome() {
     menuBtn.dataset.wired = '1';
     menuBtn.addEventListener('click', openDrawer);
   }
-  const h = location.hash || '#/';
-  const staff = currentUser && (currentUser.is_admin || currentUser.is_support);
-  document.body.classList.toggle('signed-in', !!currentUser);
-
-  // Top bar, right side. "Hire workers" shows at desktop width only (CSS);
-  // phones reach it from the drawer and the home screen. Signed in, phones
-  // get the avatar as a link to the profile and desktops get an account
-  // menu holding the pages that no longer fit in the nav row.
-  const hireBtn = `<a class="btn btn-sm tb-cta" href="#/post">${icon('plus')}<span>Hire workers</span></a>`;
-  if (currentUser) {
-    topbarAuth.innerHTML = `${hireBtn}
-      <a class="acct-link" href="#/profile" aria-label="Your profile">${chromeAvatar(currentUser)}</a>
-      <div class="acct">
-        <button class="acct-btn" id="acct-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="acct-menu">${chromeAvatar(currentUser)}<span class="acct-name">${esc(currentUser.name.split(' ')[0])}</span>${icon('chevD')}</button>
-        <div class="acct-menu" id="acct-menu" hidden>
-          <div class="acct-menu-head"><b>${esc(currentUser.name)}</b>${currentUser.city ? `<span>${esc(currentUser.city)}</span>` : ''}</div>
-          <a href="#/profile">${icon('user')}<span>Profile</span></a>
-          <a href="#/dashboard">${icon('clipboard')}<span>My Gigs</span></a>
-          <a href="#/saved">${icon('bookmark')}<span>Saved jobs</span></a>
-          ${staff ? `<a href="#/admin">${icon('shield')}<span>Admin</span></a>` : ''}
-          <a href="#/how">${icon('help')}<span>Help &amp; Support</span></a>
-          <button type="button" id="acct-logout">${icon('logout')}<span>Log out</span></button>
-        </div>
-      </div>`;
-    const acctBtn = document.getElementById('acct-btn');
-    const acctMenu = document.getElementById('acct-menu');
-    acctBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setAcctMenu(acctMenu.hidden);
-    });
-    acctMenu.addEventListener('click', (e) => { if (e.target.closest('a')) setAcctMenu(false); });
-    document.getElementById('acct-logout').addEventListener('click', logout);
-  } else {
-    topbarAuth.innerHTML = `${hireBtn}<a class="btn btn-sm btn-outline" href="#/login">Sign in</a>`;
+  const themeBtn = document.getElementById('theme-btn');
+  if (themeBtn && !themeBtn.dataset.wired) {
+    themeBtn.dataset.wired = '1';
+    themeBtn.addEventListener('click', () => setTheme(currentTheme() === 'dark' ? 'light' : 'dark'));
   }
-
-  // Drawer (phones and tablets): account first, then the pages in groups.
+  if (themeBtn) themeBtn.textContent = currentTheme() === 'dark' ? '☀️' : '🌙';
+  if (currentUser) {
+    topbarAuth.innerHTML =
+      `<a href="#/profile" style="display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:700;font-size:14px">${avatarHtml(currentUser, 'sm')}<span>${esc(currentUser.name.split(' ')[0])}</span></a>`;
+  } else {
+    topbarAuth.innerHTML = `<a class="btn btn-sm btn-outline" href="#/login">Sign in</a>`;
+  }
+  const h = location.hash || '#/';
   const nav = document.getElementById('drawer-nav');
-  const link = (href, ic, label, extra = '') =>
-    `<a href="${href}" class="${h === href ? 'active' : ''}">${icon(ic)}<span>${label}</span>${extra}</a>`;
-  const group = (title, links) => `<div class="drawer-group"><h4>${title}</h4>${links.join('')}</div>`;
-  nav.innerHTML =
-    (currentUser
-      ? `<a class="drawer-user" href="#/profile">${chromeAvatar(currentUser)}<span><b>${esc(currentUser.name)}</b><small>View your profile</small></span>${icon('chevR')}</a>`
-      : `<div class="drawer-auth"><a class="btn btn-primary" href="#/register">Create account</a><a class="btn drawer-btn-light" href="#/login">Sign in</a></div>`)
-    + `<a class="drawer-cta" href="#/post">${icon('plus')}<span>Hire workers</span></a>`
-    + group('Work', [
-      link('#/', 'home', 'Home'),
-      link('#/jobs', 'briefcase', 'Find Work'),
-      link('#/workers', 'users', 'Looking for Work'),
-      link('#/categories', 'grid', 'Categories'),
-    ])
-    + group('Buy and sell', [link('#/market', 'tag', 'Marketplace'), link('#/businesses', 'grid', 'Businesses')])
-    + (currentUser ? group('Your account', [
-      link('#/messages', 'message', 'Messages', '<span class="drawer-badge js-msg-badge" hidden></span>'),
-      link('#/dashboard', 'clipboard', 'My Gigs'),
-      link('#/saved', 'bookmark', 'Saved jobs'),
-      ...(staff ? [link('#/admin', 'shield', 'Admin')] : []),
-    ]) : '')
-    + group('Support', [link('#/how', 'help', 'Help & Support'), link('#/about', 'info', 'About PieceWork')])
-    + (currentUser ? `<button class="drawer-logout" id="drawer-logout">${icon('logout')}<span>Log out</span></button>` : '');
+  const items = [
+    ['#/', 'home', 'Home'],
+    ['#/jobs', 'briefcase', 'Find Work'],
+    ['#/workers', 'users', 'Looking for Work'],
+    ['#/post', 'plus', 'Hire Workers'],
+    ['#/categories', 'grid', 'Categories'],
+    ['#/market', 'tag', 'Marketplace'],
+    ['#/businesses', 'grid', 'Businesses'],
+    ['#/messages', 'message', 'Messages'],
+  ];
+  if (currentUser) {
+    items.push(['#/dashboard', 'clipboard', 'My Gigs']);
+    items.push(['#/profile', 'user', 'Profile']);
+    if (currentUser.is_admin || currentUser.is_support) items.push(['#/admin', 'shield', 'Admin']);
+  }
+  items.push(['#/how', 'help', 'Help & Support']);
+  nav.innerHTML = items.map(([href, ic, label]) =>
+    `<a href="${href}" class="${h === href ? 'active' : ''}">${icon(ic)}<span>${label}</span></a>`
+  ).join('') + (currentUser
+    ? `<button class="drawer-logout" id="drawer-logout">${icon('logout')}<span>Log out</span></button>`
+    : '');
   const lo = document.getElementById('drawer-logout');
   if (lo) lo.addEventListener('click', logout);
 
-  // Desktop top nav (visible at >=900px via CSS). The logo goes home, and
-  // "Hire workers" is the button beside the account controls.
+  // Desktop top nav (visible at >=900px via CSS).
   const dnav = document.getElementById('desktop-nav');
   if (dnav) {
     const dMatch = (href) => {
-      if (href === '#/jobs') return h === '#/jobs' || h.startsWith('#/job/') || h.startsWith('#/categories') || h.startsWith('#/search');
+      if (href === '#/') return h === '#/' || h === '';
+      if (href === '#/jobs') return h === '#/jobs' || h.startsWith('#/job/') || h.startsWith('#/categories') || h.startsWith('#/saved');
       if (href === '#/messages') return h.startsWith('#/messages') || h.startsWith('#/chat/');
       if (href === '#/market') return h.startsWith('#/market') || h.startsWith('#/product/') || h.startsWith('#/sell') || h.startsWith('#/selling');
+      if (href === '#/profile') return h.startsWith('#/profile') || h.startsWith('#/user/') || h.startsWith('#/dashboard') || h.startsWith('#/login') || h.startsWith('#/register');
       return h.startsWith(href);
     };
-    const ditems = currentUser
-      ? [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/messages', 'Messages'], ['#/dashboard', 'My Gigs']]
-      : [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/how', 'Help']];
+    const ditems = [
+      ['#/', 'Home'],
+      ['#/jobs', 'Find Work'],
+      ['#/workers', 'Looking for Work'],
+      ['#/post', 'Hire Workers'],
+      ['#/market', 'Marketplace'],
+      ['#/messages', 'Messages'],
+    ];
+    if (currentUser) {
+      ditems.push(['#/dashboard', 'My Gigs']);
+      ditems.push(['#/profile', 'Profile']);
+      if (currentUser.is_admin || currentUser.is_support) ditems.push(['#/admin', 'Admin']);
+    }
+    ditems.push(['#/how', 'Help']);
     dnav.innerHTML = ditems.map(([href, label]) =>
-      `<a href="${href}" class="${dMatch(href) ? 'active' : ''}">${label}${href === '#/messages' ? '<span class="dnav-badge js-msg-badge" hidden></span>' : ''}</a>`
-    ).join('');
+      `<a href="${href}" class="${dMatch(href) ? 'active' : ''}">${label}</a>`
+    ).join('') + (currentUser ? `<button class="dnav-logout" id="dnav-logout">Log out</button>` : '');
+    const dlo = document.getElementById('dnav-logout');
+    if (dlo) dlo.addEventListener('click', logout);
   }
 
   // Tab bar: Home, Find Work, Marketplace (live since 2.0 M3),
@@ -629,42 +628,17 @@ function renderChrome() {
     },
   ];
   tabbar.innerHTML = tabs.map(t =>
-    `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}">${icon(t.ic)}<span>${t.label}</span>${t.href === '#/messages' ? '<span class="tab-badge js-msg-badge" id="msg-badge" hidden></span>' : ''}</a>`
+    `<a href="${t.href}" class="${t.match(h) ? 'active' : ''}">${icon(t.ic)}<span>${t.label}</span>${t.href === '#/messages' ? '<span class="tab-badge" id="msg-badge" hidden></span>' : ''}</a>`
   ).join('');
   if (currentUser) {
     api('/api/messages/unread').then(({ unread }) => {
-      document.querySelectorAll('.js-msg-badge').forEach((b) => {
-        if (unread > 0) { b.textContent = unread > 9 ? '9+' : unread; b.hidden = false; }
-        else b.hidden = true;
-      });
+      const b = document.getElementById('msg-badge');
+      if (!b) return;
+      if (unread > 0) { b.textContent = unread > 9 ? '9+' : unread; b.hidden = false; }
+      else b.hidden = true;
     }).catch(() => {});
   }
 }
-
-/** Avatar for the menus: like avatarHtml but without the tap-to-zoom hook,
- * so tapping it follows the link or opens the account menu. */
-function chromeAvatar(user) {
-  if (user.avatar) return `<img class="avatar sm" src="${esc(user.avatar)}" alt="">`;
-  return `<span class="avatar sm" aria-hidden="true">${esc((user.name || '?').trim().charAt(0).toUpperCase())}</span>`;
-}
-
-function setAcctMenu(open) {
-  const menu = document.getElementById('acct-menu');
-  const btn = document.getElementById('acct-btn');
-  if (!menu || !btn) return;
-  menu.hidden = !open;
-  btn.setAttribute('aria-expanded', String(open));
-}
-// The account menu closes on any click outside it; Escape closes it and
-// the drawer.
-document.addEventListener('click', (e) => { if (!e.target.closest('.acct')) setAcctMenu(false); });
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  const menu = document.getElementById('acct-menu');
-  if (menu && !menu.hidden) { setAcctMenu(false); document.getElementById('acct-btn').focus(); }
-  const drawer = document.getElementById('drawer');
-  if (drawer && !drawer.hidden) closeDrawer();
-});
 
 function requireAuth(next) {
   if (!currentUser) {
@@ -741,7 +715,7 @@ function errorHtml(msg) {
   return `<div class="empty"><div class="empty-ico">${icon('info')}</div><h3>Something went wrong</h3><p>${esc(msg || 'Please try again.')}</p><button class="btn btn-sm btn-primary" data-retry-view>Try again</button></div>`;
 }
 function momoNoteHtml() {
-  return `<div class="momo-note"><b>How payment works:</b> PieceWork Zambia connects you —
+  return `<div class="momo-note"><b>How payment works:</b> 2911 Jobs connects you —
     payment happens directly between you and the other person, usually via
     <b>MTN Mobile Money</b> or <b>Airtel Money</b> when the work is done.
     Agree the amount up front and never pay before work starts.</div>`;
@@ -1140,7 +1114,7 @@ async function viewBrowse() {
     <div class="split" style="margin:6px 2px 10px"><span class="small muted" id="res-count"></span><span class="small muted" id="res-order"></span></div>
     <div id="results">${skeletonCards(3)}</div>
     <div id="more-wrap" style="text-align:center;margin:8px 0 16px"></div>
-    <div style="text-align:center;margin:18px 0 8px"><a class="link-btn" href="#/how">How PieceWork works</a></div>
+    <div style="text-align:center;margin:18px 0 8px"><a class="link-btn" href="#/how">How 2911 Jobs works</a></div>
   </div></div>`;
 
   const q = document.getElementById('q');
@@ -1382,7 +1356,7 @@ function productCard(p) {
 async function viewMarket() {
   app.innerHTML = `
   <div class="view"><div class="page">
-    <div class="page-band"><h1 class="page-title">Marketplace</h1><p class="page-sub">Buy and sell with people near you. You pay the seller directly, PieceWork never handles the money.</p></div>
+    <div class="page-band"><h1 class="page-title">Marketplace</h1><p class="page-sub">Buy and sell with people near you. You pay the seller directly, 2911 Jobs never handles the money.</p></div>
     <div id="market-ads"></div>
     ${currentUser ? `<a class="btn btn-primary" href="#/sell" style="margin-bottom:12px">${icon('plus')} Sell an item</a>
     <a class="btn btn-outline" href="#/selling" style="margin-bottom:12px">My selling</a>` : ''}
@@ -1697,7 +1671,7 @@ function productFormHtml(prefill, isEdit) {
     <div data-wiz="3" hidden>
       <h3 style="margin-top:0">Review your listing</h3>
       <div id="pf-review"></div>
-      <p class="small muted">Buyers pay you directly when you meet. PieceWork never takes a cut and never handles the money.</p>
+      <p class="small muted">Buyers pay you directly when you meet. 2911 Jobs never takes a cut and never handles the money.</p>
     </div>
     <div class="wiz-nav">
       <button class="btn btn-outline" type="button" id="pf-back" hidden>Back</button>
@@ -1966,7 +1940,7 @@ async function viewBusinesses() {
   app.innerHTML = `
   <div class="view"><div class="page">
     <h1 class="page-title">Businesses</h1>
-    <p class="page-sub">Local shops and formal businesses on PieceWork. Verified shops have shown their registration documents.</p>
+    <p class="page-sub">Local shops and formal businesses on 2911 Jobs. Verified shops have shown their registration documents.</p>
     ${currentUser ? `<a class="btn btn-primary" href="#/business/apply" style="margin-bottom:12px">${icon('plus')} Open a business storefront</a>
     <a class="btn btn-outline" href="#/business/mine" style="margin-bottom:12px">My businesses</a>` : ''}
     <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="bz-q" type="search" placeholder="Search businesses" aria-label="Search businesses"></div>
@@ -2201,7 +2175,7 @@ async function viewBusinessApply() {
   app.innerHTML = `
   <div class="view"><div class="page">
     <h1 class="page-title">Open a business storefront</h1>
-    <p class="page-sub">Your own shop page on PieceWork: logo, hours, contact, and your catalogue in one link.</p>
+    <p class="page-sub">Your own shop page on 2911 Jobs: logo, hours, contact, and your catalogue in one link.</p>
     ${businessFormHtml({ city: currentUser.city }, false)}
   </div></div>`;
   const form = document.getElementById('business-form');
@@ -2306,7 +2280,7 @@ async function viewBusinessManage(id) {
 async function viewAdminBusinesses() {
   if (!requireAuth('#/admin/businesses')) return;
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork team only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs team only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -2592,7 +2566,7 @@ async function viewJobDetail(id) {
   document.getElementById('d-back').addEventListener('click', () => { location.hash = '#/jobs'; });
   const reportJobBtn = document.getElementById('report-job-btn');
   if (reportJobBtn) reportJobBtn.addEventListener('click', async () => {
-    const reason = prompt('Why are you reporting this job? The PieceWork team will review.');
+    const reason = prompt('Why are you reporting this job? The 2911 Jobs team will review.');
     if (!reason || !reason.trim()) return;
     reportJobBtn.disabled = true;
     try {
@@ -3131,7 +3105,7 @@ function jobFormHtml(prefill = {}, mode = 'post') {
     <div class="field">
       <label class="check-row" for="jf-foodlic">
         <input type="checkbox" name="requires_food_license" id="jf-foodlic" value="1" ${prefill.requires_food_license ? 'checked' : ''}>
-        <span><b>Require a food handler's license</b><br><span class="hint">Only workers with a valid, PieceWork-verified food handler's license can apply. Use this for waiter, bartender, mixologist, cooking and catering jobs.</span></span>
+        <span><b>Require a food handler's license</b><br><span class="hint">Only workers with a valid, 2911 Jobs-verified food handler's license can apply. Use this for waiter, bartender, mixologist, cooking and catering jobs.</span></span>
       </label>
     </div>
     ${isEdit ? '' : (currentUser && currentUser.terms_accepted_at ? `
@@ -3141,7 +3115,7 @@ function jobFormHtml(prefill = {}, mode = 'post') {
     <div class="field">
       <label class="check-row" for="jf-terms">
         <input type="checkbox" name="terms_accepted" id="jf-terms" value="1">
-        <span class="small">I have read and agree to the <a href="#/terms" target="_blank" rel="noopener">Terms and Conditions</a> — including that PieceWork is not liable for any damage or theft, and that I am responsible for my own safety precautions when hiring.</span>
+        <span class="small">I have read and agree to the <a href="#/terms" target="_blank" rel="noopener">Terms and Conditions</a> — including that 2911 Jobs is not liable for any damage or theft, and that I am responsible for my own safety precautions when hiring.</span>
       </label>
     </div>`)}
     <div class="form-actions">
@@ -3763,7 +3737,7 @@ function viewProfileEdit() {
   const sfBtn = document.getElementById('sf-btn');
   const SF_LABEL = {
     approved: 'Approved. Recruiters can see you are verified.',
-    pending: 'Under review by the PieceWork team.',
+    pending: 'Under review by the 2911 Jobs team.',
     rejected: 'Not approved. It is blocking recruiters from moving to the next step with you. Upload a new selfie that follows the guide below.',
   };
   const sfShowStatus = () => {
@@ -3795,7 +3769,7 @@ function viewProfileEdit() {
   const flFile = document.getElementById('fl-file');
   const flNumber = document.getElementById('fl-number');
   const flExp = document.getElementById('fl-exp');
-  const FL_LABEL = { none: 'No license on file.', pending: 'Under review by the PieceWork team.', approved: 'Approved.', rejected: 'Not approved — please upload a clear photo of a valid license.' };
+  const FL_LABEL = { none: 'No license on file.', pending: 'Under review by the 2911 Jobs team.', approved: 'Approved.', rejected: 'Not approved — please upload a clear photo of a valid license.' };
   api('/api/users/' + currentUser.id).then(({ user }) => {
     const fl = user && user.food_license;
     if (!fl) return;
@@ -3854,7 +3828,7 @@ function viewProfileEdit() {
     try {
       await api('/api/users/me', { method: 'DELETE', body: JSON.stringify({ password: pw }) });
       currentUser = null; closeDrawer(); renderChrome();
-      toast('Your account has been deleted. Thank you for being part of PieceWork Zambia.');
+      toast('Your account has been deleted. Thank you for being part of 2911 Jobs.');
       location.hash = '#/';
     } catch (e) { toast(e.message, true); delBtn.disabled = false; }
   });
@@ -4011,7 +3985,7 @@ function stampConfidential(dataUrl) {
           ctx.fillText('CONFIDENTIAL', 0, y);
         }
         ctx.restore();
-        const foot = `CONFIDENTIAL • PieceWork Zambia • ${new Date().toLocaleDateString('en-GB')}`;
+        const foot = `CONFIDENTIAL • 2911 Jobs • ${new Date().toLocaleDateString('en-GB')}`;
         const fSize = Math.max(13, Math.round(img.width / 46));
         ctx.font = `700 ${fSize}px sans-serif`;
         ctx.textAlign = 'left';
@@ -4072,7 +4046,7 @@ async function viewUser(id) {
         ${!isSelf && currentUser ? `
         <div class="card hire-cta">
           <h3 style="margin-top:0">Hire ${firstName}</h3>
-          <p class="small muted" style="margin-top:0">${user.open_to_work ? `${firstName} is open to work in ${esc(user.city)}.` : `Post a job and ${firstName} can apply with one tap.`} PieceWork hiring runs through job posts, so your agreement stays on the record.</p>
+          <p class="small muted" style="margin-top:0">${user.open_to_work ? `${firstName} is open to work in ${esc(user.city)}.` : `Post a job and ${firstName} can apply with one tap.`} 2911 Jobs hiring runs through job posts, so your agreement stays on the record.</p>
           <a class="btn btn-primary" href="#/post">${icon('plus')}Post a Job</a>
         </div>` : ''}
         ${!isSelf && currentUser ? `
@@ -4088,7 +4062,7 @@ async function viewUser(id) {
         ${!isSelf && currentUser ? `
         <div class="card">
           <h3 style="margin-top:0">Safety</h3>
-          <p class="small muted" style="margin-top:0">Something wrong with this person? Report them to the PieceWork team, or block them so you cannot message or work with each other.</p>
+          <p class="small muted" style="margin-top:0">Something wrong with this person? Report them to the 2911 Jobs team, or block them so you cannot message or work with each other.</p>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-sm btn-outline" id="report-user-btn">🚩 Report ${firstName}</button>
             <button class="btn btn-sm btn-outline" id="block-user-btn">🚫 Block ${firstName}</button>
@@ -4133,7 +4107,7 @@ async function viewUser(id) {
     });
     const reportUserBtn = document.getElementById('report-user-btn');
     if (reportUserBtn) reportUserBtn.addEventListener('click', async () => {
-      const reason = prompt('Why are you reporting ' + user.name + '? The PieceWork team will review.');
+      const reason = prompt('Why are you reporting ' + user.name + '? The 2911 Jobs team will review.');
       if (!reason || !reason.trim()) return;
       reportUserBtn.disabled = true;
       try {
@@ -4457,19 +4431,19 @@ function viewForgot() {
       if (account_found === false) {
         done.innerHTML = `
         <p><b>No account found.</b></p>
-        <p class="small muted">We could not find a PieceWork account with <b>${esc(phone)}</b>. Check the number and try again, or <a href="#/register" style="font-weight:700">sign up for a new account</a>.</p>`;
+        <p class="small muted">We could not find a 2911 Jobs account with <b>${esc(phone)}</b>. Check the number and try again, or <a href="#/register" style="font-weight:700">sign up for a new account</a>.</p>`;
         return;
       }
       done.innerHTML = sms_sent ? `
         <p><b>Code sent by SMS.</b></p>
         <p class="small muted">Check your texts for the 6-digit code. It expires in 30 minutes.</p>
         <p style="text-align:center;margin:12px 0 0"><a href="#/reset" class="btn btn-primary full">Enter my code</a></p>
-        <p class="small muted" style="text-align:center">No text arrived? <a href="${waLink(whatsapp, 'Hello PieceWork, I need a password reset code for ' + phone)}" target="_blank" rel="noopener" style="font-weight:700">Message us on WhatsApp</a></p>`
+        <p class="small muted" style="text-align:center">No text arrived? <a href="${waLink(whatsapp, 'Hello 2911 Jobs, I need a password reset code for ' + phone)}" target="_blank" rel="noopener" style="font-weight:700">Message us on WhatsApp</a></p>`
       : `
         <p><b>Request received.</b></p>
         <p class="small muted">Message us on WhatsApp from <b>${esc(phone)}</b> and we will reply with your 6-digit reset code. It expires in 30 minutes. This WhatsApp line handles password resets only.</p>
         <a class="btn btn-primary full" target="_blank" rel="noopener"
-           href="${waLink(whatsapp, 'Hello PieceWork, I need a password reset code for ' + phone)}">${icon('message')}Message us on WhatsApp</a>
+           href="${waLink(whatsapp, 'Hello 2911 Jobs, I need a password reset code for ' + phone)}">${icon('message')}Message us on WhatsApp</a>
         <p style="text-align:center;margin:12px 0 0"><a href="#/reset" style="font-weight:700">I have my code — set a new password</a></p>`;
     } catch (err2) { toast(err2.message, true); btn.disabled = false; }
   });
@@ -4529,7 +4503,7 @@ function viewRegister() {
   const invRef = getInviteRef();
   app.innerHTML = `
   <div class="view"><div class="page" style="max-width:420px;margin:0 auto">
-    <h1 class="page-title">Join PieceWork</h1>
+    <h1 class="page-title">Join 2911 Jobs</h1>
     <p class="page-sub">Free to join. First we text you a code to prove the number is yours, then your account opens.</p>
     ${invRef ? `<div class="card" style="border:2px solid var(--green);background:var(--green-tint)">
       <b>🎉 You were invited by a friend!</b>
@@ -4655,7 +4629,7 @@ function viewRegister() {
     const smsNote = document.getElementById('reg-sms-note');
     if (start.whatsapp) {
       document.getElementById('reg-wa-link').href = waLink(start.whatsapp,
-        'Hello PieceWork, I need a signup code for ' + pendingPhone);
+        'Hello 2911 Jobs, I need a signup code for ' + pendingPhone);
       smsNote.style.display = 'block';
     } else {
       smsNote.style.display = 'none';
@@ -4703,7 +4677,7 @@ function viewRegister() {
       });
       if (resendTimer) clearInterval(resendTimer);
       currentUser = user; renderChrome();
-      toast(`Welcome to PieceWork, ${user.name.split(' ')[0]}!`);
+      toast(`Welcome to 2911 Jobs, ${user.name.split(' ')[0]}!`);
       afterAuthRedirect();
     } catch (err2) {
       showFieldErrors(verifyForm, err2.fields || { code: err2.message });
@@ -4723,7 +4697,7 @@ function viewRegister() {
       const smsNote = document.getElementById('reg-sms-note');
       if (start.whatsapp) {
         document.getElementById('reg-wa-link').href = waLink(start.whatsapp,
-          'Hello PieceWork, I need a signup code for ' + pendingPhone);
+          'Hello 2911 Jobs, I need a signup code for ' + pendingPhone);
         smsNote.style.display = 'block';
       }
       toast(start.message || 'A new signup code is on its way.');
@@ -4743,392 +4717,79 @@ function viewRegister() {
   });
 }
 
-/** Landing categories: [category, label, photo in /img/photos]. The photos
- * are professional stock photos from Pexels (free to use, no credit needed). */
-const LANDING_CATS = [
-  ['Construction & Labor', 'Construction', 'construction'],
-  ['Cleaning', 'Cleaning', 'cleaning'],
-  ['Gardening', 'Gardening', 'gardening'],
-  ['Painting', 'Painting', 'painting'],
-  ['Bricklaying', 'Bricklaying', 'bricklaying'],
-  ['Delivery & Errands', 'Delivery', 'delivery'],
-  ['Carpentry', 'Carpentry', 'carpentry'],
-  ['Electrical', 'Electrical', 'electrical'],
-  ['Moving Help', 'Moving help', 'moving'],
-  ['Welding', 'Welding', 'welding'],
-  ['Plumbing', 'Plumbing', 'plumbing'],
-  ['Cooking & Catering', 'Cooking', 'cooking'],
-  ['Security & Ushering', 'Security', 'security'],
-];
-
-/** Category tiles on either landing open Find Work filtered to that category. */
-function wireLandingCats() {
+/** Landing page (signed-out home). */
+function viewLanding() {
+  const cats = ['Cleaning', 'Construction & Labor', 'Gardening', 'Painting', 'Delivery & Errands', 'Cooking & Catering'];
+  app.innerHTML = `
+  <div class="view">
+    <section class="hero">
+      <img class="bg" src="/img/landing/cleaner-pro.jpg" alt="A 2911 Jobs cleaning professional" fetchpriority="high">
+      <div class="hero-overlay"></div>
+      <div class="hero-content">
+        <span class="kicker">Zambia's piece-work marketplace</span>
+        <h1>Quick jobs.<br><span class="hl">Quick cash.</span></h1>
+        <p>Need a quick gig done today? Post it in minutes and hire helping hands near you. Looking for work? Find piece work and get paid by mobile money — as soon as the job is done.</p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary" href="#/jobs">${icon('search')}Find work</a>
+          <a class="btn btn-outline" href="#/post">${icon('plus')}Hire workers</a>
+        </div>
+      </div>
+    </section>
+    <div class="landing">
+      <h2>Popular piece work</h2>
+      <p class="lede">Tap a category to see open jobs.</p>
+      <div class="cat-grid">
+        ${cats.map(c => {
+          const [ic, bg] = catStyle(c);
+          return `<div class="cat-card" data-cat-link="${esc(c)}" tabindex="0" role="link" aria-label="Browse ${esc(c)} jobs"><div class="cat-ico" style="background:${bg}">${icon(ic)}</div><b>${esc(c)}</b></div>`;
+        }).join('')}
+      </div>
+      <h2 style="margin-top:26px">How it works</h2>
+      <div class="steps">
+        <div class="card"><div class="step-n">1</div><div><h4>Browse gigs near you</h4><p>Jobs are matched by kilometres — nearest first. Or post a gig in minutes.</p></div></div>
+        <div class="card"><div class="step-n">2</div><div><h4>Apply in one tap</h4><p>Posters review applicants, check ratings, and hire.</p></div></div>
+        <div class="card"><div class="step-n">3</div><div><h4>Get paid by mobile money</h4><p>MTN Mobile Money or Airtel Money — the amount is agreed before you start.</p></div></div>
+      </div>
+      <div class="split" style="align-items:stretch">
+        <div class="card" style="flex:1">
+          <h3 style="margin-top:0">For workers</h3>
+          <p class="small muted">Free for workers, always. Create an account, find piece work near you, build your rating.</p>
+          <a class="btn btn-sm btn-primary" href="#/register">Join free</a>
+        </div>
+        <div class="card" style="flex:1">
+          <h3 style="margin-top:0">For posters</h3>
+          <p class="small muted">Need hands? Post the job with the pay in Kwacha and hire today.</p>
+          <a class="btn btn-sm btn-outline" href="#/post">Hire workers</a>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px;text-align:center">
+        <h3 style="margin-top:0">Built for Zambia's youth</h3>
+        <p class="small muted">2911 Jobs is a product of Isaac “Zac” Muzata — complementing government's efforts on unemployment, one job at a time.</p>
+        <a class="link-btn" href="#/about">Our story</a>
+      </div>
+      <p class="landing-foot">2911 Jobs · A product of Isaac Muzata (Zac), <a href="https://2911itservices.com" target="_blank" rel="noopener">2911 IT Services</a></p>
+    </div>
+  </div>`;
   document.querySelectorAll('[data-cat-link]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.preventDefault();
+    const go = () => {
       browseState.category = el.dataset.catLink;
       browseState.q = ''; browseState.city = ''; browseState.page = 1;
       location.hash = '#/jobs';
-    });
+    };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
   });
-}
-
-/** The moving category strip. The tiles are listed twice so the strip can
- * loop; the copy is hidden from screen readers and the keyboard. */
-function catStrip(id) {
-  const tiles = (copy) => LANDING_CATS.map(([cat, label, photo], i) => `
-    <a class="cat-tile" href="#/jobs" data-cat-link="${esc(cat)}"${copy ? ' tabindex="-1" aria-hidden="true"' : ''}${copy && i === 0 ? ' data-loop-start' : ''}>
-      <img src="/img/photos/${photo}.jpg" alt="" loading="lazy" width="360" height="360">
-      <span class="cat-tile-name">${label}${icon('chevR')}</span>
-    </a>`).join('');
-  return `
-    <div class="cat-strip-auto" id="${id}" aria-label="Job categories">
-      <div class="cat-track">${tiles(false)}${tiles(true)}</div>
-    </div>`;
-}
-
-/** Scrolls a catStrip() slowly sideways in a loop. Touch, hover and
- * keyboard focus pause it, people can still swipe or scroll it, and it
- * stays still for anyone who has reduced motion turned on. Returns a
- * function that moves the strip one tile left (-1) or right (1). */
-function autoScrollStrip(el, speed = 0.03) {
-  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let hold = false, resumeAt = 0, last = 0, pos = el.scrollLeft, setTo = pos;
-  const tile = el.querySelector('.cat-tile');
-  const loopStart = el.querySelector('[data-loop-start]');
-  const period = () => (loopStart ? loopStart.offsetLeft - tile.offsetLeft : 0);
-  const tileStep = () => tile.offsetWidth + parseFloat(getComputedStyle(tile).marginRight);
-  const rest = (ms) => { resumeAt = performance.now() + ms; };
-  el.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') hold = true; });
-  el.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') { hold = false; rest(800); } });
-  el.addEventListener('touchstart', () => { hold = true; }, { passive: true });
-  el.addEventListener('touchend', () => { hold = false; rest(3000); }, { passive: true });
-  el.addEventListener('focusin', () => { hold = true; });
-  el.addEventListener('focusout', () => { hold = false; rest(1500); });
-  el.addEventListener('wheel', () => rest(3000), { passive: true });
-  const step = (t) => {
-    if (!el.isConnected) return;
-    const dt = last ? Math.min(t - last, 64) : 0;
-    last = t;
-    const p = period();
-    if (!still && !hold && t > resumeAt && !document.hidden && p > 0) {
-      // Pick up any scroll made some other way (keyboard, scrollbar, arrows).
-      if (Math.abs(el.scrollLeft - setTo) > 2) pos = el.scrollLeft;
-      pos += dt * speed;
-      if (pos >= p) pos -= p;
-      el.scrollLeft = pos;
-      setTo = el.scrollLeft;
-    } else {
-      // Someone is in control: follow them, and wrap once they are a tile
-      // past a full loop (the margin leaves room for the arrow's hop below).
-      pos = el.scrollLeft;
-      if (!hold && p > 0 && pos >= p + tileStep()) { pos -= p; el.scrollLeft = pos; }
-    }
-    requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-  return (dir) => {
-    const by = tileStep();
-    rest(4000);
-    // At the very start there is nothing to the left, so hop to the copy.
-    if (dir < 0 && el.scrollLeft < by) el.scrollLeft += period();
-    el.scrollBy({ left: dir * by, behavior: still ? 'auto' : 'smooth' });
-  };
-}
-
-/** True inside the installed app (Play Store app or home-screen install)
- * or on a phone or tablet sized screen. Desktop browsers get the website. */
-function isAppView() {
-  const installed = window.matchMedia('(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)').matches
-    || window.navigator.standalone === true;
-  return installed || !window.matchMedia('(min-width: 900px)').matches;
-}
-
-/** Landing page (signed-out home): app screen or full website. */
-function viewLanding() {
-  if (isAppView()) viewLandingApp();
-  else viewLandingWeb();
-}
-
-/** Landing copy has no en or em dashes, even in job titles people type:
- * "10:00\u201314:00" shows as "10:00 to 14:00", "house \u2014 truck" as "house, truck". */
-function noDash(s) {
-  return String(s ?? '')
-    .replace(/(\d)\s*(?:[\u2013\u2014]|--+)\s*(\d)/g, '$1 to $2')
-    .replace(/\s*(?:[\u2013\u2014]|--+)\s*/g, ', ')
-    .replace(/^,\s*|,\s*$/g, '');
-}
-
-/** Search box on either landing: a query goes to search, empty to Find Work. */
-function wireLandingSearch(formId, inputId) {
-  document.getElementById(formId).addEventListener('submit', (e) => {
-    e.preventDefault();
-    const v = document.getElementById(inputId).value.trim();
-    location.hash = v ? '#/search?q=' + encodeURIComponent(v) : '#/jobs';
-  });
-}
-
-/** Website landing for desktop browsers: hero with search, moving
- * categories, how it works, recent jobs, safety, about, call to action and
- * a full footer. */
-function viewLandingWeb() {
-  app.innerHTML = `
-  <div class="view lw">
-    <section class="lw-hero">
-      <div>
-        <p class="lw-eyebrow">Piece work and local services in Zambia</p>
-        <h1>Hire local workers or find piece work near you</h1>
-        <p class="lw-lead">Post a job with the pay in Kwacha, choose from the people who apply, and pay by mobile money once the work is done.</p>
-        <form class="lw-search" id="lw-search" role="search">
-          ${icon('search')}
-          <input id="lw-q" type="search" placeholder="What work are you looking for?" aria-label="Search jobs">
-          <button class="btn btn-primary" type="submit">Search jobs</button>
-        </form>
-        <div class="lw-hire">
-          <span>Need a job done?</span>
-          <a class="btn btn-outline" href="#/post">Post a job</a>
-          <a class="lw-more" href="#/workers">Browse workers${icon('chevR')}</a>
-        </div>
-        <ul class="lw-checks">
-          <li>${icon('check')}Free for workers</li>
-          <li>${icon('check')}Pay agreed before work starts</li>
-          <li>${icon('check')}MTN MoMo and Airtel Money</li>
-        </ul>
-      </div>
-      <figure class="lw-hero-media">
-        <img src="/img/photos/hero-tall.jpg" alt="A smiling builder in a hard hat at a construction site" width="960" height="1040" fetchpriority="high">
-      </figure>
-    </section>
-
-    <section class="lw-section">
-      <div class="lw-head">
-        <div>
-          <h2>Browse work by category</h2>
-          <p>Open jobs posted by households and businesses near you.</p>
-        </div>
-        <div class="lw-head-tools">
-          <a class="lw-more" href="#/categories">All categories${icon('chevR')}</a>
-          <button class="lw-arrow" type="button" id="lw-cats-prev" aria-label="Previous categories">${icon('chevL')}</button>
-          <button class="lw-arrow" type="button" id="lw-cats-next" aria-label="Next categories">${icon('chevR')}</button>
-        </div>
-      </div>
-      ${catStrip('lw-cats')}
-    </section>
-
-    <section class="lw-section">
-      <div class="lw-head">
-        <div>
-          <h2>How PieceWork works</h2>
-          <p>Three steps, whether you are looking for work or hiring.</p>
-        </div>
-      </div>
-      <div class="lw-how">
-        <div class="lw-how-col">
-          <h3><span class="lw-how-ico">${icon('briefcase')}</span>Looking for work</h3>
-          <ol class="lw-steps">
-            <li><b>Create a free account</b><span>Add your name, phone number, a profile photo and a selfie so people know who they are hiring.</span></li>
-            <li><b>Apply for jobs near you</b><span>Jobs are sorted by distance, so the closest work is listed first.</span></li>
-            <li><b>Do the work and get paid</b><span>Agree the amount before you start. The person who hired you pays by mobile money.</span></li>
-          </ol>
-          <a class="btn btn-primary" href="#/register">Create a free account</a>
-        </div>
-        <div class="lw-how-col">
-          <h3><span class="lw-how-ico">${icon('users')}</span>Hiring</h3>
-          <ol class="lw-steps">
-            <li><b>Post the job</b><span>Describe the work, set the pay in Kwacha, and add the date and place.</span></li>
-            <li><b>Choose a worker</b><span>Compare applicants by their ratings, reviews and verified profile.</span></li>
-            <li><b>Pay and leave a rating</b><span>Pay what you agreed, then rate the worker so others can hire with confidence.</span></li>
-          </ol>
-          <a class="btn btn-outline" href="#/post">Post a job</a>
-        </div>
-      </div>
-    </section>
-
-    <section class="lw-section" id="lw-jobs-wrap" hidden>
-      <div class="lw-head">
-        <div>
-          <h2>Recently posted jobs</h2>
-          <p>A few of the jobs open on PieceWork right now.</p>
-        </div>
-        <a class="lw-more" href="#/jobs">See all jobs${icon('chevR')}</a>
-      </div>
-      <div class="lw-jobs" id="lw-jobs"></div>
-    </section>
-
-    <section class="lw-section">
-      <div class="lw-trust">
-        <div class="lw-trust-intro">
-          <h2>Safety comes first</h2>
-          <p>Every account is checked, and both sides can see who they are dealing with before any work starts.</p>
-          <a href="#/how">Read our safety advice${icon('chevR')}</a>
-        </div>
-        <div class="lw-trust-grid">
-          <div class="lw-trust-item">${icon('camera')}<div><b>Selfie check on every profile</b><span>A member of our team reviews each verification selfie before that person can be hired.</span></div></div>
-          <div class="lw-trust-item">${icon('star')}<div><b>Ratings from both sides</b><span>Workers and hirers rate each other after every job.</span></div></div>
-          <div class="lw-trust-item">${icon('phone')}<div><b>Phone numbers stay private</b><span>Contact details are shared only after a hirer accepts an application.</span></div></div>
-          <div class="lw-trust-item">${icon('shield')}<div><b>ID shown only to the hirer</b><span>A worker's NRC is visible only to the person who hired them and is deleted after 10 days.</span></div></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="lw-section lw-about">
-      <img src="/img/photos/community.jpg" alt="A team of workers in hard hats and safety vests working together" width="960" height="720" loading="lazy">
-      <div>
-        <h2>Built for Zambia</h2>
-        <p>PieceWork Zambia is a product of 2911 IT Services, founded by Isaac Muzata. It was started to help young people across the country earn from their skills, and to support the national effort against unemployment, one job at a time.</p>
-        <a class="lw-more" href="#/about">Read our story${icon('chevR')}</a>
-      </div>
-    </section>
-
-    <section class="lw-section lw-cta">
-      <div>
-        <h2>Join PieceWork Zambia</h2>
-        <p>Creating an account is free for workers. Posting a job takes about two minutes.</p>
-      </div>
-      <div class="lw-cta-btns">
-        <a class="btn btn-primary" href="#/register">Create a free account</a>
-        <a class="btn btn-outline" href="#/login">Sign in</a>
-      </div>
-    </section>
-
-    <footer class="lw-foot">
-      <div class="lw-foot-grid">
-        <div class="lw-foot-brand">
-          <div class="lw-foot-logo"><img src="/img/logo-tile.png" alt=""><b>PieceWork Zambia</b></div>
-          <p>A marketplace for piece work, day jobs and local services across Zambia.</p>
-          <a href="mailto:info@pieceworkzambia.com">info@pieceworkzambia.com</a>
-        </div>
-        <nav aria-label="Work">
-          <h4>Work</h4>
-          <a href="#/jobs">Find work</a>
-          <a href="#/post">Post a job</a>
-          <a href="#/workers">Browse workers</a>
-          <a href="#/categories">Categories</a>
-        </nav>
-        <nav aria-label="Marketplace">
-          <h4>Marketplace</h4>
-          <a href="#/market">Buy and sell</a>
-          <a href="#/businesses">Businesses</a>
-        </nav>
-        <nav aria-label="Company">
-          <h4>Company</h4>
-          <a href="#/about">About us</a>
-          <a href="#/how">Help and safety</a>
-          <a href="#/terms">Terms</a>
-          <a href="/privacy.html">Privacy</a>
-        </nav>
-      </div>
-      <div class="lw-foot-base">
-        <span>&copy; ${new Date().getFullYear()} PieceWork Zambia. A product of <a href="https://2911itservices.com" target="_blank" rel="noopener">2911 IT Services</a>.</span>
-      </div>
-    </footer>
-  </div>`;
-  wireLandingSearch('lw-search', 'lw-q');
-  wireLandingCats();
-  const nudge = autoScrollStrip(document.getElementById('lw-cats'));
-  document.getElementById('lw-cats-prev').addEventListener('click', () => nudge(-1));
-  document.getElementById('lw-cats-next').addEventListener('click', () => nudge(1));
-  // Real open jobs as compact text cards; the section stays hidden when there are none.
-  api('/api/jobs').then((d) => {
-    const jobs = dedupeJobs(d.jobs).slice(0, 3);
-    const wrap = document.getElementById('lw-jobs-wrap');
-    const slot = document.getElementById('lw-jobs');
-    if (!wrap || !slot || !jobs.length) return;
-    slot.innerHTML = jobs.map((j) => {
-      const area = j.area && j.area.toLowerCase() !== String(j.city || '').toLowerCase() ? j.area : '';
-      return `
-      <a class="lw-job" href="#/job/${j.id}">
-        <span class="lw-job-cat">${esc(j.category)}</span>
-        <b class="lw-job-title">${esc(noDash(j.title))}</b>
-        <span class="lw-job-place">${icon('pin')}${esc(noDash(j.city))}${area ? ', ' + esc(noDash(area)) : ''}</span>
-        <span class="lw-job-foot">
-          <span class="lw-job-pay">${kwacha(j.pay_amount)} <small>${esc(PAY_LABEL[j.pay_type] || 'per job')}</small></span>
-          <span class="lw-job-time">${esc(relTime(j.created_at))}</span>
-        </span>
-      </a>`;
-    }).join('');
-    wrap.hidden = false;
-  }).catch(() => {});
-}
-
-/** App landing for phones and the installed app: one short screen. */
-function viewLandingApp() {
-  app.innerHTML = `
-  <div class="view lp">
-    <section class="lp-banner">
-      <img src="/img/photos/hero-wide.jpg" alt="A team of workers in hard hats and safety vests working together" width="1200" height="680" fetchpriority="high">
-      <div class="lp-banner-text">
-        <h1>Find work or hire help near you</h1>
-        <p>Pay is agreed up front and paid by mobile money.</p>
-      </div>
-    </section>
-
-    <form class="searchbar lp-search" id="lp-search" role="search">
-      ${icon('search')}<input id="lp-q" type="search" placeholder="Search jobs, e.g. cleaning" aria-label="Search jobs">
-    </form>
-
-    <div class="lp-actions">
-      <a class="lp-action" href="#/jobs"><span class="lp-action-ico">${icon('briefcase')}</span><b>Find work</b><span>Jobs near you</span></a>
-      <a class="lp-action" href="#/post"><span class="lp-action-ico">${icon('users')}</span><b>Hire workers</b><span>Post a job in minutes</span></a>
-    </div>
-
-    <div class="lp-title"><h2>Popular categories</h2><a href="#/categories">See all</a></div>
-    ${catStrip('lp-cats')}
-
-    <div id="lp-jobs-wrap" hidden>
-      <div class="lp-title"><h2>Latest jobs</h2><a href="#/jobs">See all</a></div>
-      <div class="lp-list" id="lp-jobs"></div>
-    </div>
-
-    <div class="lp-title"><h2>Why people use PieceWork</h2></div>
-    <ul class="lp-trust">
-      <li><span class="lp-trust-ico">${icon('shield')}</span><span><b>Checked profiles</b>Every worker's selfie is reviewed by our team.</span></li>
-      <li><span class="lp-trust-ico">${icon('star')}</span><span><b>Ratings both ways</b>Workers and hirers rate each other after each job.</span></li>
-      <li><span class="lp-trust-ico">${icon('wallet')}</span><span><b>Mobile money</b>Pay or get paid with MTN MoMo or Airtel Money.</span></li>
-    </ul>
-
-    <section class="lp-join">
-      <h2>New to PieceWork?</h2>
-      <p>Create a free account to apply for jobs or hire workers.</p>
-      <div class="lp-join-btns">
-        <a class="btn btn-primary" href="#/register">Create account</a>
-        <a class="btn lp-btn-light" href="#/login">Sign in</a>
-      </div>
-    </section>
-
-    <footer class="lp-foot">
-      <nav aria-label="About PieceWork"><a href="#/about">About</a><a href="#/how">Help</a><a href="#/terms">Terms</a><a href="/privacy.html">Privacy</a></nav>
-      <p>&copy; ${new Date().getFullYear()} PieceWork Zambia</p>
-    </footer>
-  </div>`;
-  wireLandingSearch('lp-search', 'lp-q');
-  wireLandingCats();
-  autoScrollStrip(document.getElementById('lp-cats'));
-  // Latest open jobs as list rows; the section stays hidden when there are none.
-  api('/api/jobs').then((d) => {
-    const jobs = dedupeJobs(d.jobs).slice(0, 3);
-    const wrap = document.getElementById('lp-jobs-wrap');
-    const slot = document.getElementById('lp-jobs');
-    if (!wrap || !slot || !jobs.length) return;
-    slot.innerHTML = jobs.map((j) => `
-      <a class="lp-row" href="#/job/${j.id}">
-        <span class="lp-row-main"><b>${esc(noDash(j.title))}</b><span>${esc(noDash(j.city))} · ${esc(relTime(j.created_at))}</span></span>
-        <span class="lp-row-pay"><b>${kwacha(j.pay_amount)}</b><small>${esc(PAY_LABEL[j.pay_type] || 'per job')}</small></span>
-        ${icon('chevR')}
-      </a>`).join('');
-    wrap.hidden = false;
-  }).catch(() => {});
 }
 
 function viewAbout() {
   app.innerHTML = `
   <div class="view"><div class="page">
-    <h1 class="page-title">About PieceWork</h1>
+    <h1 class="page-title">About 2911 Jobs</h1>
     <div class="card">
       <h3 style="margin-top:0">Our story</h3>
-      <p>PieceWork Zambia is a product of <b>Isaac Muzata</b>, known as <b>Zac</b> — CEO of <b>2911 IT Services</b>, a Zambian based in Georgia, United States.</p>
+      <p>2911 Jobs is a product of <b>Isaac Muzata</b>, known as <b>Zac</b> — CEO of <b>2911 IT Services</b>, a Zambian based in Georgia, United States.</p>
       <p>Zac has a deep love for seeing young people grow and become the best they can be in life. That love is what built this platform: a simple system that connects young people to piece work — quick jobs, quick cash — so they can earn with dignity, build real skills, and take charge of their future.</p>
-      <p>PieceWork Zambia is his effort to complement the government's efforts on unemployment — and to stand behind every push to create opportunity for the next generation.</p>
+      <p>2911 Jobs is his effort to complement the government's efforts on unemployment — and to stand behind every push to create opportunity for the next generation.</p>
       <p style="margin-bottom:0"><b>One job at a time, we're putting Zambia's youth to work.</b></p>
     </div>
     <div class="card" style="text-align:center">
@@ -5144,13 +4805,13 @@ function viewAbout() {
 const ORIENTATION_SECTIONS = [
   { t: 'Show up', b: 'Arrive on time, every time. When you accept a job, someone is counting on you. Running late? Message the poster in the app immediately. No-shows with no warning damage your rating and can get your account suspended.' },
   { t: 'Do the work properly', b: 'Do what was agreed, the way it was described in the job. If you are unsure about something, ask before guessing. Leave the place as you found it, or better.' },
-  { t: 'Be honest', b: 'Only apply for work you can actually do. Never take anything that is not yours. Never lie about your skills or experience. Dishonesty ends your time on PieceWork.' },
+  { t: 'Be honest', b: 'Only apply for work you can actually do. Never take anything that is not yours. Never lie about your skills or experience. Dishonesty ends your time on 2911 Jobs.' },
   { t: 'Respect people and property', b: 'Treat the poster, their family, their staff and their property with respect. No shouting, no insults, no harassment of any kind — in person or in messages.' },
   { t: 'Stay safe', b: 'Do not take risks with your body to finish a job. If the work looks dangerous, or is very different from what was described, stop and report it in the app.' },
   { t: 'Money', b: 'The pay shown on the job is the pay. Do not demand more money once you arrive. Payment happens between you and the poster exactly as agreed.' },
   { t: 'Your rating is your future', b: 'After every job, posters rate you. High ratings bring more work and better pay. Low ratings and complaints push you down the list where nobody hires.' },
   { t: 'One person, one account', b: 'One account per person. Fake or duplicate accounts are removed, together with any giveaway entries tied to them.' },
-  { t: 'If something goes wrong', b: 'Talk it through in the app messages first — most problems are misunderstandings. If you cannot resolve it, report the job and the PieceWork team will step in.' },
+  { t: 'If something goes wrong', b: 'Talk it through in the app messages first — most problems are misunderstandings. If you cannot resolve it, report the job and the 2911 Jobs team will step in.' },
 ];
 
 /** Orientation: read the Code of Conduct, agree, then you can apply for jobs. */
@@ -5161,7 +4822,7 @@ async function viewOrientation() {
   app.innerHTML = `
   <div class="view"><div class="page">
     <h1 class="page-title">Worker orientation</h1>
-    <p class="page-sub">Read this short code of conduct. You only do it once — then you can apply for any job on PieceWork.</p>
+    <p class="page-sub">Read this short code of conduct. You only do it once — then you can apply for any job on 2911 Jobs.</p>
     ${ORIENTATION_SECTIONS.map((s, i) => `
       <div class="card">
         <h3 style="margin:0 0 6px"><span class="tbadge tb-verified" style="margin-right:8px">${i + 1}</span>${esc(s.t)}</h3>
@@ -5196,8 +4857,8 @@ function viewTerms() {
     <h1 class="page-title">Terms and Conditions</h1>
     <p class="page-sub">Last updated: 5 October 2026</p>
     <div class="card">
-      <h3 style="margin-top:0">1. What PieceWork is</h3>
-      <p>PieceWork Zambia ("PieceWork", "we") is a marketplace that connects people who need piece work done ("posters") with people looking for piece work ("workers"). PieceWork is a product of 2911 IT Services. We provide the platform only. We are <b>not</b> an employer, employment agent, contractor or subcontractor of any worker, and we are <b>not</b> a party to any agreement between a poster and a worker.</p>
+      <h3 style="margin-top:0">1. What 2911 Jobs is</h3>
+      <p>2911 Jobs (\"we\") is a marketplace that connects people who need piece work done ("posters") with people looking for piece work ("workers"). 2911 Jobs is a product of 2911 IT Services. We provide the platform only. We are <b>not</b> an employer, employment agent, contractor or subcontractor of any worker, and we are <b>not</b> a party to any agreement between a poster and a worker.</p>
     </div>
     <div class="card">
       <h3 style="margin-top:0">2. Your account</h3>
@@ -5205,7 +4866,7 @@ function viewTerms() {
     </div>
     <div class="card">
       <h3 style="margin-top:0">3. For posters — your responsibilities</h3>
-      <p>When you hire through PieceWork, <b>you</b> are responsible for:</p>
+      <p>When you hire through 2911 Jobs, <b>you</b> are responsible for:</p>
       <ul>
         <li>Checking the worker's profile, photo, ratings and reviews before hiring.</li>
         <li>Asking a hired worker to upload their NRC through the app so you can verify their identity.</li>
@@ -5219,7 +4880,7 @@ function viewTerms() {
       <h3 style="margin-top:0">4. Limitation of liability</h3>
       <p>To the fullest extent allowed by law:</p>
       <ul>
-        <li>PieceWork and 2911 IT Services are <b>not liable for any loss, damage, theft, injury or dispute</b> arising from work arranged through the app. Every work agreement is strictly between the poster and the worker.</li>
+        <li>2911 Jobs and 2911 IT Services are <b>not liable for any loss, damage, theft, injury or dispute</b> arising from work arranged through the app. Every work agreement is strictly between the poster and the worker.</li>
         <li>We do not guarantee the identity, qualifications, conduct or reliability of any user.</li>
         <li>The app is provided "as is". We are not liable for downtime, data loss or errors.</li>
       </ul>
@@ -5261,21 +4922,21 @@ const BOT_FAQ = [
   { keys: ['storefront', 'business', 'shop', 'verified badge', 'pacra'], q: 'How do I open a business storefront?',
     a: `Open <a href="#/businesses">Businesses</a> and apply for a storefront. Have these ready: your PACRA registration number, your 10 digit ZRA TPIN, your street address, the owner or director full legal name, and a clear photo of your PACRA certificate. We check them, then your Verified badge follows. You can still sell in the Marketplace while you wait.` },
   { keys: ['giveaway', 'draw', 'win', 'prize', 'raffle'], q: 'How does the giveaway work?',
-    a: `Share your invite link from the Win Cash page. Every friend who joins earns you one entry. The K1,500 Round 1 draw happens live on Facebook once PieceWork is live on the Google Play Store, and the winner is paid by mobile money.` },
-  { keys: ['free', 'cost', 'pay to', 'price', 'commission', 'charges', 'fee'], q: 'Is PieceWork free?',
-    a: `Yes, PieceWork is free right now: joining, posting jobs, applying and selling are all free during this growth period. From around 23 January 2027, posting a job becomes a paid feature. PieceWork never takes a cut of the money you earn from a job.` },
+    a: `Share your invite link from the Win Cash page. Every friend who joins earns you one entry. The K1,500 Round 1 draw happens live on Facebook once 2911 Jobs is live on the Google Play Store, and the winner is paid by mobile money.` },
+  { keys: ['free', 'cost', 'pay to', 'price', 'commission', 'charges', 'fee'], q: 'Is 2911 Jobs free?',
+    a: `Yes, 2911 Jobs is free right now: joining, posting jobs, applying and selling are all free during this growth period. From around 23 January 2027, posting a job becomes a paid feature. 2911 Jobs never takes a cut of the money you earn from a job.` },
   { keys: ['delete my account', 'delete account', 'deactivate', 'close my account', 'remove my account'], q: 'Delete or deactivate my account',
     a: `Go to Profile, then Edit Profile, and scroll to the Account section. Deactivate hides your profile and listings and you can come back any time by signing in and tapping Reactivate. Delete removes your account permanently and frees your number. Full details: pieceworkzambia.com/delete-account.html` },
   { keys: ['scam', 'fraud', 'report', 'fake', 'stole', 'cheated'], q: 'How do I report a problem person?',
-    a: `Stay safe: meet in a public place for first jobs, agree the pay before you start, and never pay any registration fee to get work, real jobs on PieceWork never ask for money up front. To report someone, open a ticket below under Report a problem and tell us what happened, or use the report option on their listing or profile.` },
+    a: `Stay safe: meet in a public place for first jobs, agree the pay before you start, and never pay any registration fee to get work, real jobs on 2911 Jobs never ask for money up front. To report someone, open a ticket below under Report a problem and tell us what happened, or use the report option on their listing or profile.` },
   { keys: ['nrc', 'national registration', 'identity document', 'id card'], q: 'Why do you ask for my NRC?',
     a: `Your NRC is only ever shown to the poster who actually hired you, never publicly. It is watermarked with the viewer's name, every view is logged, and it deletes itself after 10 days. It protects posters from no-shows and protects you by proving who you are.` },
   { keys: ['google play', 'play store', 'download', 'app store', 'iphone', 'install'], q: 'When is the app on Google Play?',
-    a: `PieceWork is in final closed testing for Google Play right now. The good news: the web app already does everything. Open pieceworkzambia.com in Chrome and choose Add to Home Screen, it works like an app, on Android and iPhone.` },
+    a: `2911 Jobs is in final closed testing for Google Play right now. The good news: the web app already does everything. Open pieceworkzambia.com in Chrome and choose Add to Home Screen, it works like an app, on Android and iPhone.` },
   { keys: ['orientation', 'training', 'course'], q: 'What is the worker orientation?',
-    a: `A short in-app orientation that shows you how PieceWork works and how to stay safe and get hired. Posters can see who finished it, and finished profiles get more acceptances. You will find it in your Profile.` },
+    a: `A short in-app orientation that shows you how 2911 Jobs works and how to stay safe and get hired. Posters can see who finished it, and finished profiles get more acceptances. You will find it in your Profile.` },
   { keys: ['get paid', 'paid', 'momo', 'mobile money', 'airtel money', 'payment for work'], q: 'How do I get paid for work?',
-    a: `The poster pays you directly, most people use MTN Mobile Money or Airtel Money. Agree the amount and when you will be paid before you start. PieceWork does not hold wages, so if a poster does not pay, open a ticket and tell us.` },
+    a: `The poster pays you directly, most people use MTN Mobile Money or Airtel Money. Agree the amount and when you will be paid before you start. 2911 Jobs does not hold wages, so if a poster does not pay, open a ticket and tell us.` },
   { keys: ['change my', 'edit profile', 'wrong city', 'update'], q: 'How do I fix my profile?',
     a: `Go to Profile, then Edit Profile. You can change your name, city, bio, photo and selfie there. Your phone number is your account identity, so it cannot be changed in the app; if you lost that number, open a ticket below and we will help.` },
 ];
@@ -5326,7 +4987,7 @@ function viewHow() {
       <div id="ticket-body">${loadingHtml('Loading tickets...')}</div>
     </div>
 
-    <h2 class="page-title" style="font-size:1.25rem;margin-top:26px">How PieceWork works</h2>
+    <h2 class="page-title" style="font-size:1.25rem;margin-top:26px">How 2911 Jobs works</h2>
     <div class="steps">
       <div class="card"><div class="step-n">1</div><div><h4>Hire workers (or find work)</h4><p>Need hands for an event, a move, cleaning or building? Post the job with the pay in Kwacha. Looking for work? Browse jobs near you.</p></div></div>
       <div class="card"><div class="step-n">2</div><div><h4>Apply or hire in the app</h4><p>Workers apply with one tap. Posters review applicants, check their ratings, and accept the right people.</p></div></div>
@@ -5337,7 +4998,7 @@ function viewHow() {
     ${momoNoteHtml()}
     <div class="card" style="text-align:center">
       <h3 style="margin-top:0">Stay safe</h3>
-      <p class="small muted">Meet in public places for first jobs. Never pay any registration fee to get work. Real jobs on PieceWork never ask for money up front.</p>
+      <p class="small muted">Meet in public places for first jobs. Never pay any registration fee to get work. Real jobs on 2911 Jobs never ask for money up front.</p>
       <a class="btn btn-primary" href="#/register">Get started, it is free</a>
       <div style="margin-top:10px"><a class="link-btn" href="#/about">Our story, why Zac built this</a></div>
     </div>
@@ -5369,7 +5030,7 @@ function botAsk(text) {
 function initBot() {
   const log = document.getElementById('bot-log');
   if (!log) return;
-  log.innerHTML = supBubble('bot', `Hi, this is Zac, your assistant. Ask me anything about PieceWork, or tap a topic below.`);
+  log.innerHTML = supBubble('bot', `Hi, this is Zac, your assistant. Ask me anything about 2911 Jobs, or tap a topic below.`);
   const chips = document.getElementById('bot-chips');
   const picks = ['How do I post a job?', 'My selfie was rejected', 'I forgot my password', 'Why can I not see a phone number?', 'How do I sell on the Marketplace?', 'Delete or deactivate my account'];
   chips.innerHTML = picks.map(p => `<button type="button" class="sup-chip" data-q="${esc(p)}">${esc(p)}</button>`).join('');
@@ -5847,7 +5508,7 @@ async function viewInvite() {
   app.innerHTML = `
   <div class="view"><div class="page" style="max-width:520px;margin:0 auto">
     <h1 class="page-title">Win cash prizes 🎉</h1>
-    <p class="page-sub">Invite friends to PieceWork Zambia. Every friend who joins with your link earns you entries into the live giveaway draw.</p>
+    <p class="page-sub">Invite friends to 2911 Jobs. Every friend who joins with your link earns you entries into the live giveaway draw.</p>
     <div id="invite-body">${loadingHtml('Loading…')}</div>
   </div></div>`;
   const body = document.getElementById('invite-body');
@@ -5922,7 +5583,7 @@ async function viewAdmin() {
   if (!requireAuth('#/admin')) return;
   const mod = currentUser.is_admin || currentUser.is_support;
   if (!mod) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork team only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs team only.')}</div></div>`;
     return;
   }
   if (!currentUser.is_admin) {
@@ -5959,7 +5620,7 @@ async function viewAdmin() {
     const mrow = (href, ic, label, badge) => `<a href="${href}">${icon(ic)}<span>${label}</span>${badge ? `<span class="dash-badge">${badge}</span>` : ''}<span class="chev">${icon('chevR')}</span></a>`;
     body.innerHTML = `
       <div class="admin-dash">
-        <div class="dash-head"><h2>Admin Dashboard</h2><span>PieceWork Zambia at a glance</span></div>
+        <div class="dash-head"><h2>Admin Dashboard</h2><span>2911 Jobs at a glance</span></div>
         <div class="dash-tiles">
           ${tile('#2563EB', 'users', 'Users', s.users)}
           ${tile('#10B981', 'briefcase', 'Jobs', jobsTotal)}
@@ -6096,7 +5757,7 @@ async function badgeSelfieCount() {
 
 /** Trust badges: vetting tiers shown on profiles and worker cards. */
 const TRUST_BADGE_DEFS = {
-  verified: { label: 'Verified', icon: 'check', cls: 'tb-verified', hint: 'Identity selfie verified by the PieceWork team' },
+  verified: { label: 'Verified', icon: 'check', cls: 'tb-verified', hint: 'Identity selfie verified by the 2911 Jobs team' },
   id: { label: 'ID verified', icon: 'shield', cls: 'tb-id', hint: 'National ID on file' },
   vouched: { label: 'Vouched', icon: 'users', cls: 'tb-vouched', hint: 'Vouched for by people who know them' },
   proven: { label: 'Proven', icon: null, cls: 'tb-proven', hint: 'Completed jobs with top ratings' },
@@ -6136,10 +5797,10 @@ function selfieGuideHtml() {
 
 /** Quick WhatsApp reason templates for messaging users waiting on selfie review. */
 const SELFIE_REASONS = [
-  { label: 'Two people in selfie', text: (n) => `Hi ${n}, your PieceWork Zambia verification selfie was not approved because it shows two people. Please take a new selfie with only yourself, face clearly visible, and upload it again under Profile in the app.` },
-  { label: 'Face not clear', text: (n) => `Hi ${n}, your PieceWork Zambia verification selfie was not approved because your face is not clearly visible. Please retake it in good light, without sunglasses or a hat, and upload it again under Profile in the app.` },
-  { label: '24-hour wait', text: (n) => `Hi ${n}, thanks for joining PieceWork Zambia. Selfie verifications can take up to 24 hours. Yours is in the queue and we will review it soon. You can still browse jobs while you wait.` },
-  { label: 'Custom message', text: (n) => `Hi ${n}, this is the PieceWork Zambia team about your verification selfie: ` },
+  { label: 'Two people in selfie', text: (n) => `Hi ${n}, your 2911 Jobs verification selfie was not approved because it shows two people. Please take a new selfie with only yourself, face clearly visible, and upload it again under Profile in the app.` },
+  { label: 'Face not clear', text: (n) => `Hi ${n}, your 2911 Jobs verification selfie was not approved because your face is not clearly visible. Please retake it in good light, without sunglasses or a hat, and upload it again under Profile in the app.` },
+  { label: '24-hour wait', text: (n) => `Hi ${n}, thanks for joining 2911 Jobs. Selfie verifications can take up to 24 hours. Yours is in the queue and we will review it soon. You can still browse jobs while you wait.` },
+  { label: 'Custom message', text: (n) => `Hi ${n}, this is the 2911 Jobs team about your verification selfie: ` },
 ];
 
 /** Fetch the pending food-license count and badge the review buttons. */
@@ -6155,7 +5816,7 @@ async function badgeFoodLicenseCount() {
 async function viewFoodLicenses() {
   if (!requireAuth('#/admin/food-licenses')) return;
   if (!(currentUser.is_admin || currentUser.is_support)) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork team only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs team only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -6223,7 +5884,7 @@ async function viewFoodLicenses() {
 async function viewVerifications() {
   if (!requireAuth('#/admin/verifications')) return;
   if (!(currentUser.is_admin || currentUser.is_support)) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -6306,7 +5967,7 @@ async function viewVerifications() {
           <span class="small muted">${esc(u.phone)} · ${esc(u.city)} · joined ${esc(fmtDate(u.created_at))}</span>
           <div class="btn-row" style="margin-top:10px">
             <button class="btn btn-sm btn-primary" data-notify="${u.id}">${icon('message')}Send the SMS</button>
-            <a class="btn btn-sm btn-outline" href="${waLink(u.phone, 'Hi ' + String(u.name || '').split(' ')[0] + ', this is the PieceWork Zambia team about your verification selfie: ')}" target="_blank" rel="noopener">${icon('message')}WhatsApp</a>
+            <a class="btn btn-sm btn-outline" href="${waLink(u.phone, 'Hi ' + String(u.name || '').split(' ')[0] + ', this is the 2911 Jobs team about your verification selfie: ')}" target="_blank" rel="noopener">${icon('message')}WhatsApp</a>
           </div>
         </div>`).join('');
       box2.innerHTML = stats + `
@@ -6331,7 +5992,7 @@ async function viewVerifications() {
 async function viewAdminResets() {
   if (!requireAuth('#/admin/resets')) return;
   if (!(currentUser.is_admin || currentUser.is_support)) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -6379,7 +6040,7 @@ async function viewAdminResets() {
     try {
       const { code, user_name, user_phone } = await api(`/api/admin/resets/${btn.dataset.issue}/issue`, { method: 'POST' });
       toast(`Code issued for ${user_name}.`);
-      window.open(waLink(user_phone, `Hello ${user_name}, your PieceWork password reset code is ${code}. Enter it in the app within 30 minutes. Do not share it with anyone.`), '_blank', 'noopener');
+      window.open(waLink(user_phone, `Hello ${user_name}, your 2911 Jobs password reset code is ${code}. Enter it in the app within 30 minutes. Do not share it with anyone.`), '_blank', 'noopener');
       load();
     } catch (e) { toast(e.message, true); btn.disabled = false; }
   }
@@ -6390,7 +6051,7 @@ async function viewAdminResets() {
 async function viewAdminJobs() {
   if (!requireAuth('#/admin/jobs')) return;
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   const statuses = ['all', 'open', 'filled', 'completed', 'cancelled'];
@@ -6468,7 +6129,7 @@ async function viewAdminJobs() {
 async function viewUserActivity() {
   if (!requireAuth('#/admin/activity')) return;
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -6645,7 +6306,7 @@ async function viewUserActivity() {
 async function viewAdminReports() {
   if (!requireAuth('#/admin/reports')) return;
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -6703,7 +6364,7 @@ async function viewAdminReports() {
 async function viewAdminAudit() {
   if (!requireAuth('#/admin/audit')) return;
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -6733,7 +6394,7 @@ async function viewAdminAudit() {
 async function viewAdminCategories() {
   if (!requireAuth('#/admin/categories')) return;
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -6793,7 +6454,7 @@ async function viewAdminCategories() {
 async function viewTesters() {
   if (!requireAuth('#/admin/testers')) return;
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -6895,7 +6556,7 @@ async function viewTesters() {
 /** Admin referral monitor — signups, leaderboard, recent joins, cheats. */async function viewReferralDashboard() {
   if (!requireAuth('#/admin/referrals')) return;
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -6956,7 +6617,7 @@ async function viewTesters() {
 async function viewGiveawayDraw(id) {
   if (!requireAuth('#/admin/draw/' + id)) return;
   if (!currentUser.is_admin) {
-    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the PieceWork admin only.')}</div></div>`;
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs admin only.')}</div></div>`;
     return;
   }
   app.innerHTML = `
@@ -7135,11 +6796,6 @@ async function router() {
 }
 
 window.addEventListener('hashchange', router);
-// The signed-out landing swaps between the app screen and the website
-// when a browser window crosses the desktop width.
-window.matchMedia('(min-width: 900px)').addEventListener('change', () => {
-  if (!currentUser && /^#?\/?$/.test(location.hash)) viewLanding();
-});
 
 /* ---------------- global click delegation ---------------- */
 document.addEventListener('click', (e) => {
@@ -7147,21 +6803,21 @@ document.addEventListener('click', (e) => {
   if (shareBtn) {
     e.preventDefault();
     e.stopPropagation();
-    shareJob(shareBtn.dataset.share, shareBtn.dataset.title || 'Job on PieceWork Zambia');
+    shareJob(shareBtn.dataset.share, shareBtn.dataset.title || 'Job on 2911 Jobs');
     return;
   }
   const productShareBtn = e.target.closest('[data-share-product]');
   if (productShareBtn) {
     e.preventDefault();
     e.stopPropagation();
-    shareProduct(productShareBtn.dataset.shareProduct, productShareBtn.dataset.title || 'Item on PieceWork Zambia');
+    shareProduct(productShareBtn.dataset.shareProduct, productShareBtn.dataset.title || 'Item on 2911 Jobs');
     return;
   }
   const businessShareBtn = e.target.closest('[data-share-business]');
   if (businessShareBtn) {
     e.preventDefault();
     e.stopPropagation();
-    shareBusiness(businessShareBtn.dataset.shareBusiness, businessShareBtn.dataset.title || 'Storefront on PieceWork Zambia');
+    shareBusiness(businessShareBtn.dataset.shareBusiness, businessShareBtn.dataset.title || 'Storefront on 2911 Jobs');
     return;
   }
   const saveBtn = e.target.closest('[data-save]');
@@ -7210,7 +6866,7 @@ function getInviteRef() {
 })();
 
 function shareText(link, prize) {
-  return `Join me on PieceWork Zambia and find piece work near you! Sign up with my link and I get entries into the K${prize} giveaway draw: ${link}`;
+  return `Join me on 2911 Jobs and find piece work near you! Sign up with my link and I get entries into the K${prize} giveaway draw: ${link}`;
 }
 
 (async function boot() {

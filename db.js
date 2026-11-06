@@ -188,7 +188,7 @@ const SCHEMA = [
     sort       INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
-  // 2.0 M3: marketplace. Products are sold peer to peer; PieceWork never
+  // 2.0 M3: marketplace. Products are sold peer to peer; 2911 Jobs never
   // handles the money. Photos mirror job_photos (data URIs, served via a
   // dedicated endpoint). Offers are proposals, not payments.
   `CREATE TABLE IF NOT EXISTS products (
@@ -399,7 +399,7 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_ads_status_ends ON ads(status, ends_at)`,
   `CREATE INDEX IF NOT EXISTS idx_ads_owner ON ads(owner_id)`,
   // Support hub (2026-10-29): tickets, live chat queue and the FAQ bot's
-  // unanswered-question log. Guests are phone-identified (PieceWork
+  // unanswered-question log. Guests are phone-identified (2911 Jobs
   // accounts are phone-based, no email is collected), so user_id is
   // nullable and guest_name/guest_phone carry the contact instead.
   `CREATE TABLE IF NOT EXISTS support_tickets (

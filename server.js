@@ -1,6 +1,6 @@
 'use strict';
 /**
- * PieceWork Zambia — Express API + static frontend.
+ * 2911 Jobs — Express API + static frontend.
  */
 require('dotenv').config();
 const express = require('express');
@@ -95,7 +95,7 @@ app.use((req, res, next) => {
 });
 
 // ---------------------------------------------------------------- device id
-// Anti-fraud: one PieceWork account per browser. A long-lived device cookie
+// Anti-fraud: one 2911 Jobs account per browser. A long-lived device cookie
 // identifies the browser; registration is refused when the device already
 // has an account. The cookie alone can be cleared, so the signup IP is also
 // recorded — same-IP signups are allowed but disqualified from giveaways.
@@ -417,7 +417,7 @@ async function auth(req, res, next) {
     const user = await getOne('SELECT * FROM users WHERE id = ?', [payload.sub]);
     if (!user) return err(res, 401, 'Account no longer exists.');
     if (user.suspended_at && !isAdmin(user)) {
-      return err(res, 403, 'This account has been suspended. Contact PieceWork support if you believe this is a mistake.');
+      return err(res, 403, 'This account has been suspended. Contact 2911 Jobs support if you believe this is a mistake.');
     }
     if (user.deactivated_at && !isAdmin(user)) {
       return err(res, 403, 'This account is deactivated. Sign in and choose Reactivate to use it again.');
@@ -486,7 +486,7 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   // Anti-fraud: one account per browser/device.
   const deviceId = req.deviceId;
   const devExists = await getOne('SELECT id FROM users WHERE device_id = ?', [deviceId]);
-  if (devExists) return err(res, 409, 'This device already has a PieceWork account. Please sign in instead.');
+  if (devExists) return err(res, 409, 'This device already has a 2911 Jobs account. Please sign in instead.');
 
   // A code was just sent to this number: make the sender wait out the
   // resend cooldown instead of overwriting the pending signup.
@@ -563,7 +563,7 @@ app.post('/api/auth/login', loginIpLimiter, loginLimiter, ah(async (req, res) =>
     return err(res, 401, 'Wrong number or password.');
   }
   if (user.suspended_at && !isAdmin(user)) {
-    return err(res, 403, 'This account has been suspended. Contact PieceWork support if you believe this is a mistake.');
+    return err(res, 403, 'This account has been suspended. Contact 2911 Jobs support if you believe this is a mistake.');
   }
   if (user.deactivated_at && !isAdmin(user)) {
     return res.status(403).json({ error: 'This account is deactivated.', code: 'ACCOUNT_DEACTIVATED' });
@@ -583,7 +583,7 @@ app.post('/api/auth/reactivate', loginIpLimiter, loginLimiter, ah(async (req, re
     return err(res, 401, 'Wrong number or password.');
   }
   if (user.suspended_at && !isAdmin(user)) {
-    return err(res, 403, 'This account has been suspended. Contact PieceWork support if you believe this is a mistake.');
+    return err(res, 403, 'This account has been suspended. Contact 2911 Jobs support if you believe this is a mistake.');
   }
   if (user.deactivated_at) {
     await runWrite('UPDATE users SET deactivated_at = NULL WHERE id = ?', [user.id]);
@@ -706,7 +706,7 @@ function composeSms(build, name, title) {
 // sha256-hashed at rest, 30-minute expiry, burned after 5 wrong attempts,
 // and every send is written to sms_log under kind 'signup_code'.
 function signupCodeMessage(code) {
-  return `Hi, this is Zac, your assistant. Your PieceWork Zambia signup code is ${code}. It expires in ${SIGNUP_CODE_TTL_MIN} minutes. Do not share it.`;
+  return `Hi, this is Zac, your assistant. Your 2911 Jobs signup code is ${code}. It expires in ${SIGNUP_CODE_TTL_MIN} minutes. Do not share it.`;
 }
 
 /** Send a signup code over the Africa's Talking transport and log the
@@ -802,7 +802,7 @@ app.post('/api/auth/register/verify', resetLimiter, ah(async (req, res) => {
   }
   const deviceId = req.deviceId;
   const devExists = await getOne('SELECT id FROM users WHERE device_id = ?', [deviceId]);
-  if (devExists) return err(res, 409, 'This device already has a PieceWork account. Please sign in instead.');
+  if (devExists) return err(res, 409, 'This device already has a 2911 Jobs account. Please sign in instead.');
 
   // Referral: resolve the code stored with the pending signup.
   let referredBy = null;
@@ -843,7 +843,7 @@ app.post('/api/auth/register/verify', resetLimiter, ah(async (req, res) => {
   setAuthCookie(res, signToken(user.id));
   // Registration confirmation text (fire-and-forget; logged either way).
   notifySms(user.id, 'welcome', composeSms(
-    (n) => `Hi, this is Zac, your assistant. Welcome to PieceWork Zambia, ${n}. Your account is ready: pieceworkzambia.com`,
+    (n) => `Hi, this is Zac, your assistant. Welcome to 2911 Jobs, ${n}. Your account is ready: pieceworkzambia.com`,
     user.name, ''), user.phone).catch(() => {});
   res.status(201).json({ user: publicUser(user) });
 }));
@@ -921,7 +921,7 @@ async function deliverPush(userId, payload) {
     if (!ensureVapid()) return counts;
     const subs = await getAll('SELECT * FROM push_subscriptions WHERE user_id = ?', [userId]);
     const data = JSON.stringify({
-      title: payload.title || 'PieceWork Zambia',
+      title: payload.title || '2911 Jobs',
       body: payload.body || '',
       url: payload.url || '#/',
       tag: payload.tag || 'piecework',
@@ -1004,7 +1004,7 @@ app.post('/api/push/unsubscribe', ah(auth), ah(async (req, res) => {
 app.post('/api/push/test', ah(auth), ah(async (req, res) => {
   if (!pushEnabled()) return res.json({ sent: 0, failed: 0, skipped: true });
   const counts = await deliverPush(req.user.id, {
-    title: 'PieceWork Zambia',
+    title: '2911 Jobs',
     body: 'Test notification: push is working on this device.',
     url: '#/profile',
     tag: 'push-test',
@@ -1272,7 +1272,7 @@ app.post('/api/auth/forgot', forgotLimiter, ah(async (req, res) => {
     // Reset sends are written to sms_log like every other member text,
     // so the admin SMS log can prove a code was sent (Oct 27, 2026:
     // this handler used to send direct and stay invisible to support).
-    const resetText = `Hi, this is Zac, your assistant. Here is your code: ${code}. It expires in ${RESET_CODE_TTL_MIN} minutes. Do not share it. PieceWork Zambia`;
+    const resetText = `Hi, this is Zac, your assistant. Here is your code: ${code}. It expires in ${RESET_CODE_TTL_MIN} minutes. Do not share it. 2911 Jobs`;
     try {
       await sendSms(normPhone, resetText);
       smsSent = true;
@@ -2022,7 +2022,7 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
       req.user.name, job.title
     )).catch(() => {});
       notifyPush(job.poster_id, {
-        title: 'PieceWork Zambia',
+        title: '2911 Jobs',
         body: `${req.user.name} applied for your job '${job.title}'.`,
         url: `#/job/${job.id}`,
         tag: `application-${job.id}`,
@@ -2040,7 +2040,7 @@ app.post('/api/jobs/:id/apply', ah(auth), ah(async (req, res) => {
       req.user.name, job.title
     )).catch(() => {});
     notifyPush(job.poster_id, {
-      title: 'PieceWork Zambia',
+      title: '2911 Jobs',
       body: `${req.user.name} applied for your job '${job.title}'.`,
       url: `#/job/${job.id}`,
       tag: `application-${job.id}`,
@@ -2148,7 +2148,7 @@ app.patch('/api/applications/:id', ah(auth), ah(async (req, res) => {
       '', job.title
     )).catch(() => {});
     notifyPush(appRow.worker_id, {
-      title: 'PieceWork Zambia',
+      title: '2911 Jobs',
       body: `Good news, you were accepted for '${job.title}'. Open the job to see the poster's number.`,
       url: `#/job/${job.id}`,
       tag: `accepted-${id}`,
@@ -2384,14 +2384,14 @@ app.get('/api/admin/verifications', ah(auth), ah(async (req, res) => {
 }));
 
 // The standard rejection notice (Zac, Oct 24): one SMS segment, in the
-// same voice as every other PieceWork text, plus a push for members who
+// same voice as every other 2911 Jobs text, plus a push for members who
 // enabled notifications. The K1,500 giveaway consequence rides on the
 // push and on the Edit Profile notice, to keep the SMS to one segment.
-const SELFIE_REJECTED_SMS = 'Hi, this is Zac, your assistant. Your PieceWork profile pic was not approved and is blocking recruiters. Open Profile, Edit profile and upload a clear selfie.';
+const SELFIE_REJECTED_SMS = 'Hi, this is Zac, your assistant. Your 2911 Jobs profile pic was not approved and is blocking recruiters. Open Profile, Edit profile and upload a clear selfie.';
 function notifySelfieRejected(userId) {
   notifySms(userId, 'selfie_rejected', SELFIE_REJECTED_SMS).catch(() => {});
   notifyPush(userId, {
-    title: 'PieceWork Zambia',
+    title: '2911 Jobs',
     body: 'Your profile pic verification was not approved. It is blocking recruiters from moving to the next step, and unapproved pics disqualify you from the K1,500 giveaway. Tap to fix your profile.',
     url: '#/profile/edit',
     tag: 'selfie-rejected',
@@ -2617,7 +2617,7 @@ app.delete('/api/users/me', ah(auth), ah(async (req, res) => {
   const id = req.user.id;
   const drawWin = await getOne('SELECT id FROM giveaway_draws WHERE winner_user_id = ? LIMIT 1', [id]);
   if (drawWin) {
-    return err(res, 422, 'This account is recorded as a giveaway winner and cannot be deleted automatically. Contact PieceWork support and we will handle it.');
+    return err(res, 422, 'This account is recorded as a giveaway winner and cannot be deleted automatically. Contact 2911 Jobs support and we will handle it.');
   }
   await runWrite('UPDATE giveaways SET winner_user_id = NULL WHERE winner_user_id = ?', [id]);
   await runWrite('UPDATE sms_log SET user_id = NULL WHERE user_id = ?', [id]);
@@ -3005,9 +3005,9 @@ app.patch('/api/admin/users/:id/profile', ah(auth), ah(async (req, res) => {
 // Ask a member to upload a document: one tap sends an SMS and a push
 // in Zac's voice pointing at Edit Profile, where all three live.
 const DOC_REQUESTS = {
-  selfie: 'Hi, this is Zac, your assistant. PieceWork needs a clear selfie to verify your profile. Open the app, go to Profile, Edit profile, and upload it today.',
-  photo: 'Hi, this is Zac, your assistant. PieceWork needs a clear profile photo on your account. Open the app, go to Profile, Edit profile, and add your photo today.',
-  food_license: 'Hi, this is Zac, your assistant. PieceWork needs your food handlers licence. Open the app, go to Profile, Edit profile, and upload it today. Thank you.',
+  selfie: 'Hi, this is Zac, your assistant. 2911 Jobs needs a clear selfie to verify your profile. Open the app, go to Profile, Edit profile, and upload it today.',
+  photo: 'Hi, this is Zac, your assistant. 2911 Jobs needs a clear profile photo on your account. Open the app, go to Profile, Edit profile, and add your photo today.',
+  food_license: 'Hi, this is Zac, your assistant. 2911 Jobs needs your food handlers licence. Open the app, go to Profile, Edit profile, and upload it today. Thank you.',
 };
 app.post('/api/admin/users/:id/request-doc', ah(auth), ah(async (req, res) => {
   if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
@@ -3019,7 +3019,7 @@ app.post('/api/admin/users/:id/request-doc', ah(auth), ah(async (req, res) => {
   const text = DOC_REQUESTS[kind];
   if (!text) return err(res, 422, 'Choose a document to request.');
   notifySms(id, 'doc_request_' + kind, text).catch(() => {});
-  notifyPush(id, { title: 'PieceWork Zambia', body: text, url: '#/profile/edit', tag: 'doc-request' }).catch(() => {});
+  notifyPush(id, { title: '2911 Jobs', body: text, url: '#/profile/edit', tag: 'doc-request' }).catch(() => {});
   logAdmin(req, 'user.request_doc', 'user', id, kind);
   res.json({ ok: true, id, kind });
 }));
@@ -3711,7 +3711,7 @@ app.patch('/api/admin/businesses/:id/verification', ah(auth), ah(async (req, res
 }));
 
 // ---------------------------------------------------------------- marketplace (2.0 M3)
-// Peer-to-peer listings. PieceWork never touches the money: buyers and
+// Peer-to-peer listings. 2911 Jobs never touches the money: buyers and
 // sellers agree and pay each other directly, exactly like jobs.
 const PRODUCT_CONDITIONS = ['New', 'Like new', 'Good', 'Fair'];
 const MAX_PRODUCT_PHOTOS = 5;
@@ -3999,7 +3999,7 @@ app.post('/api/products/:id/offers', ah(auth), ah(async (req, res) => {
       req.user.name, product.title
     )).catch(() => {});
       notifyPush(product.seller_id, {
-        title: 'PieceWork Zambia',
+        title: '2911 Jobs',
         body: `${req.user.name} offered K${amount.toLocaleString('en-US')} for your item '${product.title}'.`,
         url: `#/product/${product.id}`,
         tag: `offer-${existing.id}`,
@@ -4017,7 +4017,7 @@ app.post('/api/products/:id/offers', ah(auth), ah(async (req, res) => {
       req.user.name, product.title
     )).catch(() => {});
     notifyPush(product.seller_id, {
-      title: 'PieceWork Zambia',
+      title: '2911 Jobs',
       body: `${req.user.name} offered K${amount.toLocaleString('en-US')} for your item '${product.title}'.`,
       url: `#/product/${product.id}`,
       tag: `offer-${insertId(info)}`,
@@ -4338,7 +4338,7 @@ function sharePreviewPage(res, { title, desc, image, target, self }) {
 <html lang="en"><head><meta charset="utf-8">
 <title>${t}</title>
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="PieceWork Zambia">
+<meta property="og:site_name" content="2911 Jobs">
 <meta property="og:title" content="${t}">
 <meta property="og:description" content="${d}">
 <meta property="og:image" content="${img}">
@@ -4348,14 +4348,14 @@ function sharePreviewPage(res, { title, desc, image, target, self }) {
 <meta name="twitter:description" content="${d}">
 <meta name="twitter:image" content="${img}">
 </head><body style="font-family:sans-serif;background:#101B35;color:#F5F7FB;text-align:center;padding:40px">
-<p>${t}</p><p><img src="${img}" alt="${t}" style="max-width:420px;width:100%;border-radius:12px"></p><p><a href="${url}" style="color:#FFB547">Open on PieceWork Zambia</a></p>
+<p>${t}</p><p><img src="${img}" alt="${t}" style="max-width:420px;width:100%;border-radius:12px"></p><p><a href="${url}" style="color:#FFB547">Open on 2911 Jobs</a></p>
 <script>location.replace(${JSON.stringify(target)});</script>
 </body></html>`);
 }
 
 function genericShare(res, target, self) {
   return sharePreviewPage(res, {
-    title: 'PieceWork Zambia: Quick jobs. Quick cash.',
+    title: '2911 Jobs: Quick jobs. Quick cash.',
     desc: 'Find piece work, hire trusted help, buy and sell in the Marketplace, all across Zambia.',
     image: BRAND_OG_IMAGE,
     target,
@@ -4394,8 +4394,8 @@ app.get('/s/business/:slug', ah(async (req, res) => {
     ? `${SHARE_ORIGIN}/api/businesses/${b.id}/image/cover`
     : (b.logo ? `${SHARE_ORIGIN}/api/businesses/${b.id}/image/logo` : BRAND_OG_IMAGE);
   return sharePreviewPage(res, {
-    title: `${b.name} · Storefront on PieceWork Zambia`,
-    desc: excerpt(b.tagline || b.description, 180) || `Visit ${b.name} on PieceWork Zambia.`,
+    title: `${b.name} · Storefront on 2911 Jobs`,
+    desc: excerpt(b.tagline || b.description, 180) || `Visit ${b.name} on 2911 Jobs.`,
     image,
     target: `${SHARE_ORIGIN}/#/business/${encodeURIComponent(b.slug)}`,
     self: `${SHARE_ORIGIN}/s/business/${encodeURIComponent(b.slug)}`,
@@ -4406,8 +4406,8 @@ app.get('/s/product/:id', ah(async (req, res) => {
   const p = await getOne(`SELECT pr.*, (SELECT ph.id FROM product_photos ph WHERE ph.product_id = pr.id ORDER BY ph.sort, ph.id LIMIT 1) AS cover_photo_id FROM products pr WHERE pr.id = ?`, [req.params.id]);
   if (!p || p.status !== 'active') return genericShare(res, SHARE_ORIGIN + '/#/market', `${SHARE_ORIGIN}/s/product/${req.params.id}`);
   return sharePreviewPage(res, {
-    title: `${p.title} · K${Number(p.price || 0).toLocaleString('en-US')} on PieceWork Zambia`,
-    desc: excerpt(p.description, 180) || `${p.condition || ''} · ${p.city || ''} · See it on PieceWork Zambia.`,
+    title: `${p.title} · K${Number(p.price || 0).toLocaleString('en-US')} on 2911 Jobs`,
+    desc: excerpt(p.description, 180) || `${p.condition || ''} · ${p.city || ''} · See it on 2911 Jobs.`,
     image: p.cover_photo_id ? `${SHARE_ORIGIN}/api/products/${p.id}/photos/${p.cover_photo_id}` : BRAND_OG_IMAGE,
     target: `${SHARE_ORIGIN}/#/product/${p.id}`,
     self: `${SHARE_ORIGIN}/s/product/${p.id}`,
@@ -4423,8 +4423,8 @@ app.get('/s/user/:id', ah(async (req, res) => {
     statsLine = ` · ${st.jobs_completed} jobs completed · ${st.items_sold} items sold`;
   } catch { /* stats are a bonus, never block the preview */ }
   return sharePreviewPage(res, {
-    title: `${u.name} · PieceWork Zambia`,
-    desc: `${u.city || 'Zambia'}${statsLine}. See the profile, ratings and reviews on PieceWork Zambia.`,
+    title: `${u.name} · 2911 Jobs`,
+    desc: `${u.city || 'Zambia'}${statsLine}. See the profile, ratings and reviews on 2911 Jobs.`,
     image: u.avatar ? `${SHARE_ORIGIN}/api/users/${u.id}/avatar` : BRAND_OG_IMAGE,
     target: `${SHARE_ORIGIN}/#/user/${u.id}`,
     self: `${SHARE_ORIGIN}/s/user/${u.id}`,
@@ -4435,8 +4435,8 @@ app.get('/s/job/:id', ah(async (req, res) => {
   const j = await getOne(`SELECT jb.*, (SELECT ph.id FROM job_photos ph WHERE ph.job_id = jb.id ORDER BY ph.sort, ph.id LIMIT 1) AS cover_photo_id FROM jobs jb WHERE jb.id = ?`, [req.params.id]);
   if (!j || j.is_draft) return genericShare(res, SHARE_ORIGIN + '/#/jobs', `${SHARE_ORIGIN}/s/job/${req.params.id}`);
   return sharePreviewPage(res, {
-    title: `${j.title} · ${j.city} on PieceWork Zambia`,
-    desc: excerpt(j.description, 180) || `${j.category} piece work in ${j.city}. Apply on PieceWork Zambia.`,
+    title: `${j.title} · ${j.city} on 2911 Jobs`,
+    desc: excerpt(j.description, 180) || `${j.category} piece work in ${j.city}. Apply on 2911 Jobs.`,
     image: j.cover_photo_id ? `${SHARE_ORIGIN}/api/jobs/${j.id}/photos/${j.cover_photo_id}` : BRAND_OG_IMAGE,
     target: `${SHARE_ORIGIN}/#/job/${j.id}`,
     self: `${SHARE_ORIGIN}/s/job/${j.id}`,
@@ -4475,7 +4475,7 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
 });
 // ---------------------------------------------------------------- support hub
 // Tickets, a live chat queue and the FAQ bot's unanswered-question log
-// (2026-10-29). Guests are identified by phone: PieceWork accounts are
+// (2026-10-29). Guests are identified by phone: 2911 Jobs accounts are
 // phone-based and no email is collected at signup. Ticket refs are
 // PWZ-(1000 + id) so a member can quote one on any channel.
 const SUPPORT_CATEGORIES = ['Account help', 'Jobs', 'Marketplace', 'Verification', 'Payments', 'Report a problem', 'Other'];
@@ -4547,7 +4547,7 @@ app.post('/api/support/tickets', ah(maybeAuth), ah(async (req, res) => {
     guestName = supClean(b.name, 80);
     guestPhone = normalizePhone(b.phone || '');
     if (guestName.length < 2) return err(res, 422, 'Please tell us your name.');
-    if (!guestPhone) return err(res, 422, 'Please give the phone number on your PieceWork account.');
+    if (!guestPhone) return err(res, 422, 'Please give the phone number on your 2911 Jobs account.');
   }
   const ins = await runWrite(
     'INSERT INTO support_tickets (user_id, guest_name, guest_phone, category, subject) VALUES (?, ?, ?, ?, ?)',
@@ -4614,7 +4614,7 @@ app.post('/api/support/chats', ah(maybeAuth), ah(async (req, res) => {
     guestName = supClean(b.name, 80);
     guestPhone = normalizePhone(b.phone || '');
     if (guestName.length < 2) return err(res, 422, 'Please tell us your name.');
-    if (!guestPhone) return err(res, 422, 'Please give the phone number on your PieceWork account.');
+    if (!guestPhone) return err(res, 422, 'Please give the phone number on your 2911 Jobs account.');
   }
   const existing = userId
     ? await getOne(`SELECT * FROM support_chats WHERE user_id = ? AND status IN ('waiting', 'active') ORDER BY id DESC LIMIT 1`, [userId])
@@ -4831,7 +4831,7 @@ init()
   .then(async () => {
     await seedCategories();
     app.listen(PORT, () => {
-      console.log(`PieceWork Zambia running on http://localhost:${PORT}`);
+      console.log(`2911 Jobs running on http://localhost:${PORT}`);
     });
     // NRC privacy sweeper: purge expired identity docs on boot and daily.
     sweepExpiredNrc();
