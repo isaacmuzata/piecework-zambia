@@ -875,6 +875,7 @@ async function signupOtpTests() {
   await pushTests(admin.cookie);
   await adsTests({ admin, third, p2, bizId, bizSlug });
   await experiencesTests(admin.cookie, worker.cookie, worker.id, third.id);
+  await experiencesPhase3Tests(admin.cookie, worker.cookie, worker.id, third.id, third.cookie);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failures.length) console.log('Failures: ' + failures.join(' | '));
@@ -1420,13 +1421,14 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
   const bizId = Number(biz.lastInsertRowid);
   // Phase 3 (2026-11-08): experience_listings.host_id is now a FK to
   // experience_hosts(id), NOT a user id as in the Phase 2 fixtures.
-  // Create the member's host profile with id = memberId, so the
-  // host-side fixtures below resolve through the FK and the Phase 2
-  // browse code (which still joins users on host_id, to be rewired by
-  // the Phase 3 backend worker) keeps showing the member's host card.
+  // Create the member's host profile with an id (9001) deliberately
+  // DIFFERENT from the member's user id, so the suite genuinely tests
+  // the rewired join (listings -> experience_hosts -> users): the old
+  // join (users on host_id) would find no user 9001 and the host card
+  // would come back nameless.
   const hostRow = await dbExecute(
     "INSERT INTO experience_hosts (id, user_id, display_name, city, status, verification_status) VALUES (?, ?, 'Worker Tester', 'Kitwe', 'approved', 'unverified')",
-    [memberId, memberId]);
+    [9001, memberId]);
   const hostId = Number(hostRow.lastInsertRowid);
   const mkListing = async (sql, args) => Number((await dbExecute(sql, args)).lastInsertRowid);
   const stayId = await mkListing(
@@ -1471,9 +1473,12 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
 
   // The pre-fixture empty GET is cached for 60s; a write to the family
   // busts it (this also proves the bust wiring before the cache test).
+  // Phase 3: POST /api/experiences exists now (create, auth-gated), so an
+  // unauthenticated write is 401, not the old 404 — the bust still fires
+  // because the bust middleware runs before auth.
   const bust0 = await call('POST', '/api/experiences', {});
-  check('EXP: a write to the family busts the list cache (404 route, cache dropped)',
-    bust0.status === 404, 'status ' + bust0.status);
+  check('EXP: a write to the family busts the list cache (401 route, cache dropped)',
+    bust0.status === 401, 'status ' + bust0.status);
 
   const all = await call('GET', '/api/experiences');
   const allIds = (all.json.experiences || []).map((e) => e.id);
@@ -1628,7 +1633,7 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
   const c3Cache = c3.headers.get('x-cache');
   await c3.text();
   check('EXP: a write to /api/experiences busts the family cache (MISS again)',
-    bust.status === 404 && c3Cache === 'MISS', bust.status + '/' + c3Cache);
+    bust.status === 401 && c3Cache === 'MISS', bust.status + '/' + c3Cache);
 
   // Frontend (Phase 2): the served SPA bundle carries the Experiences
   // routes, views, tokens and icons, and prices are ZMW, never fmtK().
@@ -1661,4 +1666,517 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
       .every((t) => css.includes(t))
     && css.includes('.exp-price') && css.includes('.exp-hero-search') && css.includes('.btn-exp'),
     'status ' + cssRes.status);
+}
+
+// 2911 Experiences Phase 3 (2026-11-08): host onboarding, verification,
+// business opt-in, staff, listing writes, admin decisions. All rows are
+// TEST rows (EXP3 titles, TEST users). No payments, no checkout.
+async function experiencesPhase3Tests(adminCookie, memberCookie, memberId, otherId, otherCookie) {
+  const expHost2 = await registerUser('EXP Host Two', '0970000031', 'Lusaka');
+  const expStaff = await registerUser('EXP Staff Member', '0970000032', 'Kitwe');
+  const expManager = await registerUser('EXP Manager Member', '0970000034', 'Lusaka');
+  const expStranger = await registerUser('EXP Stranger', '0970000033', 'Ndola');
+  const toursCat = (await dbOne("SELECT id FROM experience_categories WHERE name = 'Tours'")).id;
+  const eventsCat = (await dbOne("SELECT id FROM experience_categories WHERE name = 'Events'")).id;
+  const bizRow = await dbOne("SELECT id FROM businesses WHERE slug = 'exp-verified-lodge-co-1'");
+  const bizId = Number(bizRow.id);
+  const PDF = 'data:application/pdf;base64,JVBERi0xLjQK';
+  const BIG_IMG = 'data:image/jpeg;base64,' + 'A'.repeat(2500000);
+  const BAD_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+  // The Phase 3 fixture: the member's host row id (9001) deliberately
+  // differs from the member's user id, so the public host card only
+  // resolves when the join goes listings -> experience_hosts -> users.
+  const fixtureHost = await dbOne('SELECT id, user_id FROM experience_hosts WHERE user_id = ?', [memberId]);
+  check('EXP3: fixture host row id differs from the member user id (rewire is genuinely tested)',
+    fixtureHost && Number(fixtureHost.id) === 9001 && Number(fixtureHost.user_id) === memberId,
+    JSON.stringify(fixtureHost));
+
+  // Signed-out writes are 401.
+  const noAuthMe = await call('GET', '/api/experiences/host/me');
+  check('EXP3: host/me signed out is 401', noAuthMe.status === 401, 'status ' + noAuthMe.status);
+  const noAuthApply = await call('POST', '/api/experiences/host/apply', { display_name: 'X' });
+  check('EXP3: host apply signed out is 401', noAuthApply.status === 401, 'status ' + noAuthApply.status);
+
+  // Member host profile + dashboard (fixture host is already approved).
+  const me = await call('GET', '/api/experiences/host/me', null, memberCookie);
+  const meHost = (me.json || {}).individual || {};
+  check('EXP3: host/me returns the member host row (approved) with a masked payout only',
+    me.status === 200 && meHost.id === 9001 && meHost.status === 'approved'
+    && meHost.account_type === 'individual' && meHost.display_name === 'Worker Tester'
+    && !('payout_reference' in meHost) && meHost.payout_reference_masked === ''
+    && Array.isArray(me.json.businesses) && me.json.businesses.length === 0,
+    JSON.stringify(me.json).slice(0, 200));
+  const dash = await call('GET', '/api/experiences/host/dashboard', null, memberCookie);
+  check('EXP3: host dashboard carries real zero request/booking/earning counts, never invented numbers',
+    dash.status === 200 && dash.json.counts && dash.json.counts.requests === 0
+    && dash.json.counts.bookings === 0 && dash.json.counts.earnings === 0
+    && dash.json.counts.listings === 3 && dash.json.counts.drafts === 1 && dash.json.counts.active === 2
+    && Array.isArray(dash.json.listings) && dash.json.listings.length <= 5,
+    JSON.stringify(dash.json.counts));
+
+  // Member (approved host) creates a draft tour with a subtype row.
+  const mk = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Member Tour', description: 'A guided tour for the Phase 3 checks.', city: 'Lusaka',
+    price_from: 200, price_unit: 'per_person', capacity_max: 8,
+    duration_hours: 3, group_size_max: 8, meeting_point: 'Lusaka Museum',
+  }, memberCookie);
+  const mkListing = (mk.json || {}).listing || {};
+  const mkId = mkListing.id;
+  check('EXP3: approved host creates a listing draft (approval draft, town location resolved)',
+    mk.status === 200 && mkListing.approval_status === 'draft' && mkListing.status === 'draft'
+    && mkListing.title === 'EXP3 Member Tour' && mkListing.location && mkListing.location.name === 'Lusaka',
+    'status ' + mk.status + ' ' + JSON.stringify(mk.json).slice(0, 200));
+  const mkTour = await dbOne('SELECT * FROM experience_tours WHERE listing_id = ?', [mkId]);
+  check('EXP3: listing creation writes the 1:1 tour subtype row in the same write',
+    !!mkTour && Number(mkTour.group_size_max) === 8 && mkTour.meeting_point === 'Lusaka Museum',
+    JSON.stringify(mkTour));
+  const subNoPhoto = await call('POST', '/api/experiences/' + mkId + '/submit', {}, memberCookie);
+  check('EXP3: listing submit without a photo is 422',
+    subNoPhoto.status === 422 && JSON.stringify(subNoPhoto.json).includes('photo'),
+    'status ' + subNoPhoto.status + ' ' + JSON.stringify(subNoPhoto.json).slice(0, 160));
+  const addPhoto = await call('POST', '/api/experiences/' + mkId + '/photos', { photos: [IMG] }, memberCookie);
+  check('EXP3: owner appends a photo (first photo is the cover, sort 0)',
+    addPhoto.status === 200 && (addPhoto.json.photos || []).length === 1
+    && addPhoto.json.photos[0].sort === 0,
+    'status ' + addPhoto.status + ' ' + JSON.stringify(addPhoto.json).slice(0, 160));
+  const subOk = await call('POST', '/api/experiences/' + mkId + '/submit', {}, memberCookie);
+  check('EXP3: approved host submits a complete listing (approval submitted)',
+    subOk.status === 200 && subOk.json.listing && subOk.json.listing.approval_status === 'submitted',
+    'status ' + subOk.status + ' ' + JSON.stringify(subOk.json).slice(0, 160));
+  const admApprove = await call('PATCH', '/api/admin/experiences/' + mkId, { decision: 'approve' }, adminCookie);
+  check('EXP3: admin listing approve publishes it (approval approved, status active)',
+    admApprove.status === 200 && admApprove.json.listing
+    && admApprove.json.listing.approval_status === 'approved' && admApprove.json.listing.status === 'active',
+    'status ' + admApprove.status + ' ' + JSON.stringify(admApprove.json).slice(0, 160));
+  const pub = await call('GET', '/api/experiences/' + mkId);
+  const pubItem = (pub.json || {}).experience || {};
+  check('EXP3: guest detail carries is_owner false and no approval_status',
+    pub.status === 200 && pubItem.is_owner === false && !('approval_status' in pubItem),
+    'status ' + pub.status + ' ' + JSON.stringify(pubItem).slice(0, 200));
+  const pubOwner = await call('GET', '/api/experiences/' + mkId, null, memberCookie);
+  const pubOwnerItem = (pubOwner.json || {}).experience || {};
+  check('EXP3: owner detail carries is_owner true and approval_status approved',
+    pubOwner.status === 200 && pubOwnerItem.is_owner === true && pubOwnerItem.approval_status === 'approved',
+    'status ' + pubOwner.status + ' ' + JSON.stringify(pubOwnerItem).slice(0, 200));
+  const listAfter = await call('GET', '/api/experiences');
+  check('EXP3: approved listing appears in the public list',
+    (listAfter.json.experiences || []).some((e) => e.id === mkId),
+    'total ' + listAfter.json.total);
+  const admSuspend = await call('PATCH', '/api/admin/experiences/' + mkId, { decision: 'suspend' }, adminCookie);
+  check('EXP3: admin listing suspend works',
+    admSuspend.status === 200 && admSuspend.json.listing.status === 'suspended',
+    'status ' + admSuspend.status + ' ' + JSON.stringify(admSuspend.json).slice(0, 160));
+  const listSusp = await call('GET', '/api/experiences');
+  check('EXP3: suspended listing is excluded from the public list',
+    !(listSusp.json.experiences || []).some((e) => e.id === mkId),
+    'total ' + listSusp.json.total);
+  const detSusp = await call('GET', '/api/experiences/' + mkId);
+  check('EXP3: suspended detail returns the suspended shape (200, no reason shown)',
+    detSusp.status === 200 && detSusp.json.suspended === true
+    && detSusp.json.listing && detSusp.json.listing.id === mkId && detSusp.json.listing.status === 'suspended',
+    'status ' + detSusp.status + ' ' + JSON.stringify(detSusp.json).slice(0, 160));
+  const admUnsusp = await call('PATCH', '/api/admin/experiences/' + mkId, { decision: 'unsuspend' }, adminCookie);
+  check('EXP3: admin listing unsuspend restores it to active',
+    admUnsusp.status === 200 && admUnsusp.json.listing.status === 'active',
+    'status ' + admUnsusp.status + ' ' + JSON.stringify(admUnsusp.json).slice(0, 160));
+
+  // New individual host: partial apply, submit validation failures.
+  const me2 = await call('GET', '/api/experiences/host/me', null, expHost2.cookie);
+  check('EXP3: a new user has no individual host row yet',
+    me2.status === 200 && me2.json.individual === null && Array.isArray(me2.json.businesses),
+    JSON.stringify(me2.json).slice(0, 120));
+  const apply1 = await call('POST', '/api/experiences/host/apply', { display_name: 'EXP Host Two', city: 'Lusaka' }, expHost2.cookie);
+  const host2Id = (apply1.json.host || {}).id;
+  check('EXP3: partial apply creates a draft host row',
+    apply1.status === 200 && apply1.json.host && apply1.json.host.status === 'draft'
+    && apply1.json.host.display_name === 'EXP Host Two' && apply1.json.host.city === 'Lusaka',
+    'status ' + apply1.status + ' ' + JSON.stringify(apply1.json).slice(0, 160));
+  const applyBad = await call('POST', '/api/experiences/host/apply', { account_type: 'business' }, expHost2.cookie);
+  check('EXP3: apply with account_type business is 422', applyBad.status === 422, 'status ' + applyBad.status);
+  const submitEarly = await call('POST', '/api/experiences/host/submit', {}, expHost2.cookie);
+  check('EXP3: host submit with an incomplete application is 422 with a fields map (bio, documents, listing, payout)',
+    submitEarly.status === 422 && submitEarly.json.fields
+    && submitEarly.json.fields.bio && submitEarly.json.fields.documents
+    && submitEarly.json.fields.listing && submitEarly.json.fields.payout_method,
+    'status ' + submitEarly.status + ' ' + JSON.stringify(submitEarly.json).slice(0, 200));
+
+  // Document validation: bad MIME, oversize, PDF accepted, selfie accepted.
+  const docBadMime = await call('POST', '/api/experiences/host/documents', { kind: 'nrc', image: BAD_IMG, host_side: 'individual' }, expHost2.cookie);
+  check('EXP3: document upload rejects a bad MIME (GIF) with 422', docBadMime.status === 422, 'status ' + docBadMime.status);
+  const docBig = await call('POST', '/api/experiences/host/documents', { kind: 'nrc', image: BIG_IMG, host_side: 'individual' }, expHost2.cookie);
+  check('EXP3: document upload rejects an oversize file with 422', docBig.status === 422, 'status ' + docBig.status);
+  const docPdf = await call('POST', '/api/experiences/host/documents', { kind: 'nrc', image: PDF, host_side: 'individual' }, expHost2.cookie);
+  const nrcDocId = (docPdf.json.document || {}).id;
+  check('EXP3: a PDF identity document is accepted (UI Spec image-or-PDF rule)',
+    docPdf.status === 200 && docPdf.json.document && docPdf.json.document.kind === 'nrc'
+    && docPdf.json.document.status === 'pending' && !('image' in docPdf.json.document),
+    'status ' + docPdf.status + ' ' + JSON.stringify(docPdf.json).slice(0, 160));
+  const docSelfie = await call('POST', '/api/experiences/host/documents', { kind: 'selfie', image: IMG, host_side: 'individual' }, expHost2.cookie);
+  const selfieDocId = (docSelfie.json.document || {}).id;
+  check('EXP3: a selfie document upload works',
+    docSelfie.status === 200 && docSelfie.json.document && docSelfie.json.document.kind === 'selfie',
+    'status ' + docSelfie.status);
+  const docs = await call('GET', '/api/experiences/host/documents', null, expHost2.cookie);
+  check('EXP3: document list carries metadata only, never image data',
+    docs.status === 200 && (docs.json.documents || []).length === 2
+    && !JSON.stringify(docs.json).includes('data:image') && !JSON.stringify(docs.json).includes('JVBERi'),
+    JSON.stringify(docs.json).slice(0, 200));
+
+  // Unapproved host can draft, but cannot publish.
+  const l2 = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Host Two Tour', description: 'A first tour draft from the new host.', city: 'Livingstone',
+    price_from: 150, price_unit: 'per_person', capacity_max: 6,
+  }, expHost2.cookie);
+  const l2Id = (l2.json.listing || {}).id;
+  check('EXP3: an unapproved host can still create a listing draft',
+    l2.status === 200 && l2.json.listing && l2.json.listing.approval_status === 'draft'
+    && l2.json.listing.location && l2.json.listing.location.name === 'Livingstone',
+    'status ' + l2.status + ' ' + JSON.stringify(l2.json).slice(0, 200));
+  const l2SubmitBlocked = await call('POST', '/api/experiences/' + l2Id + '/submit', {}, expHost2.cookie);
+  check('EXP3: listing submit is blocked with 422 until the host is approved',
+    l2SubmitBlocked.status === 422 && String(l2SubmitBlocked.json.error || '').includes('must be approved before you can publish'),
+    'status ' + l2SubmitBlocked.status + ' ' + JSON.stringify(l2SubmitBlocked.json).slice(0, 160));
+
+  // Complete the application via PATCH, then submit / request-info / resubmit / approve / verify.
+  const patchMe = await call('PATCH', '/api/experiences/host/me', {
+    bio: 'I guide walking tours around Livingstone and the falls.',
+    payout_method: 'mobile_money', payout_reference: '0977123456',
+  }, expHost2.cookie);
+  check('EXP3: host PATCH saves bio and payout, masked as Airtel Mobile Money ending 456',
+    patchMe.status === 200 && patchMe.json.host
+    && patchMe.json.host.payout_reference_masked === 'Airtel Mobile Money, ending 456'
+    && !('payout_reference' in patchMe.json.host),
+    'status ' + patchMe.status + ' ' + JSON.stringify(patchMe.json).slice(0, 200));
+  const submitOk = await call('POST', '/api/experiences/host/submit', {}, expHost2.cookie);
+  check('EXP3: host submit succeeds once complete (status submitted)',
+    submitOk.status === 200 && submitOk.json.host && submitOk.json.host.status === 'submitted',
+    'status ' + submitOk.status + ' ' + JSON.stringify(submitOk.json).slice(0, 160));
+  const submitAgain = await call('POST', '/api/experiences/host/submit', {}, expHost2.cookie);
+  check('EXP3: a submitted application cannot be submitted again (422)', submitAgain.status === 422, 'status ' + submitAgain.status);
+  const riNoNote = await call('PATCH', '/api/admin/experiences/hosts/' + host2Id, { decision: 'request_info' }, adminCookie);
+  check('EXP3: admin request_info without a note is 422', riNoNote.status === 422, 'status ' + riNoNote.status);
+  const riNote = 'Please add a clearer photo of your NRC.';
+  const ri = await call('PATCH', '/api/admin/experiences/hosts/' + host2Id, { decision: 'request_info', note: riNote }, adminCookie);
+  check('EXP3: admin request_info stores the note verbatim (additional_info)',
+    ri.status === 200 && ri.json.host && ri.json.host.status === 'additional_info'
+    && ri.json.host.verification_note === riNote,
+    'status ' + ri.status + ' ' + JSON.stringify(ri.json).slice(0, 200));
+  const resub = await call('POST', '/api/experiences/host/resubmit', {}, expHost2.cookie);
+  check('EXP3: host resubmit returns to submitted',
+    resub.status === 200 && resub.json.host && resub.json.host.status === 'submitted',
+    'status ' + resub.status);
+  const approveHost = await call('PATCH', '/api/admin/experiences/hosts/' + host2Id, { decision: 'approve' }, adminCookie);
+  check('EXP3: admin host approve works',
+    approveHost.status === 200 && approveHost.json.host.status === 'approved', 'status ' + approveHost.status);
+  const verifyHost = await call('PATCH', '/api/admin/experiences/hosts/' + host2Id + '/verify', { decision: 'verified', note: 'ID checked.' }, adminCookie);
+  check('EXP3: admin host verify sets the verification badge (separate from approval)',
+    verifyHost.status === 200 && verifyHost.json.host.verification_status === 'verified',
+    'status ' + verifyHost.status + ' ' + JSON.stringify(verifyHost.json).slice(0, 160));
+
+  // The second host's listing can now publish; a third listing tests the reject path.
+  const l2Photo = await call('POST', '/api/experiences/' + l2Id + '/photos', { photos: [IMG] }, expHost2.cookie);
+  check('EXP3: host adds a photo to the draft', l2Photo.status === 200, 'status ' + l2Photo.status);
+  const l2Sub = await call('POST', '/api/experiences/' + l2Id + '/submit', {}, expHost2.cookie);
+  check('EXP3: listing submit works once the host is approved',
+    l2Sub.status === 200 && l2Sub.json.listing.approval_status === 'submitted',
+    'status ' + l2Sub.status + ' ' + JSON.stringify(l2Sub.json).slice(0, 160));
+  const l2Approve = await call('PATCH', '/api/admin/experiences/' + l2Id, { decision: 'approve' }, adminCookie);
+  check('EXP3: admin approves the second host listing',
+    l2Approve.status === 200 && l2Approve.json.listing.status === 'active',
+    'status ' + l2Approve.status);
+  const l3 = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Rejected Tour', description: 'A tour that will be rejected by admin.', city: 'Lusaka',
+    price_from: 100, price_unit: 'per_person', capacity_max: 4,
+  }, expHost2.cookie);
+  const l3Id = (l3.json.listing || {}).id;
+  await call('POST', '/api/experiences/' + l3Id + '/photos', { photos: [IMG] }, expHost2.cookie);
+  await call('POST', '/api/experiences/' + l3Id + '/submit', {}, expHost2.cookie);
+  const rejNoNote = await call('PATCH', '/api/admin/experiences/' + l3Id, { decision: 'reject' }, adminCookie);
+  check('EXP3: admin listing reject without a note is 422', rejNoNote.status === 422, 'status ' + rejNoNote.status);
+  const rejNote = 'Photos do not show the real meeting point.';
+  const rej = await call('PATCH', '/api/admin/experiences/' + l3Id, { decision: 'reject', note: rejNote }, adminCookie);
+  check('EXP3: admin listing reject stores the note verbatim in approval_note',
+    rej.status === 200 && rej.json.listing.approval_status === 'rejected'
+    && rej.json.listing.approval_note === rejNote,
+    'status ' + rej.status + ' ' + JSON.stringify(rej.json).slice(0, 200));
+  const rejPub = await call('GET', '/api/experiences/' + l3Id);
+  check('EXP3: a rejected listing stays non-public (404)', rejPub.status === 404, 'status ' + rejPub.status);
+
+  // Host reject path (stranger's application stays visible as Rejected).
+  await call('POST', '/api/experiences/host/apply', { display_name: 'EXP Stranger', city: 'Ndola', bio: 'A stranger host profile for the reject check.' }, expStranger.cookie);
+  const strangerHost = await dbOne('SELECT id FROM experience_hosts WHERE user_id = ?', [expStranger.id]);
+  const hostRejNote = 'We could not verify this application.';
+  const hostRej = await call('PATCH', '/api/admin/experiences/hosts/' + strangerHost.id, { decision: 'reject', note: hostRejNote }, adminCookie);
+  check('EXP3: admin host reject stores the note verbatim and the application stays visible as rejected',
+    hostRej.status === 200 && hostRej.json.host.status === 'rejected'
+    && hostRej.json.host.verification_note === hostRejNote,
+    'status ' + hostRej.status + ' ' + JSON.stringify(hostRej.json).slice(0, 200));
+  const hostRejSubmit = await call('POST', '/api/experiences/host/submit', {}, expStranger.cookie);
+  check('EXP3: a rejected application cannot be submitted again (422)', hostRejSubmit.status === 422, 'status ' + hostRejSubmit.status);
+  const adminHosts = await call('GET', '/api/admin/experiences/hosts?status=rejected', null, adminCookie);
+  check('EXP3: admin hosts list filters by status',
+    adminHosts.status === 200 && (adminHosts.json.hosts || []).length === 1
+    && adminHosts.json.hosts[0].id === strangerHost.id,
+    'status ' + adminHosts.status + ' ' + JSON.stringify(adminHosts.json).slice(0, 160));
+  const adminHostsNo = await call('GET', '/api/admin/experiences/hosts', null, memberCookie);
+  check('EXP3: admin hosts list is admin-only (member gets 403)', adminHostsNo.status === 403, 'status ' + adminHostsNo.status);
+
+  // Business opt-in + commission override.
+  const bizOptMember = await call('POST', '/api/experiences/host/business', { business_id: bizId }, memberCookie);
+  check('EXP3: business opt-in for a business the caller does not own is 422',
+    bizOptMember.status === 422, 'status ' + bizOptMember.status + ' ' + JSON.stringify(bizOptMember.json).slice(0, 120));
+  const bizOpt = await call('POST', '/api/experiences/host/business', { business_id: bizId }, otherCookie);
+  const linkId = (bizOpt.json.link || {}).id;
+  check('EXP3: business owner opts in (link created, experiences active, commission default null)',
+    bizOpt.status === 200 && bizOpt.json.link && bizOpt.json.link.business_id === bizId
+    && bizOpt.json.link.experiences_status === 'active' && bizOpt.json.link.commission_rate_override === null
+    && bizOpt.json.link.verification_status === 'verified',
+    'status ' + bizOpt.status + ' ' + JSON.stringify(bizOpt.json).slice(0, 200));
+  const bizOptAgain = await call('POST', '/api/experiences/host/business', { business_id: bizId }, otherCookie);
+  check('EXP3: opting in twice returns the same link',
+    bizOptAgain.status === 200 && bizOptAgain.json.link && bizOptAgain.json.link.id === linkId,
+    'status ' + bizOptAgain.status);
+  const bizPatch = await call('PATCH', '/api/experiences/host/business/' + linkId, {
+    payout_method: 'mobile_money', payout_reference: '0771234567',
+  }, otherCookie);
+  check('EXP3: business owner updates payout, masked as MTN Mobile Money ending 567',
+    bizPatch.status === 200 && bizPatch.json.link.payout_reference_masked === 'MTN Mobile Money, ending 567'
+    && !('payout_reference' in bizPatch.json.link),
+    'status ' + bizPatch.status + ' ' + JSON.stringify(bizPatch.json).slice(0, 200));
+  const bizPatchCommission = await call('PATCH', '/api/experiences/host/business/' + linkId, { commission_rate_override: 20 }, otherCookie);
+  check('EXP3: business owner attempting the commission override gets 403',
+    bizPatchCommission.status === 403, 'status ' + bizPatchCommission.status);
+  const commOwner = await call('PATCH', '/api/admin/experiences/businesses/' + bizId + '/commission', { rate: 15 }, otherCookie);
+  check('EXP3: commission override is admin-only (owner gets 403)',
+    commOwner.status === 403, 'status ' + commOwner.status);
+  const commBad = await call('PATCH', '/api/admin/experiences/businesses/' + bizId + '/commission', { rate: 101 }, adminCookie);
+  check('EXP3: commission override above 100 is 422', commBad.status === 422, 'status ' + commBad.status);
+  const comm = await call('PATCH', '/api/admin/experiences/businesses/' + bizId + '/commission', { rate: 15 }, adminCookie);
+  check('EXP3: admin sets the commission override to 15',
+    comm.status === 200 && comm.json.link.commission_rate_override === 15,
+    'status ' + comm.status + ' ' + JSON.stringify(comm.json).slice(0, 160));
+  const commNull = await call('PATCH', '/api/admin/experiences/businesses/' + bizId + '/commission', { rate: null }, adminCookie);
+  check('EXP3: admin can reset the commission override to the platform default (null)',
+    commNull.status === 200 && commNull.json.link.commission_rate_override === null,
+    'status ' + commNull.status);
+  const meThird = await call('GET', '/api/experiences/host/me', null, otherCookie);
+  check('EXP3: host/me shows the business link for the business owner',
+    meThird.status === 200 && meThird.json.individual === null
+    && (meThird.json.businesses || []).length === 1
+    && meThird.json.businesses[0].business_id === bizId,
+    JSON.stringify(meThird.json).slice(0, 200));
+
+  // Staff: invite validation, accept, role boundaries, manager writes, revoke, decline.
+  const inviteUnknown = await call('POST', '/api/experiences/host/business/' + bizId + '/staff', { phone: '0970000999', role: 'staff' }, otherCookie);
+  check('EXP3: staff invite for a phone with no account is 422', inviteUnknown.status === 422, 'status ' + inviteUnknown.status);
+  const inviteOwner = await call('POST', '/api/experiences/host/business/' + bizId + '/staff', { phone: '0970000003', role: 'staff' }, otherCookie);
+  check('EXP3: staff invite for the business owner themself is 422', inviteOwner.status === 422, 'status ' + inviteOwner.status);
+  const inviteStaff = await call('POST', '/api/experiences/host/business/' + bizId + '/staff', { phone: '0970000032', role: 'staff' }, otherCookie);
+  check('EXP3: owner invites a staff member (status invited)',
+    inviteStaff.status === 200 && inviteStaff.json.staff && inviteStaff.json.staff.status === 'invited'
+    && inviteStaff.json.staff.role === 'staff' && inviteStaff.json.staff.user_id === expStaff.id,
+    'status ' + inviteStaff.status + ' ' + JSON.stringify(inviteStaff.json).slice(0, 160));
+  const staffListInvited = await call('GET', '/api/experiences/host/business/' + bizId + '/staff', null, expStaff.cookie);
+  check('EXP3: an invited (not yet active) member cannot list staff (403)',
+    staffListInvited.status === 403, 'status ' + staffListInvited.status);
+  const myInvites = await call('GET', '/api/experiences/host/invites', null, expStaff.cookie);
+  check('EXP3: the invitee sees the pending invite in-app',
+    myInvites.status === 200 && (myInvites.json.invites || []).length === 1
+    && myInvites.json.invites[0].business_id === bizId && myInvites.json.invites[0].role === 'staff',
+    JSON.stringify(myInvites.json).slice(0, 160));
+  const acceptWrong = await call('POST', '/api/experiences/host/staff/invites/' + bizId + '/accept', {}, memberCookie);
+  check('EXP3: only the invited user can accept (someone else gets 404)',
+    acceptWrong.status === 404, 'status ' + acceptWrong.status);
+  const accept = await call('POST', '/api/experiences/host/staff/invites/' + bizId + '/accept', {}, expStaff.cookie);
+  check('EXP3: the invitee accepts (invited -> active)',
+    accept.status === 200 && accept.json.staff && accept.json.staff.status === 'active',
+    'status ' + accept.status + ' ' + JSON.stringify(accept.json).slice(0, 160));
+  const staffList = await call('GET', '/api/experiences/host/business/' + bizId + '/staff', null, otherCookie);
+  check('EXP3: owner lists staff with name, phone, role and status',
+    staffList.status === 200 && (staffList.json.staff || []).length === 1
+    && staffList.json.staff[0].name === 'EXP Staff Member',
+    JSON.stringify(staffList.json).slice(0, 160));
+  const staffListAsStaff = await call('GET', '/api/experiences/host/business/' + bizId + '/staff', null, expStaff.cookie);
+  check('EXP3: a staff-role member cannot list staff (403)',
+    staffListAsStaff.status === 403, 'status ' + staffListAsStaff.status);
+  const inviteMgr = await call('POST', '/api/experiences/host/business/' + bizId + '/staff', { phone: '0970000034', role: 'manager' }, otherCookie);
+  check('EXP3: owner invites a manager',
+    inviteMgr.status === 200 && inviteMgr.json.staff.role === 'manager', 'status ' + inviteMgr.status);
+  await call('POST', '/api/experiences/host/staff/invites/' + bizId + '/accept', {}, expManager.cookie);
+  const bizListingStaff = await call('POST', '/api/experiences', {
+    host_side: 'business', business_id: bizId, listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Staff Tour', description: 'A tour a staff member must not create.', city: 'Lusaka',
+    price_from: 100, price_unit: 'per_person', capacity_max: 4,
+  }, expStaff.cookie);
+  check('EXP3: a staff-role member cannot create a business listing (403)',
+    bizListingStaff.status === 403, 'status ' + bizListingStaff.status);
+  const bizListingMgr = await call('POST', '/api/experiences', {
+    host_side: 'business', business_id: bizId, listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Manager Tour', description: 'A tour created by the business manager.', city: 'Lusaka',
+    price_from: 100, price_unit: 'per_person', capacity_max: 4,
+  }, expManager.cookie);
+  const bizListingId = (bizListingMgr.json.listing || {}).id;
+  check('EXP3: a manager can create a business listing draft',
+    bizListingMgr.status === 200 && bizListingMgr.json.listing && bizListingMgr.json.listing.approval_status === 'draft',
+    'status ' + bizListingMgr.status + ' ' + JSON.stringify(bizListingMgr.json).slice(0, 160));
+  const mgrEdit = await call('PATCH', '/api/experiences/' + bizListingId, { title: 'EXP3 Manager Tour Edited' }, expManager.cookie);
+  check('EXP3: a manager can edit a business listing',
+    mgrEdit.status === 200 && mgrEdit.json.listing.title === 'EXP3 Manager Tour Edited',
+    'status ' + mgrEdit.status + ' ' + JSON.stringify(mgrEdit.json).slice(0, 160));
+  const staffEdit = await call('PATCH', '/api/experiences/' + bizListingId, { title: 'EXP3 Staff Edit' }, expStaff.cookie);
+  check('EXP3: a staff-role member cannot edit a listing (403)',
+    staffEdit.status === 403, 'status ' + staffEdit.status);
+  const staffPayout = await call('PATCH', '/api/experiences/host/business/' + linkId, { payout_reference: '0970000000' }, expStaff.cookie);
+  check('EXP3: a staff-role member cannot change payout details (403)',
+    staffPayout.status === 403, 'status ' + staffPayout.status);
+  const staffComm = await call('PATCH', '/api/admin/experiences/businesses/' + bizId + '/commission', { rate: 5 }, expStaff.cookie);
+  check('EXP3: a staff-role member cannot change the commission override (403)',
+    staffComm.status === 403, 'status ' + staffComm.status);
+  await call('POST', '/api/experiences/' + bizListingId + '/photos', { photos: [IMG] }, expManager.cookie);
+  const bizSub = await call('POST', '/api/experiences/' + bizListingId + '/submit', {}, expManager.cookie);
+  check('EXP3: a manager can submit a business listing (business host gate is the active storefront)',
+    bizSub.status === 200 && bizSub.json.listing.approval_status === 'submitted',
+    'status ' + bizSub.status + ' ' + JSON.stringify(bizSub.json).slice(0, 160));
+  await call('PATCH', '/api/admin/experiences/' + bizListingId, { decision: 'approve' }, adminCookie);
+  await call('POST', '/api/experiences/host/business/' + bizId + '/staff', { phone: '0970000033', role: 'staff' }, otherCookie);
+  const decline = await call('POST', '/api/experiences/host/staff/invites/' + bizId + '/decline', {}, expStranger.cookie);
+  const invitesAfter = await call('GET', '/api/experiences/host/invites', null, expStranger.cookie);
+  check('EXP3: the invitee can decline (invite removed)',
+    decline.status === 200 && (invitesAfter.json.invites || []).length === 0,
+    'status ' + decline.status);
+  const revoke = await call('POST', '/api/experiences/host/business/' + bizId + '/staff/' + expStaff.id + '/revoke', {}, otherCookie);
+  check('EXP3: owner revokes a staff member',
+    revoke.status === 200 && revoke.json.staff.status === 'revoked',
+    'status ' + revoke.status + ' ' + JSON.stringify(revoke.json).slice(0, 160));
+  const staffEditAfter = await call('PATCH', '/api/experiences/' + bizListingId, { title: 'EXP3 After Revoke' }, expStaff.cookie);
+  check('EXP3: a revoked member loses access immediately (403)',
+    staffEditAfter.status === 403, 'status ' + staffEditAfter.status);
+
+  // Listing creation validation + free events + host-side move refusal.
+  const badTitle = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'AB', description: 'Long enough description here.', city: 'Lusaka',
+    price_from: 100, price_unit: 'per_person', capacity_max: 4,
+  }, memberCookie);
+  check('EXP3: listing creation rejects a title under 3 chars (422)', badTitle.status === 422, 'status ' + badTitle.status);
+  const badCity = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Bad City', description: 'Long enough description here.', city: 'Nowhere',
+    price_from: 100, price_unit: 'per_person', capacity_max: 4,
+  }, memberCookie);
+  check('EXP3: listing creation rejects a city outside CITIES (422)', badCity.status === 422, 'status ' + badCity.status);
+  const badPrice = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Free Tour', description: 'Long enough description here.', city: 'Lusaka',
+    price_from: 0, price_unit: 'per_person', capacity_max: 4,
+  }, memberCookie);
+  check('EXP3: a non-event listing cannot be free (422)', badPrice.status === 422, 'status ' + badPrice.status);
+  const overPrice = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Pricey Tour', description: 'Long enough description here.', city: 'Lusaka',
+    price_from: 10000001, price_unit: 'per_person', capacity_max: 4,
+  }, memberCookie);
+  check('EXP3: listing creation rejects a price above K10,000,000 (422)', overPrice.status === 422, 'status ' + overPrice.status);
+  const badCat = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: 999999,
+    title: 'EXP3 Bad Cat', description: 'Long enough description here.', city: 'Lusaka',
+    price_from: 100, price_unit: 'per_person', capacity_max: 4,
+  }, memberCookie);
+  check('EXP3: listing creation rejects an unknown category (422)', badCat.status === 422, 'status ' + badCat.status);
+  const freeEvent = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'event', category_id: eventsCat,
+    title: 'EXP3 Free Event', description: 'A free community event for testing.', city: 'Lusaka',
+    price_from: 0, price_unit: 'per_event', capacity_max: 50,
+    venue_name: 'Showgrounds', event_date: '2027-05-01',
+  }, memberCookie);
+  const freeEventId = (freeEvent.json.listing || {}).id;
+  check('EXP3: an event may be free (price 0) and writes the event subtype row',
+    freeEvent.status === 200 && freeEvent.json.listing && freeEvent.json.listing.price_from === 0,
+    'status ' + freeEvent.status + ' ' + JSON.stringify(freeEvent.json).slice(0, 160));
+  const freeEventRow = await dbOne('SELECT * FROM experience_events WHERE listing_id = ?', [freeEventId]);
+  check('EXP3: event subtype row carries the venue and date',
+    !!freeEventRow && freeEventRow.venue_name === 'Showgrounds' && freeEventRow.event_date === '2027-05-01',
+    JSON.stringify(freeEventRow));
+  const notOwnerEdit = await call('PATCH', '/api/experiences/' + mkId, { title: 'EXP3 Hijack' }, expStranger.cookie);
+  check('EXP3: a non-owner cannot edit a listing (403)', notOwnerEdit.status === 403, 'status ' + notOwnerEdit.status);
+  const moveSide = await call('PATCH', '/api/experiences/' + mkId, { host_side: 'business', business_id: bizId }, memberCookie);
+  check('EXP3: moving a listing between host sides is refused (422, deferred)',
+    moveSide.status === 422, 'status ' + moveSide.status);
+
+  // Photo cap 8, cover swap, delete, host listings.
+  const capListing = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Photo Cap Tour', description: 'A tour to test the eight photo cap.', city: 'Lusaka',
+    price_from: 100, price_unit: 'per_person', capacity_max: 4,
+  }, memberCookie);
+  const capId = (capListing.json.listing || {}).id;
+  const eight = await call('POST', '/api/experiences/' + capId + '/photos', { photos: [IMG, IMG, IMG, IMG, IMG, IMG, IMG, IMG] }, memberCookie);
+  const capPhotos = (eight.json.photos || []);
+  check('EXP3: eight photos can be added (the cap)',
+    eight.status === 200 && capPhotos.length === 8,
+    'status ' + eight.status + ' ' + JSON.stringify(eight.json).slice(0, 160));
+  const ninth = await call('POST', '/api/experiences/' + capId + '/photos', { photos: [IMG] }, memberCookie);
+  check('EXP3: a ninth photo is refused (photo cap 8 enforced)',
+    ninth.status === 422, 'status ' + ninth.status);
+  const coverSwap = await call('POST', `/api/experiences/${capId}/photos/${capPhotos[3].id}/cover`, {}, memberCookie);
+  const coverRow = await dbOne('SELECT id FROM experience_listing_media WHERE listing_id = ? ORDER BY sort, id LIMIT 1', [capId]);
+  check('EXP3: making a photo the cover swaps it to sort 0',
+    coverSwap.status === 200 && coverRow && Number(coverRow.id) === capPhotos[3].id,
+    'status ' + coverSwap.status + ' ' + JSON.stringify(coverRow));
+  const delPhoto = await call('DELETE', '/api/experiences/' + capId + '/photos/' + capPhotos[0].id, null, memberCookie);
+  const photoCount = await dbOne('SELECT COUNT(*) AS c FROM experience_listing_media WHERE listing_id = ?', [capId]);
+  check('EXP3: owner can delete a photo',
+    delPhoto.status === 200 && Number(photoCount.c) === 7,
+    'status ' + delPhoto.status + ' count ' + JSON.stringify(photoCount));
+  const myListings = await call('GET', '/api/experiences/host/listings', null, memberCookie);
+  check('EXP3: host listings lists the caller listings with approval_status',
+    myListings.status === 200 && (myListings.json.listings || []).some((l) => l.id === mkId && l.approval_status === 'approved')
+    && myListings.json.total >= 4,
+    'status ' + myListings.status + ' total ' + myListings.json.total);
+
+  // Document reads: stranger 404, owner + admin read and are logged, queue, delete rules.
+  const strangerRead = await fetch(BASE + '/api/experiences/host/documents/' + nrcDocId, { headers: { Cookie: expStranger.cookie } });
+  await strangerRead.text();
+  check('EXP3: a stranger reading a verification document gets 404',
+    strangerRead.status === 404, 'status ' + strangerRead.status);
+  const ownerRead = await fetch(BASE + '/api/experiences/host/documents/' + nrcDocId, { headers: { Cookie: expHost2.cookie } });
+  const ownerReadType = ownerRead.headers.get('content-type');
+  await ownerRead.text();
+  check('EXP3: the owner can read their PDF document (application/pdf)',
+    ownerRead.status === 200 && (ownerReadType || '').includes('application/pdf'),
+    'status ' + ownerRead.status + ' type ' + ownerReadType);
+  const views = await dbOne('SELECT COUNT(*) AS c FROM experience_document_views WHERE document_id = ?', [nrcDocId]);
+  check('EXP3: a successful document read is logged in experience_document_views',
+    Number(views.c) === 1, 'views ' + JSON.stringify(views));
+  const adminRead = await fetch(BASE + '/api/experiences/host/documents/' + nrcDocId, { headers: { Cookie: adminCookie } });
+  await adminRead.text();
+  const views2 = await dbOne('SELECT COUNT(*) AS c FROM experience_document_views WHERE document_id = ?', [nrcDocId]);
+  check('EXP3: an admin read is logged too (2 views total)',
+    adminRead.status === 200 && Number(views2.c) === 2, 'views ' + JSON.stringify(views2));
+  const queue = await call('GET', '/api/admin/experiences/documents', null, adminCookie);
+  check('EXP3: admin documents queue lists documents with identity, never image data',
+    queue.status === 200 && (queue.json.documents || []).some((d) => d.id === nrcDocId && d.kind === 'nrc')
+    && !JSON.stringify(queue.json).includes('data:application') && !JSON.stringify(queue.json).includes('data:image'),
+    'status ' + queue.status + ' ' + JSON.stringify(queue.json).slice(0, 200));
+  const queueMember = await call('GET', '/api/admin/experiences/documents', null, memberCookie);
+  check('EXP3: the documents queue is admin/support only (member gets 403)',
+    queueMember.status === 403, 'status ' + queueMember.status);
+  const docDecideMember = await call('PATCH', '/api/admin/experiences/documents/' + nrcDocId, { decision: 'approved' }, memberCookie);
+  check('EXP3: a member cannot decide a document (403)', docDecideMember.status === 403, 'status ' + docDecideMember.status);
+  const docApprove = await call('PATCH', '/api/admin/experiences/documents/' + selfieDocId, { decision: 'approved', note: 'Clear selfie.' }, adminCookie);
+  check('EXP3: admin approves a document (reviewed_by + note stored)',
+    docApprove.status === 200 && docApprove.json.document.status === 'approved'
+    && docApprove.json.document.review_note === 'Clear selfie.',
+    'status ' + docApprove.status + ' ' + JSON.stringify(docApprove.json).slice(0, 160));
+  const delApproved = await call('DELETE', '/api/experiences/host/documents/' + selfieDocId, null, expHost2.cookie);
+  check('EXP3: an approved document cannot be deleted (422, audit trail)',
+    delApproved.status === 422, 'status ' + delApproved.status);
+  const delPending = await call('DELETE', '/api/experiences/host/documents/' + nrcDocId, null, expHost2.cookie);
+  const goneDoc = await dbOne('SELECT id FROM experience_host_verifications WHERE id = ?', [nrcDocId]);
+  check('EXP3: a pending document can be deleted by its owner',
+    delPending.status === 200 && !goneDoc, 'status ' + delPending.status);
 }

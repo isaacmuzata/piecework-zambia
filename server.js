@@ -55,6 +55,7 @@ const BIG_JSON_PREFIXES = [
   ['POST', '/api/products'], ['PATCH', '/api/products'],
   ['POST', '/api/businesses'], ['PATCH', '/api/businesses'],
   ['POST', '/api/applications'], ['PATCH', '/api/applications'],
+  ['POST', '/api/experiences'], ['PATCH', '/api/experiences'],
 ];
 app.use((req, res, next) => {
   if (req.method === 'PATCH' && req.path === '/api/users/me') return json10mb(req, res, next);
@@ -3827,6 +3828,15 @@ const PRODUCT_CONDITIONS = ['New', 'Like new', 'Good', 'Fair'];
 const MAX_PRODUCT_PHOTOS = 5;
 const MAX_ACTIVE_LISTINGS = 30;
 const productLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 40, standardHeaders: true , handler: tooManyTries });
+// 2911 Experiences Phase 3 (Nov 8, 2026): host-onboarding writes (host
+// apply, verification document upload, business opt-in) get their own
+// 20/hr bucket with the same policy as businessLimiter, NOT the shared
+// businessLimiter instance: that budget is shared with POST
+// /api/businesses, whose validation loops already consume it in the API
+// suite (and a host applying right after a business-creation burst would
+// be wrongly throttled in production too). Listing creation and photo
+// uploads reuse the existing productLimiter (40/hr) directly.
+const expHostLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true, handler: tooManyTries });
 
 function serializeProduct(p) {
   return {
@@ -4428,13 +4438,15 @@ app.post('/api/conversations/:id/messages', ah(auth), msgLimiter, ah(async (req,
 }));
 
 
-// ---------------------------------------------------------------- 2911 Experiences (Phase 2)
+// ---------------------------------------------------------------- 2911 Experiences (Phase 2 + Phase 3)
 // Public browse API lives in routes/experiences.js (module split decision,
 // Nov 8, 2026): the router shares auth, maybeAuth, ah, err, runWrite,
-// getOne, getAll and listCache with this file. No write endpoints in this
-// phase; listing creation is Phase 3. Mounted here, before the share
-// previews, so /api/experiences/* resolves before the SPA fallback.
-app.use(createExperiencesRouter({ ah, err, maybeAuth, getOne, getAll, runWrite, listCache }));
+// getOne, getAll, listCache, isAdmin, isSupport, logAdmin, CITIES and the
+// product/business rate limiters with this file. Phase 3 adds the host
+// onboarding, verification, listing management and admin decision
+// endpoints in the same router. Mounted here, before the share previews,
+// so /api/experiences/* resolves before the SPA fallback.
+app.use(createExperiencesRouter({ ah, err, maybeAuth, getOne, getAll, runWrite, listCache, auth, isAdmin, isSupport, logAdmin, CITIES, productLimiter, expHostLimiter }));
 
 // ---------------------------------------------------------------- share previews
 // Social apps (WhatsApp, Facebook) do not run the SPA and cannot read hash
