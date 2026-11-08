@@ -8780,7 +8780,6 @@ function expWizStepHtml(n) {
       ${row('selfie', 'Verification selfie *', 'A clear photo of only you, face to the camera, in good light.')}
       ${(currentUser && currentUser.selfie_status && currentUser.selfie_status !== 'approved') ? `<p class="small">Your account selfie is not approved yet. Upload one from <a href="#/profile/edit">Profile, Edit Profile</a> too.</p>` : ''}
       ${row('drivers_licence', 'Driving licence', 'Required for transport listings.')}
-      ${row('tourism_licence', 'Tourism licence or permit', 'Optional, for tours, adventure, and cultural activities that need one.')}
       ${row('other', 'Proof of ownership or venue permission', 'For stays: proof you may let the property. For events: venue permission. Optional.')}
       <p class="ferr" id="exp-wiz-doc-err" hidden></p>
       <p class="small muted">Required before you can continue: an NRC or passport, and a verification selfie.</p>

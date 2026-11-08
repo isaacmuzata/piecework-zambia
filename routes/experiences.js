@@ -1218,6 +1218,12 @@ function createExperiencesRouter(deps) {
       return err(res, 422, 'Choose whether this document is for your individual or business host profile.',
         { host_side: 'Choose individual or business.' });
     }
+    // Tourism licences are for business hosts only (Zac, Nov 8, 2026):
+    // an individual host never needs one, and the wizard does not offer it.
+    if (kind === 'tourism_licence' && hostSide === 'individual') {
+      return err(res, 422, 'A tourism licence is only for business hosts.',
+        { kind: 'Tourism licences are for business hosts only.' });
+    }
     const countRow = await getOne(
       hostId != null
         ? 'SELECT COUNT(*) AS c FROM experience_host_verifications WHERE host_id = ?'
