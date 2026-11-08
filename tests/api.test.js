@@ -1666,6 +1666,48 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
       .every((t) => css.includes(t))
     && css.includes('.exp-price') && css.includes('.exp-hero-search') && css.includes('.btn-exp'),
     'status ' + cssRes.status);
+
+  // Frontend (Phase 3): host onboarding wizard, dashboards, listing
+  // create/edit, payouts, owner banner and status badges, served-asset
+  // checks only (no extra writes: the productLimiter budget is thin).
+  check('EXP3-FE: served app.js carries the host routes and views',
+    appJs.includes('#/host/apply') && appJs.includes('#/host/dashboard')
+    && appJs.includes('#/host/business') && appJs.includes('#/host/listings')
+    && appJs.includes('#/host/listings/new') && appJs.includes('#/host/payouts')
+    && appJs.includes('viewHostApply') && appJs.includes('viewHostDashboard')
+    && appJs.includes('viewHostBusiness') && appJs.includes('viewHostListings')
+    && appJs.includes('viewHostListingNew') && appJs.includes('viewHostListingEdit')
+    && appJs.includes('viewHostPayouts'),
+    '');
+  check('EXP3-FE: 7-step wizard labels, draft save and submit copy are present',
+    appJs.includes('Account type') && appJs.includes('First listing')
+    && appJs.includes('Submit for review') && appJs.includes('Save draft')
+    && appJs.includes('Application sent. The 2911 Jobs team will review it and let you know.')
+    && appJs.includes('JPG, PNG, WebP or PDF, up to 2 MB')
+    && appJs.includes('Payments are disabled at launch.'),
+    '');
+  check('EXP3-FE: publish gate hint and masked payout rule are present',
+    appJs.includes('Your host application must be approved before you can publish')
+    && appJs.includes('expMaskPayout') && appJs.includes('ending ')
+    && appJs.includes('payout_reference_masked'),
+    '');
+  check('EXP3-FE: owner banner, suspended state and status badges are present',
+    appJs.includes('You own this listing') && appJs.includes('expStatusBadge')
+    && appJs.includes('This listing is not available') && appJs.includes('data.suspended')
+    && appJs.includes('EXP_HOST_STATUS_LABELS'),
+    '');
+  check('EXP3-FE: dashboard honest empty states are present, no reviews or messages tables',
+    appJs.includes('No booking requests yet. When a guest sends a request, it appears here.')
+    && appJs.includes('No reviews yet. Reviews appear here after guests complete a booking.')
+    && appJs.includes('No dates set')
+    && !appJs.includes('experience_reviews') && !appJs.includes('experience_messages'),
+    '');
+  check('EXP3-FE: served styles.css carries the host status badge tokens',
+    ['.exp-status-draft', '.exp-status-submitted', '.exp-status-under_review',
+      '.exp-status-additional_info', '.exp-status-approved', '.exp-status-rejected',
+      '.exp-status-suspended'].every((t) => css.includes(t))
+    && css.includes('.exp-owner-banner') && css.includes('.exp-photo-grid'),
+    '');
 }
 
 // 2911 Experiences Phase 3 (2026-11-08): host onboarding, verification,
