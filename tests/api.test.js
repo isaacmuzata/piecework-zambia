@@ -1619,4 +1619,36 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
   await c3.text();
   check('EXP: a write to /api/experiences busts the family cache (MISS again)',
     bust.status === 404 && c3Cache === 'MISS', bust.status + '/' + c3Cache);
+
+  // Frontend (Phase 2): the served SPA bundle carries the Experiences
+  // routes, views, tokens and icons, and prices are ZMW, never fmtK().
+  const appJsRes = await fetch(BASE + '/app.js');
+  const appJs = await appJsRes.text();
+  check('EXP-FE: served app.js carries the Experiences routes and views',
+    appJsRes.status === 200
+    && appJs.includes('#/experiences') && appJs.includes('#/experiences/search')
+    && appJs.includes('viewExperiences') && appJs.includes('viewExperienceSearch')
+    && appJs.includes('viewExperienceCategory') && appJs.includes('viewExperience('),
+    'status ' + appJsRes.status);
+  check('EXP-FE: fmtZMW formats integer ZMW and Experiences prices never use fmtK',
+    appJs.includes('function fmtZMW') && appJs.includes("return 'ZMW '")
+    && appJs.includes('expPriceText') && appJs.includes('fmtZMW(e.price_from)'),
+    '');
+  check('EXP-FE: Experiences icons, category mapping and no-sixth-tab nav are present',
+    ['compass:', 'backpack:', 'bed:', 'bus:', 'mountain:', 'drum:', 'ticket:'].every((ic) => appJs.includes(ic))
+    && appJs.includes('EXP_CATEGORIES_FALLBACK') && appJs.includes('Travel and stays')
+    && appJs.includes("['#/experiences', 'Experiences']"),
+    '');
+  check('EXP-FE: booking shows an honest "Bookings open soon" state, never a checkout',
+    appJs.includes('Bookings open soon') && !appJs.includes('Pay now'),
+    '');
+  const cssRes = await fetch(BASE + '/styles.css');
+  const css = await cssRes.text();
+  check('EXP-FE: served styles.css carries the Experiences tokens',
+    cssRes.status === 200
+    && ['--exp-purple:#4C1D95', '--exp-mint:#A3E635', '--exp-sage:#E8F5E9',
+        '--exp-sand:#F5F0E1', '--exp-coral:#FF6B6B', '--exp-gold:#F59E0B']
+      .every((t) => css.includes(t))
+    && css.includes('.exp-price') && css.includes('.exp-hero-search') && css.includes('.btn-exp'),
+    'status ' + cssRes.status);
 }

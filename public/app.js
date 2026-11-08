@@ -62,6 +62,14 @@ const ICONS = {
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   facebook: '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>',
+  /* 2911 Experiences (Phase 2): same 24x24, stroke 2, round caps/joins. */
+  compass: '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+  backpack: '<path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"/><path d="M8 10h8"/><path d="M8 17h8"/>',
+  bed: '<path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/>',
+  bus: '<path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/>',
+  mountain: '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>',
+  drum: '<path d="m2 2 8 8"/><path d="m22 2-8 8"/><ellipse cx="12" cy="9" rx="10" ry="5"/><path d="M7 13.4v7.9"/><path d="M12 14v8"/><path d="M17 13.4v7.9"/><path d="M2 9v8"/>',
+  ticket: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2M13 11v2M13 17v2"/>',
 };
 function icon(name) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -573,6 +581,9 @@ function renderChrome() {
   const nav = document.getElementById('drawer-nav');
   const link = (href, ic, label, extra = '') =>
     `<a href="${href}" class="${h === href ? 'active' : ''}">${icon(ic)}<span>${label}</span>${extra}</a>`;
+  // Starts-with match, so a listing detail page highlights Experiences Home.
+  const linkStarts = (href, ic, label, extra = '') =>
+    `<a href="${href}" class="${h === href || h.startsWith(href + '/') || (href === '#/experiences' && h.startsWith('#/experience/')) ? 'active' : ''}">${icon(ic)}<span>${label}</span>${extra}</a>`;
   const group = (title, links) => `<div class="drawer-group"><h4>${title}</h4>${links.join('')}</div>`;
   nav.innerHTML =
     (currentUser
@@ -586,6 +597,19 @@ function renderChrome() {
       link('#/categories', 'grid', 'Categories'),
     ])
     + group('Buy and sell', [link('#/market', 'tag', 'Marketplace'), link('#/businesses', 'grid', 'Businesses')])
+    // Experiences (Phase 2). PROVISIONAL, pending Zac's confirmation of
+    // the no-sixth-tab decision: reached from Home, this drawer group and
+    // desktop nav, with no tab active on Experiences pages. My Bookings
+    // and Become a Host links wait for Phases 3-4, when those routes exist.
+    + group('Travel and stays', [
+      linkStarts('#/experiences', 'compass', 'Experiences'),
+      link('#/experiences/category/tours', 'compass', 'Tours'),
+      link('#/experiences/category/stays', 'bed', 'Stays'),
+      link('#/experiences/category/transport', 'bus', 'Transport'),
+      link('#/experiences/category/adventure', 'mountain', 'Adventure'),
+      link('#/experiences/category/cultural', 'drum', 'Cultural'),
+      link('#/experiences/category/events', 'ticket', 'Events'),
+    ])
     + (currentUser ? group('Your account', [
       link('#/messages', 'message', 'Messages', '<span class="drawer-badge js-msg-badge" hidden></span>'),
       link('#/dashboard', 'clipboard', 'My Gigs'),
@@ -605,11 +629,14 @@ function renderChrome() {
       if (href === '#/jobs') return h === '#/jobs' || h.startsWith('#/job/') || h.startsWith('#/categories') || h.startsWith('#/search');
       if (href === '#/messages') return h.startsWith('#/messages') || h.startsWith('#/chat/');
       if (href === '#/market') return h.startsWith('#/market') || h.startsWith('#/product/') || h.startsWith('#/sell') || h.startsWith('#/selling');
+      // Experiences (Phase 2, PROVISIONAL no-sixth-tab decision): the
+      // desktop nav item covers home, search, category, detail and host pages.
+      if (href === '#/experiences') return h === '#/experiences' || h.startsWith('#/experiences/') || h.startsWith('#/experience/') || h.startsWith('#/host/');
       return h.startsWith(href);
     };
     const ditems = currentUser
-      ? [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/messages', 'Messages'], ['#/dashboard', 'My Gigs']]
-      : [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/how', 'Help']];
+      ? [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/experiences', 'Experiences'], ['#/messages', 'Messages'], ['#/dashboard', 'My Gigs']]
+      : [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/experiences', 'Experiences'], ['#/how', 'Help']];
     dnav.innerHTML = ditems.map(([href, label]) =>
       `<a href="${href}" class="${dMatch(href) ? 'active' : ''}">${label}${href === '#/messages' ? '<span class="dnav-badge js-msg-badge" hidden></span>' : ''}</a>`
     ).join('');
@@ -894,6 +921,7 @@ async function viewHome() {
       <a class="entry-card" href="#/jobs"><span class="entry-ico">${icon('briefcase')}</span><span class="entry-text"><b>Find work</b><span>Piece work a few kilometres from home</span></span>${icon('chevR')}</a>
       <a class="entry-card" href="#/post"><span class="entry-ico">${icon('users')}</span><span class="entry-text"><b>Hire help</b><span>Post a job. People nearby apply</span></span>${icon('chevR')}</a>
       <a class="entry-card" href="#/market"><span class="entry-ico">${icon('tag')}</span><span class="entry-text"><b>Buy &amp; sell</b><span>Phones, furniture, produce and more</span></span>${icon('chevR')}</a>
+      <a class="entry-card" href="#/experiences"><span class="entry-ico">${icon('compass')}</span><span class="entry-text"><b>Explore Zambia</b><span>Tours, stays, transport and experiences</span></span>${icon('chevR')}</a>
     </div>
     <div class="page" style="padding-top:6px">
       <div id="home-ads"></div>
@@ -914,6 +942,7 @@ async function viewHome() {
       <div class="section-title"><span>${getLoc() ? 'Jobs Near You' : 'Recent Jobs'}</span><a href="#/jobs">See all</a></div>
       <div id="home-jobs">${skeletonCards(3)}</div>
       <div id="home-picks"></div>
+      <div id="home-exp"></div>
       <div class="section-title"><span>How it works</span><a href="#/how">More detail</a></div>
       <div class="steps">
         <div class="card"><div class="step-n">1</div><div><h4>Sign up free</h4><p>Your name, phone, a photo and a selfie.</p></div></div>
@@ -1031,6 +1060,17 @@ async function viewHome() {
         location.hash = '#/product/' + el.dataset.product;
       });
     });
+  }).catch(() => {});
+  // 2911 Experiences (Phase 2): real listings only; the section hides
+  // entirely when there are none yet.
+  api('/api/experiences?sort=newest&limit=8').then((d) => {
+    const slot = document.getElementById('home-exp');
+    if (!slot) return;
+    const es = (d.experiences || []).slice(0, 8);
+    if (!es.length) return;
+    slot.innerHTML = `
+      <div class="section-title"><span>Experiences in Zambia</span><a href="#/experiences">See all</a></div>
+      <div class="hscroll">${es.map(expCard).join('')}</div>`;
   }).catch(() => {});
   try {
     const loc = getLoc();
@@ -1355,6 +1395,164 @@ const MARKET_CAT_PHOTOS = { 'Vehicles & Parts': 'vehicles', 'Electronics': 'elec
 
 function fmtK(n) { return 'K' + Number(n || 0).toLocaleString('en-ZM'); }
 
+/* ---------------- 2911 Experiences (Phase 2, Nov 8, 2026) ----------------
+   Public browse frontend for the tourism module inside 2911 Jobs. Prices
+   are ZMW primary via fmtZMW(); fmtK() is never used for Experiences.
+   No fabricated stats, reviews, providers or availability anywhere: every
+   count, rating and date comes from the /api/experiences responses, and
+   sections hide entirely when they have no real data. No write endpoints
+   exist in this phase: host onboarding is Phase 3, bookings Phase 4, so
+   every Become a Host / Book / Message action that has no backend yet
+   shows an honest "coming soon" state instead of a dead link or a fake
+   checkout. Navigation decision (PROVISIONAL, pending Zac's confirmation):
+   no sixth bottom tab; Experiences is reached from a Home card, a drawer
+   group and a desktop nav link. */
+
+/** ZMW primary, integer Kwacha: "ZMW 1,250". Never fmtK() for Experiences. */
+function fmtZMW(n) { return 'ZMW ' + Number(n || 0).toLocaleString('en-ZM'); }
+
+const EXP_PRICE_UNIT_LABELS = {
+  per_person: 'per person', per_group: 'per group', per_night: 'per night',
+  per_day: 'per day', per_hour: 'per hour', per_trip: 'per trip',
+  per_event: 'per event', quote: 'price on request',
+};
+/* Fallback when /api/experiences/categories cannot be reached; the live
+   list from the API always wins. Slug is the lowercase name. */
+const EXP_CATEGORIES_FALLBACK = [
+  { name: 'Tours', kind: 'tour', icon: 'compass' },
+  { name: 'Stays', kind: 'stay', icon: 'bed' },
+  { name: 'Transport', kind: 'transport', icon: 'bus' },
+  { name: 'Adventure', kind: 'experience', icon: 'mountain' },
+  { name: 'Cultural', kind: 'experience', icon: 'drum' },
+  { name: 'Events', kind: 'event', icon: 'ticket' },
+];
+/* Category colour-dot mapping: [icon, colour]. Unknown categories fall
+   back to the backpack tile. */
+const EXP_CAT_STYLE = {
+  Tours: ['compass', '#4C1D95'],
+  Stays: ['bed', '#2563EB'],
+  Transport: ['bus', '#0E7490'],
+  Adventure: ['mountain', '#1E8A44'],
+  Cultural: ['drum', '#B45309'],
+  Events: ['ticket', '#DB2777'],
+};
+function expCatSlug(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+function expCatStyle(name) {
+  const s = EXP_CAT_STYLE[name];
+  return s ? { icon: s[0], color: s[1] } : { icon: 'backpack', color: '#4C1D95' };
+}
+function expCatName(slug) {
+  const found = EXP_CATEGORIES_FALLBACK.find((c) => expCatSlug(c.name) === String(slug || '').toLowerCase());
+  return found ? found.name : String(slug || '').replace(/(^|-)(\w)/g, (m, d, c) => (d ? ' ' : '') + c.toUpperCase());
+}
+/** "ZMW 450 per night" (or "Free" for a zero price). Unit in a grey span. */
+function expPriceText(e) {
+  if (!e) return '';
+  if (Number(e.price_from) === 0) return 'Free';
+  const unit = EXP_PRICE_UNIT_LABELS[e.price_unit];
+  return fmtZMW(e.price_from) + (unit ? ` <span class="exp-per">${unit}</span>` : '');
+}
+function expCapacityText(e) {
+  const n = Number(e.capacity_max || 1);
+  if (e.listing_type === 'stay') return `Sleeps ${n}`;
+  if (e.listing_type === 'vehicle') return `Seats ${n}`;
+  return `Up to ${n} guest${n === 1 ? '' : 's'}`;
+}
+function expRatingHtml(e) {
+  if (e.rating_avg == null || !e.rating_count) return '';
+  return `<span class="pg-meta">${icon('star')}<span>${Number(e.rating_avg).toFixed(1)} (${e.rating_count})</span></span>`;
+}
+/** Honest stand-in for actions whose backend lands in a later phase. */
+function expHostSoon() { toast('Become a Host is coming soon. Host onboarding opens in the next phase.'); }
+function expBookingSoon() { toast('Bookings open soon. Booking requests launch in the next phase.'); }
+
+/* ---------------- saved experiences (on this device) ---------------- */
+function getSavedExperiences() {
+  try {
+    const v = JSON.parse(localStorage.getItem('pw_saved_experiences') || '[]');
+    return Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : [];
+  } catch { return []; }
+}
+function isSavedExperience(id) { return getSavedExperiences().includes(Number(id)); }
+function toggleSaveExperience(id) {
+  id = Number(id);
+  let s = getSavedExperiences();
+  if (s.includes(id)) {
+    s = s.filter((x) => x !== id);
+    toast('Removed from saved experiences.');
+  } else {
+    s.push(id);
+    toast('Experience saved on this device.');
+  }
+  localStorage.setItem('pw_saved_experiences', JSON.stringify(s));
+  document.querySelectorAll(`[data-expsave="${id}"]`).forEach((b) => {
+    b.classList.toggle('saved', s.includes(id));
+    b.setAttribute('aria-pressed', s.includes(id) ? 'true' : 'false');
+  });
+}
+
+function shareExperience(id, title) {
+  const url = PUBLIC_ORIGIN + '/s/experience/' + id;
+  openShareSheet({
+    heading: 'Share this experience',
+    url,
+    text: '"' + title + '" — see this experience on 2911 Jobs',
+    copiedMessage: 'Experience link copied. Paste it anywhere to share.',
+  });
+}
+
+/** Photo-led result card. No rating shown where there are no reviews;
+ * no availability date invented (the API returns availability_text null
+ * until Phase 4, so the card says "Check dates"). */
+function expCard(e) {
+  const cat = e.category || {};
+  const style = expCatStyle(cat.name);
+  const saved = isSavedExperience(e.id);
+  const loc = e.location && e.location.chain ? e.location.chain : [e.city, e.area].filter(Boolean).join(' · ');
+  return `
+  <article class="product-card-g exp-card" data-experience="${e.id}" tabindex="0" role="link" aria-label="${esc(e.title)}">
+    <div class="pg-media">
+      ${e.cover_photo
+        ? `<img src="${esc(e.cover_photo)}" alt="${esc(e.title)}" loading="lazy">`
+        : `<div class="job-thumb product-thumb">${icon(style.icon)}</div>`}
+      <span class="pg-cond">${esc(cat.name || e.listing_type || '')}</span>
+      ${e.photo_count > 1 ? `<span class="pd-count">1/${e.photo_count}</span>` : ''}
+      <button class="job-save product-share" data-share-experience="${e.id}" data-title="${esc(e.title)}" aria-label="Share this experience">${icon('share')}</button>
+      <button class="job-save ${saved ? 'saved' : ''}" data-expsave="${e.id}" aria-label="Save this experience" aria-pressed="${saved ? 'true' : 'false'}">${icon('heart')}</button>
+    </div>
+    <div class="pg-body">
+      <h3>${esc(e.title)}</h3>
+      <div class="exp-price">${expPriceText(e)}</div>
+      <div class="pg-meta">${icon('pin')}<span>${esc(loc)}${e.distance_km != null ? ` · ${e.distance_km} km away` : ''}</span></div>
+      ${expRatingHtml(e)}
+      <div class="pg-meta">${icon('users')}<span>${esc(expCapacityText(e))}</span></div>
+      ${e.host && e.host.verified ? `<div><span class="exp-verified">${icon('check')} Verified host</span></div>` : ''}
+      <div class="exp-avail"><span class="exp-dot"></span>Check dates</div>
+    </div>
+  </article>`;
+}
+let expBrowseState = { destination: '', province: '', from: '', to: '', guests: '', category: '', min: '', max: '', capacity: '', verified: false, instant: false, sort: '', page: 1 };
+let expCategoriesCache = null;
+async function expCategories() {
+  if (expCategoriesCache) return expCategoriesCache;
+  try {
+    const d = await api('/api/experiences/categories');
+    if (d && Array.isArray(d.categories) && d.categories.length) {
+      expCategoriesCache = d.categories;
+      return expCategoriesCache;
+    }
+  } catch { /* fallback below */ }
+  expCategoriesCache = EXP_CATEGORIES_FALLBACK;
+  return expCategoriesCache;
+}
+async function expProvinces() {
+  try {
+    const d = await api('/api/experiences/locations');
+    if (d && Array.isArray(d.locations)) return d.locations;
+  } catch { /* no province data: the control is hidden, never hard-coded */ }
+  return [];
+}
+
 function productCard(p) {
   const savedP = isSavedProduct(p.id);
   return `
@@ -1481,6 +1679,696 @@ async function viewMarket() {
   /* condition is owned by the quick chips (All / New / Used) */
   document.getElementById('m-sort').addEventListener('change', (e) => { marketState.sort = e.target.value; load(true); });
   load(true);
+}
+
+/* ---------------- Experiences homepage (#/experiences) ---------------- */
+async function viewExperiences() {
+  const today = new Date().toISOString().slice(0, 10);
+  app.innerHTML = `
+  <div class="view">
+    <section class="exp-hero-search">
+      <span class="exp-kicker">2911 Experiences</span>
+      <h1>Discover Zambia. Experience More. Earn Locally.</h1>
+      <p class="exp-sub">Tours, stays, transport, and local experiences, from verified Zambian hosts.</p>
+      <div class="exp-search-card">
+        <div class="exp-search-row">
+          <div class="field exp-dest-wrap" style="margin-bottom:12px">
+            <label for="exp-dest">Where to?</label>
+            <input id="exp-dest" type="text" placeholder="Try Livingstone, Lusaka, or South Luangwa" autocomplete="off" aria-label="Destination">
+            <div class="exp-suggest" id="exp-dest-suggest" hidden></div>
+          </div>
+          <div class="field">
+            <label for="exp-province">Province</label>
+            <select id="exp-province" aria-label="Province"><option value="">All provinces</option></select>
+          </div>
+          <div class="field">
+            <label for="exp-date">Date</label>
+            <input id="exp-date" type="date" min="${today}" aria-label="Date">
+          </div>
+          <div class="field exp-guests-field">
+            <label>Guests</label>
+            <div class="exp-guests">
+              
+              <span class="exp-guests-ctl">
+                <button type="button" id="exp-guests-minus" aria-label="Fewer guests">-</button>
+                <span class="exp-guests-count" id="exp-guests-count" aria-live="polite">2</span>
+                <button type="button" id="exp-guests-plus" aria-label="More guests">+</button>
+              </span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="exp-cat">Category</label>
+            <select id="exp-cat" aria-label="Category"><option value="">All categories</option></select>
+          </div>
+        </div>
+        <p class="ferr" id="exp-search-err" hidden></p>
+        <button class="btn btn-exp full" id="exp-search-go" type="button">${icon('search')} Search experiences</button>
+      </div>
+      <p class="exp-search-note">No payment needed to send a booking request.</p>
+    </section>
+    <div class="page" style="padding-top:6px">
+      <div class="section-title"><span>Browse by category</span></div>
+      <div class="cat-strip" id="exp-cats">${skeletonCards(1)}</div>
+      <div id="exp-sections"></div>
+      <div id="exp-sec-new"></div>
+      <div id="exp-sec-stays"></div>
+      <div id="exp-sec-tours"></div>
+      <div id="exp-sec-events"></div>
+      <div id="exp-sec-vtransport"></div>
+      <div id="exp-sec-hosts"></div>
+      <div id="exp-sec-saved"></div>
+      <a class="promo-card" href="#" data-exp-host-soon style="background:linear-gradient(135deg,#0B1F3B,#4C1D95);text-decoration:none;color:#fff;display:flex;align-items:center;gap:14px;padding:18px">
+        <div style="font-size:34px">${icon('compass')}</div>
+        <div class="promo-text" style="background:none;padding:0"><h3>Earn from what you know</h3><p>List a room, a vehicle, a tour, or an experience. You set the price and the dates.</p></div>
+      </a>
+      <div class="card" style="margin-top:16px"><div class="safety-card"><span class="safety-ico">${icon('shield')}</span><div><b>Travel safe</b><ul><li>Meet your host in a public place first</li><li>Never pay outside a booking request</li><li>Report anything that feels wrong</li></ul><a class="small" href="#/how">Help and safety</a></div></div></div>
+      <div class="cta-final">
+        <h3>Your next Zambian experience is a few taps away.</h3>
+        <p>Search by place and date, send a booking request, and hear back from your host.</p>
+        <div class="btn-row"><a class="btn btn-exp" href="#/experiences/search">Search experiences</a><a class="btn btn-outline" href="#" data-exp-host-soon>Become a Host</a></div>
+      </div>
+    </div>
+  </div>`;
+
+  /* Hero search wiring. */
+  let guests = 2;
+  const gCount = document.getElementById('exp-guests-count');
+  const gMinus = document.getElementById('exp-guests-minus');
+  const gPlus = document.getElementById('exp-guests-plus');
+  const setGuests = (n) => {
+    guests = Math.max(1, Math.min(16, n));
+    gCount.textContent = String(guests);
+    gMinus.disabled = guests <= 1;
+    gPlus.disabled = guests >= 16;
+  };
+  gMinus.addEventListener('click', () => setGuests(guests - 1));
+  gPlus.addEventListener('click', () => setGuests(guests + 1));
+  setGuests(2);
+  const destInput = document.getElementById('exp-dest');
+  const suggest = document.getElementById('exp-dest-suggest');
+  let destTimer;
+  destInput.addEventListener('input', () => {
+    clearTimeout(destTimer);
+    const v = destInput.value.trim();
+    if (v.length < 2) { suggest.hidden = true; suggest.innerHTML = ''; return; }
+    destTimer = setTimeout(async () => {
+      try {
+        const d = await api('/api/experiences/locations?q=' + encodeURIComponent(v) + '&limit=6');
+        const locs = d.locations || [];
+        if (!locs.length || document.activeElement !== destInput) { suggest.hidden = true; return; }
+        suggest.innerHTML = locs.map((l) => `<button type="button" data-exp-loc="${esc(l.name)}"><b>${esc(l.name)}</b><small>${esc(l.chain || '')}</small></button>`).join('');
+        suggest.hidden = false;
+        suggest.querySelectorAll('[data-exp-loc]').forEach((b) => b.addEventListener('click', () => {
+          destInput.value = b.dataset.expLoc;
+          suggest.hidden = true;
+          suggest.innerHTML = '';
+        }));
+      } catch { suggest.hidden = true; }
+    }, 250);
+  });
+  destInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') { suggest.hidden = true; } });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest || !e.target.closest('.exp-dest-wrap')) { suggest.hidden = true; }
+  });
+  expProvinces().then((provs) => {
+    const sel = document.getElementById('exp-province');
+    if (!sel) return;
+    provs.forEach((p) => {
+      const o = document.createElement('option');
+      o.value = p.name; o.textContent = p.name + ' Province';
+      sel.appendChild(o);
+    });
+  });
+  const cats = await expCategories();
+  const catSel = document.getElementById('exp-cat');
+  if (catSel) cats.forEach((c) => {
+    const o = document.createElement('option');
+    o.value = c.name; o.textContent = c.name;
+    catSel.appendChild(o);
+  });
+  document.getElementById('exp-search-go').addEventListener('click', () => {
+    const err = document.getElementById('exp-search-err');
+    const from = document.getElementById('exp-date').value;
+    if (from && from < today) {
+      err.textContent = 'The date cannot be in the past.';
+      err.hidden = false;
+      return;
+    }
+    err.hidden = true;
+    const params = new URLSearchParams();
+    const dest = destInput.value.trim();
+    if (dest) params.set('destination', dest);
+    const prov = document.getElementById('exp-province').value;
+    if (prov) params.set('province', prov);
+    if (from) params.set('from', from);
+    if (guests !== 2) params.set('guests', String(guests));
+    const cat = document.getElementById('exp-cat').value;
+    if (cat) params.set('category', cat);
+    const qs = params.toString();
+    location.hash = '#/experiences/search' + (qs ? '?' + qs : '');
+  });
+
+  /* Category strip: always all six, even when a category has no listings. */
+  const catsSlot = document.getElementById('exp-cats');
+  if (catsSlot) {
+    catsSlot.innerHTML = cats.map((c) => {
+      const st = expCatStyle(c.name);
+      return `<a class="cat-card exp-cat-card" href="#/experiences/category/${expCatSlug(c.name)}"><span class="cat-ico" style="background:${st.color}">${icon(st.icon)}</span><b>${esc(c.name)}</b><span class="exp-cat-dot" style="background:${st.color}"></span></a>`;
+    }).join('');
+  }
+
+  /* Sections: each hides entirely when it has no real data. */
+  async function expSection(slotId, title, link, promise) {
+    try {
+      const d = await promise;
+      const items = d.experiences || [];
+      if (!items.length) return;
+      const el = document.getElementById(slotId);
+      if (!el) return;
+      el.innerHTML = `<div class="section-title"><span>${esc(title)}</span><a href="${link}">See all</a></div><div class="hscroll">${items.map(expCard).join('')}</div>`;
+    } catch { /* section stays hidden */ }
+  }
+  async function expHostsSection() {
+    try {
+      const d = await api('/api/experiences?verified=1&sort=newest&limit=20');
+      const seen = new Set();
+      const hosts = [];
+      for (const e of d.experiences || []) {
+        if (!e.host || !e.host.verified) continue;
+        const key = e.host.type + ':' + e.host.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        hosts.push(e.host);
+      }
+      if (!hosts.length) return;
+      const el = document.getElementById('exp-sec-hosts');
+      if (!el) return;
+      el.innerHTML = `<div class="section-title"><span>Verified hosts</span><a href="#/experiences/search?verified=1">See all</a></div><div class="fw-scroll">${hosts.slice(0, 8).map((h) => {
+        const href = h.type === 'business' ? '#/business/' + encodeURIComponent(h.slug || '') : '#/user/' + h.id;
+        return `<a class="fw-card" href="${href}">${avatarHtml({ name: h.name, avatar: h.avatar }, 'lg')}<b>${esc(h.name)}</b><span class="fw-city">${icon('pin')}${esc(h.city || '')}</span><span class="exp-verified">${icon('check')} Verified host</span></a>`;
+      }).join('')}</div>`;
+    } catch { /* section stays hidden */ }
+  }
+  async function expSavedSection() {
+    if (!currentUser) return;
+    const ids = getSavedExperiences();
+    if (!ids.length) return;
+    const items = [];
+    for (const id of ids.slice(0, 8)) {
+      try {
+        const d = await api('/api/experiences/' + id);
+        if (d.experience) items.push(d.experience);
+      } catch { /* a removed listing drops out of the saved strip */ }
+    }
+    if (!items.length) return;
+    const el = document.getElementById('exp-sec-saved');
+    if (!el) return;
+    el.innerHTML = `<div class="section-title"><span>Your saved experiences</span></div><div class="hscroll">${items.map(expCard).join('')}</div>`;
+  }
+
+  try {
+    const totalRes = await api('/api/experiences?limit=1');
+    if (totalRes.total === 0) {
+      const slot = document.getElementById('exp-sections');
+      if (slot) {
+        slot.innerHTML = emptyHtml('compass', 'Experiences are coming soon',
+          'Hosts are signing up now. Check back soon, or become one of the first hosts.',
+          `<button class="btn btn-sm btn-primary" data-exp-host-soon>Become a Host</button>`);
+      }
+      return;
+    }
+  } catch { /* if the total check fails, try the sections anyway */ }
+  expSection('exp-sec-new', 'Newly added', '#/experiences/search?sort=newest', api('/api/experiences?sort=newest&limit=8'));
+  expSection('exp-sec-stays', 'New stays', '#/experiences/category/stays', api('/api/experiences?category=Stays&sort=newest&limit=8'));
+  expSection('exp-sec-tours', 'New tours', '#/experiences/category/tours', api('/api/experiences?category=Tours&sort=newest&limit=8'));
+  expSection('exp-sec-events', 'New events', '#/experiences/category/events', api('/api/experiences?category=Events&sort=newest&limit=8'));
+  expSection('exp-sec-vtransport', 'Verified transport', '#/experiences/search?category=Transport&verified=1', api('/api/experiences?category=Transport&verified=1&sort=newest&limit=8'));
+  expHostsSection();
+  expSavedSection();
+}
+
+/* ---------------- Experiences search + category (#/experiences/search,
+   #/experiences/category/:slug) ----------------
+   One layout, server-side filters via query parameters, Load more (never
+   infinite scroll), count from the API response only. The category page is
+   the same view pre-filtered by category. */
+async function viewExperienceSearch(presetSlug) {
+  const query = new URLSearchParams(location.hash.split('?')[1] || '');
+  const isCategory = !!presetSlug;
+  const catName = isCategory ? expCatName(presetSlug) : '';
+  const catStyle = isCategory ? expCatStyle(catName) : null;
+  expBrowseState = {
+    destination: query.get('destination') || '',
+    province: query.get('province') || '',
+    from: query.get('from') || '',
+    to: query.get('to') || '',
+    guests: query.get('guests') || '',
+    category: isCategory ? catName : (query.get('category') || ''),
+    min: query.get('min') || '',
+    max: query.get('max') || '',
+    capacity: query.get('capacity') || '',
+    verified: query.get('verified') === '1',
+    instant: query.get('instant') === '1',
+    sort: query.get('sort') || '',
+    page: Math.max(1, parseInt(query.get('page') || '1', 10) || 1),
+  };
+  const title = isCategory ? catName : 'Search experiences';
+  const sub = isCategory ? 'Browse ' + catName.toLowerCase() + ' across Zambia.' : 'Search by place, date and price.';
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <div class="page-band"><h1 class="page-title">${esc(title)}</h1><p class="page-sub">${esc(sub)}</p></div>
+    <div class="search-again">
+      <div class="searchbar">${icon('search')}<input id="exp-q" type="search" placeholder="Where to? Try Livingstone or Mfuwe" value="${esc(expBrowseState.destination)}" aria-label="Search by destination"></div>
+      <button class="btn btn-primary" id="exp-q-go" type="button">Search</button>
+    </div>
+    <div class="chips" id="exp-chips"><button class="chip ${!expBrowseState.category ? 'active' : ''}" data-exp-cat="">All</button></div>
+    <div class="filters" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
+      <button class="btn btn-outline btn-sm" id="exp-filters-btn" type="button">${icon('sliders')} Filters</button>
+      <select id="exp-sort" aria-label="Sort experiences" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
+        <option value="" ${!expBrowseState.sort ? 'selected' : ''}>Recommended</option>
+        <option value="newest" ${expBrowseState.sort === 'newest' ? 'selected' : ''}>Newest</option>
+        <option value="price_low" ${expBrowseState.sort === 'price_low' ? 'selected' : ''}>Price: low to high</option>
+        <option value="price_high" ${expBrowseState.sort === 'price_high' ? 'selected' : ''}>Price: high to low</option>
+        <option value="rating" ${expBrowseState.sort === 'rating' ? 'selected' : ''}>Highest rated</option>
+      </select>
+    </div>
+    <div class="split" style="margin:6px 2px 10px"><span class="small muted" id="exp-count"></span><span class="small muted" id="exp-order"></span></div>
+    <div id="exp-results">${skeletonCards(3)}</div>
+    <div id="exp-more" style="text-align:center;margin:8px 0 16px"></div>
+    <div style="text-align:center;margin:18px 0 8px"><a class="link-btn" href="#/how">How 2911 Jobs works</a></div>
+  </div></div>`;
+
+  const cats = await expCategories();
+  const chips = document.getElementById('exp-chips');
+  chips.innerHTML = `<button class="chip ${!expBrowseState.category ? 'active' : ''}" data-exp-cat="">All</button>` +
+    cats.map((c) => `<button class="chip ${expCatSlug(c.name) === expCatSlug(expBrowseState.category) ? 'active' : ''}" data-exp-cat="${esc(c.name)}">${esc(c.name)}</button>`).join('');
+  chips.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-exp-cat]');
+    if (!btn) return;
+    expBrowseState.category = btn.dataset.expCat;
+    expBrowseState.page = 1;
+    chips.querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c === btn));
+    syncExpHash();
+    loadExp(true);
+  });
+  document.getElementById('exp-sort').addEventListener('change', (e) => {
+    expBrowseState.sort = e.target.value;
+    expBrowseState.page = 1;
+    syncExpHash();
+    loadExp(true);
+  });
+  const runSearchAgain = () => {
+    expBrowseState.destination = document.getElementById('exp-q').value.trim();
+    expBrowseState.page = 1;
+    syncExpHash();
+    loadExp(true);
+  };
+  document.getElementById('exp-q-go').addEventListener('click', runSearchAgain);
+  document.getElementById('exp-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearchAgain(); });
+  document.getElementById('exp-more').addEventListener('click', (e) => {
+    if (e.target.id === 'exp-load-more') { expBrowseState.page++; syncExpHash(); loadExp(false); }
+  });
+  document.getElementById('exp-filters-btn').addEventListener('click', openExpFilters);
+  await loadExp(true);
+
+  function expParams() {
+    const s = expBrowseState;
+    const params = new URLSearchParams({ page: String(s.page) });
+    if (s.sort) params.set('sort', s.sort);
+    if (s.destination) params.set('destination', s.destination);
+    if (s.province) params.set('province', s.province);
+    if (s.from) params.set('from', s.from);
+    if (s.to) params.set('to', s.to);
+    if (s.guests) params.set('guests', s.guests);
+    if (s.category) params.set('category', s.category);
+    if (s.min) params.set('min', s.min);
+    if (s.max) params.set('max', s.max);
+    if (s.capacity) params.set('capacity', s.capacity);
+    if (s.verified) params.set('verified', '1');
+    if (s.instant) params.set('instant', '1');
+    return params;
+  }
+  /* Keep the filter state in the URL hash (replaceState: no reload, no
+     router re-run) so a filtered results link can be shared and reloaded. */
+  function syncExpHash() {
+    const qs = expParams().toString();
+    const base = isCategory ? '#/experiences/category/' + expCatSlug(expBrowseState.category || presetSlug) : '#/experiences/search';
+    try { history.replaceState(null, '', base + (qs ? '?' + qs : '')); } catch { /* ignore */ }
+  }
+  async function loadExp(reset) {
+    const results = document.getElementById('exp-results');
+    const more = document.getElementById('exp-more');
+    if (!results) return;
+    if (reset) results.innerHTML = skeletonCards(3);
+    try {
+      const data = await api('/api/experiences?' + expParams().toString());
+      const count = document.getElementById('exp-count');
+      if (count) count.textContent = `${data.total} ${data.total === 1 ? 'experience' : 'experiences'}`;
+      const order = document.getElementById('exp-order');
+      if (order) {
+        order.textContent = expBrowseState.sort === 'price_low' ? 'Price: low to high'
+          : expBrowseState.sort === 'price_high' ? 'Price: high to low'
+          : expBrowseState.sort === 'rating' ? 'Highest rated first'
+          : expBrowseState.sort === 'newest' ? 'Newest first' : 'Recommended';
+      }
+      if (reset) {
+        if (!data.experiences.length) {
+          if (isCategory) {
+            const plural = catName.toLowerCase();
+            results.innerHTML = emptyHtml(catStyle.icon, 'No ' + plural + ' yet',
+              'No ' + plural + ' are listed in this category yet. Check back soon, or be the first host to list one.',
+              currentUser ? `<button class="btn btn-sm btn-primary" data-exp-host-soon>Become a Host</button>` : `<a class="btn btn-sm btn-primary" href="#/experiences">Browse all experiences</a>`);
+          } else {
+            results.innerHTML = emptyHtml('search', 'No experiences found',
+              'Try different dates, a nearby town, or a wider price range.',
+              `<button class="btn btn-sm btn-primary" id="exp-clear-filters">Clear filters</button>`);
+            const clearBtn = document.getElementById('exp-clear-filters');
+            if (clearBtn) clearBtn.addEventListener('click', () => {
+              expBrowseState = { destination: '', province: '', from: '', to: '', guests: '', category: '', min: '', max: '', capacity: '', verified: false, instant: false, sort: '', page: 1 };
+              document.getElementById('exp-q').value = '';
+              document.getElementById('exp-sort').value = '';
+              chips.querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c.dataset.expCat === ''));
+              syncExpHash();
+              loadExp(true);
+            });
+          }
+        } else {
+          results.innerHTML = `<div class="product-grid">${data.experiences.map(expCard).join('')}</div>`;
+        }
+      } else {
+        const grid = results.querySelector('.product-grid');
+        if (grid) grid.insertAdjacentHTML('beforeend', data.experiences.map(expCard).join(''));
+      }
+      if (more) {
+        more.innerHTML = data.page < data.totalPages
+          ? `<button id="exp-load-more" class="btn btn-ghost btn-sm">Load more (${data.remaining} remaining)</button>` : '';
+      }
+    } catch (e) {
+      if (reset) results.innerHTML = errorHtml(e.message);
+    }
+  }
+  async function openExpFilters() {
+    const s = expBrowseState;
+    const provs = await expProvinces();
+    const overlay = document.createElement('div');
+    overlay.className = 'share-overlay';
+    overlay.innerHTML = `
+    <div class="share-sheet exp-sheet" role="dialog" aria-label="Filters">
+      <h3>Filters</h3>
+      <p class="share-sub">Prices are per night, per person, or per trip, as shown on each listing.</p>
+      <div class="field"><label for="exp-f-dest">Destination</label><input id="exp-f-dest" type="text" placeholder="Town or place" value="${esc(s.destination)}"></div>
+      ${provs.length ? `<div class="field"><label for="exp-f-prov">Province</label><select id="exp-f-prov"><option value="">All provinces</option>${provs.map((p) => `<option ${s.province === p.name ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>` : ''}
+      <div class="exp-date">
+        <div class="field"><label for="exp-f-from">From</label><input id="exp-f-from" type="date" value="${esc(s.from)}"></div>
+        <div class="field"><label for="exp-f-to">To</label><input id="exp-f-to" type="date" value="${esc(s.to)}"></div>
+      </div>
+      <div class="exp-date">
+        <div class="field"><label for="exp-f-min">Min price (ZMW)</label><input id="exp-f-min" type="number" min="0" inputmode="numeric" placeholder="0" value="${esc(s.min)}"></div>
+        <div class="field"><label for="exp-f-max">Max price (ZMW)</label><input id="exp-f-max" type="number" min="0" inputmode="numeric" placeholder="No max" value="${esc(s.max)}"></div>
+      </div>
+      <div class="field"><label>Minimum guests</label>
+        <div class="exp-guests"><span class="exp-guests-ctl">
+          <button type="button" id="exp-f-cap-minus" aria-label="Fewer guests">-</button>
+          <span class="exp-guests-count" id="exp-f-cap-count" aria-live="polite">${esc(s.capacity || '1')}</span>
+          <button type="button" id="exp-f-cap-plus" aria-label="More guests">+</button>
+        </span></div>
+      </div>
+      <label class="switch-row"><span>Verified hosts only</span><input type="checkbox" id="exp-f-verified" ${s.verified ? 'checked' : ''}><span class="switch"></span></label>
+      <label class="switch-row"><span>Instant booking only</span><input type="checkbox" id="exp-f-instant" ${s.instant ? 'checked' : ''}><span class="switch"></span></label>
+      <div class="exp-sheet-actions">
+        <button class="btn btn-ghost" id="exp-f-clear" type="button">Clear all</button>
+        <button class="btn btn-primary" id="exp-f-apply" type="button">Show results</button>
+      </div>
+    </div>`;
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    let cap = Math.max(1, Math.min(16, parseInt(s.capacity || '1', 10) || 1));
+    const capCount = overlay.querySelector('#exp-f-cap-count');
+    const setCap = (n) => {
+      cap = Math.max(1, Math.min(16, n));
+      capCount.textContent = String(cap);
+      overlay.querySelector('#exp-f-cap-minus').disabled = cap <= 1;
+      overlay.querySelector('#exp-f-cap-plus').disabled = cap >= 16;
+    };
+    overlay.querySelector('#exp-f-cap-minus').addEventListener('click', () => setCap(cap - 1));
+    overlay.querySelector('#exp-f-cap-plus').addEventListener('click', () => setCap(cap + 1));
+    setCap(cap);
+    overlay.querySelector('#exp-f-clear').addEventListener('click', () => {
+      expBrowseState = { destination: '', province: '', from: '', to: '', guests: '', category: isCategory ? catName : '', min: '', max: '', capacity: '', verified: false, instant: false, sort: expBrowseState.sort, page: 1 };
+      document.getElementById('exp-q').value = '';
+      close();
+      syncExpHash();
+      loadExp(true);
+    });
+    overlay.querySelector('#exp-f-apply').addEventListener('click', () => {
+      const from = overlay.querySelector('#exp-f-from').value;
+      const to = overlay.querySelector('#exp-f-to').value;
+      if (from && to && from > to) { toast('Check out must be after check in.', true); return; }
+      expBrowseState.destination = overlay.querySelector('#exp-f-dest').value.trim();
+      const provSel = overlay.querySelector('#exp-f-prov');
+      expBrowseState.province = provSel ? provSel.value : '';
+      expBrowseState.from = from;
+      expBrowseState.to = to;
+      expBrowseState.min = overlay.querySelector('#exp-f-min').value.trim();
+      expBrowseState.max = overlay.querySelector('#exp-f-max').value.trim();
+      expBrowseState.capacity = cap > 1 ? String(cap) : '';
+      expBrowseState.verified = overlay.querySelector('#exp-f-verified').checked;
+      expBrowseState.instant = overlay.querySelector('#exp-f-instant').checked;
+      expBrowseState.page = 1;
+      document.getElementById('exp-q').value = expBrowseState.destination;
+      close();
+      syncExpHash();
+      loadExp(true);
+    });
+    document.body.appendChild(overlay);
+  }
+}
+async function viewExperienceCategory(slug) { return viewExperienceSearch(slug); }
+
+/* ---------------- Listing detail (#/experience/:id) ---------------- */
+function expZoom(photos, startIdx) {
+  closeAvatarZoom();
+  let idx = startIdx;
+  const overlay = document.createElement('div');
+  overlay.id = 'avatar-zoom';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-label', 'Listing photos enlarged');
+  const render = () => {
+    overlay.innerHTML = `
+      <button class="avatar-zoom-close" aria-label="Close">${icon('x')}</button>
+      ${photos.length > 1 ? `<button class="exp-zoom-prev" aria-label="Previous photo">${icon('chevL')}</button><button class="exp-zoom-next" aria-label="Next photo">${icon('chevR')}</button>` : ''}
+      <img src="${esc(photos[idx].url)}" alt="Photo ${idx + 1} of ${photos.length}">`;
+    overlay.querySelector('.avatar-zoom-close').addEventListener('click', closeAvatarZoom);
+    const prev = overlay.querySelector('.exp-zoom-prev');
+    if (prev) prev.addEventListener('click', (ev) => { ev.stopPropagation(); idx = (idx - 1 + photos.length) % photos.length; render(); });
+    const next = overlay.querySelector('.exp-zoom-next');
+    if (next) next.addEventListener('click', (ev) => { ev.stopPropagation(); idx = (idx + 1) % photos.length; render(); });
+  };
+  render();
+  overlay.addEventListener('click', (ev) => { if (ev.target === overlay || ev.target.tagName === 'IMG') closeAvatarZoom(); });
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', escCloseAvatarZoom);
+}
+function expCancelSummary(policy, listingType) {
+  const when = listingType === 'stay' ? 'check in' : 'start time';
+  if (policy === 'Flexible') return `Free cancellation up to 48 hours before ${when}.`;
+  if (policy === 'Moderate') return `Free cancellation up to 7 days before ${when}.`;
+  if (policy === 'Strict') return 'No free cancellation. Cancellation fees apply as shown at booking.';
+  if (policy === 'Event') return 'Tickets are non refundable unless the event is cancelled.';
+  return policy || '';
+}
+function expDetailRows(e) {
+  const d = e.details || {};
+  const row = (label, value) => (value === undefined || value === null || value === '' ? '' : `<div class="drow"><span>${esc(label)}</span><b>${esc(String(value))}</b></div>`);
+  let rows = '';
+  if (e.listing_type === 'stay') {
+    rows += row('Property type', d.property_type);
+    rows += row('Sleeps', d.max_guests);
+    rows += row('Bedrooms', d.bedrooms);
+    rows += row('Bathrooms', d.bathrooms);
+    rows += row('Check in', d.check_in_time ? 'From ' + d.check_in_time : '');
+    rows += row('Check out', d.check_out_time ? 'By ' + d.check_out_time : '');
+    if (Array.isArray(d.units) && d.units.length) {
+      rows += `<div class="drow"><span>Rooms</span><b>${d.units.map((u) => esc(u.name) + ' · sleeps ' + u.sleeps + ' · ' + fmtZMW(u.price_per_night) + ' per night').join('<br>')}</b></div>`;
+    }
+  } else if (e.listing_type === 'vehicle') {
+    rows += row('Vehicle type', d.vehicle_type);
+    rows += row('Vehicle', [d.make, d.model, d.year].filter(Boolean).join(' '));
+    rows += row('Seats', d.seats);
+    rows += row('Driver', d.driver_included === true ? 'With driver' : (d.driver_included === false ? 'Self drive' : ''));
+    rows += row('Transmission', d.transmission);
+    rows += row('Fuel', d.fuel);
+    rows += row('Price per day', d.price_per_day ? fmtZMW(d.price_per_day) : '');
+  } else if (e.listing_type === 'tour') {
+    rows += row('Duration', d.duration_hours ? d.duration_hours + ' hours' : (d.duration_days ? d.duration_days + (d.duration_days === 1 ? ' day' : ' days') : ''));
+    rows += row('Group size', (d.group_size_min || d.group_size_max) ? `Up to ${d.group_size_max || ''} guests${d.group_size_min ? ' (min ' + d.group_size_min + ')' : ''}` : '');
+    rows += row('Meeting point', d.meeting_point);
+    rows += row('Price per person', d.price_per_person ? fmtZMW(d.price_per_person) : '');
+  } else if (e.listing_type === 'event') {
+    rows += row('Date', d.event_date ? fmtDate(d.event_date) : '');
+    rows += row('Venue', d.venue_name);
+    rows += row('Doors open', d.doors_time);
+    rows += row('Ends', d.ends_at);
+    rows += row('Capacity', d.ticket_capacity);
+    rows += row('Age limit', d.age_limit);
+  }
+  rows += row('Capacity', expCapacityText(e));
+  rows += row('Location', e.location ? e.location.chain : [e.city, e.area].filter(Boolean).join(' · '));
+  rows += row('Cancellation', e.cancellation_policy);
+  return rows;
+}
+async function viewExperience(id) {
+  app.innerHTML = `<div class="view"><div class="page"><div id="exp-box">${skeletonCards(2)}</div></div></div>`;
+  const box = document.getElementById('exp-box');
+  let data;
+  try {
+    data = await api('/api/experiences/' + id);
+  } catch (e) {
+    box.innerHTML = emptyHtml('compass', 'This listing is not available',
+      'This listing is no longer available.',
+      `<a class="btn btn-sm btn-primary" href="#/experiences">Back to Experiences</a>`);
+    return;
+  }
+  const e = data.experience;
+  const related = data.related || [];
+  const cat = e.category || {};
+  const style = expCatStyle(cat.name);
+  const host = e.host || {};
+  const today = new Date().toISOString().slice(0, 10);
+  const photos = e.photos || [];
+  const inclusions = e.inclusions || [];
+  const exclusions = e.exclusions || [];
+  const amenities = (e.details && Array.isArray(e.details.amenities)) ? e.details.amenities : [];
+  const houseRules = e.details && e.details.house_rules;
+  box.innerHTML = `
+    <a class="small" href="#/experiences">Back to Experiences</a>
+    ${photos.length ? `<div class="exp-gallery">
+      <img class="pd-main" id="exp-main" src="${esc(photos[0].url)}" alt="${esc(e.title)}">
+      <span class="pd-count" id="exp-count">1/${photos.length}</span>
+      ${photos.length > 1 ? `<div class="pd-thumbs">${photos.map((ph, i) => `<img class="pd-thumb ${i === 0 ? 'active' : ''}" data-exp-thumb="${esc(ph.url)}" data-exp-idx="${i}" src="${esc(ph.url)}" alt="Photo ${i + 1} of this experience" loading="lazy">`).join('')}</div>` : ''}
+    </div>` : ''}
+    <div class="exp-detail" style="margin-top:12px">
+      <div class="exp-main-col">
+        <div class="card" style="margin-top:0">
+          ${!photos.length ? `<div class="job-thumb product-thumb" style="width:100%;height:120px;border-radius:14px;margin-bottom:10px">${icon(style.icon)}</div>` : ''}
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+            <h1 class="page-title" style="font-size:22px;margin:0">${esc(e.title)}</h1>
+            <span style="display:inline-flex;gap:8px;flex:none"><button class="icon-btn" data-share-experience="${e.id}" data-title="${esc(e.title)}" aria-label="Share this experience">${icon('share')}</button><button class="icon-btn ${isSavedExperience(e.id) ? 'saved' : ''}" data-expsave="${e.id}" aria-label="Save this experience" aria-pressed="${isSavedExperience(e.id) ? 'true' : 'false'}">${icon('heart')}</button></span>
+          </div>
+          <div class="exp-price lg" style="margin-top:6px">${expPriceText(e)}</div>
+          <div class="job-meta" style="margin-top:6px">
+            <span class="badge badge-cat">${esc(cat.name || e.listing_type || '')}</span>
+            <span>${icon('pin')} ${esc(e.location ? e.location.chain : [e.city, e.area].filter(Boolean).join(' · '))}</span>
+            <span>${icon('users')} ${esc(expCapacityText(e))}</span>
+          </div>
+          <div class="pd-stats">
+            <div class="pd-stat"><span>Category</span><b>${esc(cat.name || '')}</b></div>
+            <div class="pd-stat"><span>Location</span><b>${esc(e.city || '')}</b></div>
+            <div class="pd-stat"><span>Posted</span><b>${esc(relTime(e.created_at))}</b></div>
+          </div>
+          <p style="margin-top:12px;white-space:pre-wrap">${esc(e.description)}</p>
+          ${e.view_count ? `<p class="small muted" style="margin-top:8px"><span class="job-meta" style="display:inline-flex;align-items:center;gap:4px">${icon('eye')} ${e.view_count} views</span></p>` : ''}
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">Your host</h3>
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            ${avatarHtml({ name: host.name, avatar: host.avatar }, 'md')}
+            <span><b>${esc(host.name || '')}</b>
+            <span class="small muted" style="display:block">${esc(host.city || '')}${host.member_since ? ' · Member since ' + esc(String(host.member_since).slice(0, 4)) : ''}</span>
+            ${host.verified ? '<span class="badge badge-verified">Verified host</span>' : ''}</span>
+          </div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn btn-primary" id="exp-msg-host">${icon('message')} Message host</button>
+            <button class="btn btn-outline" data-share-experience="${e.id}" data-title="${esc(e.title)}">${icon('share')} Share</button>
+            <button class="btn btn-outline" id="exp-report">${icon('shield')} Report</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">Details</h3>
+          <div class="detail-rows">${expDetailRows(e)}</div>
+          ${amenities.length ? `<div class="tagrow">${amenities.map((a) => `<span class="tag">${esc(a)}</span>`).join('')}</div>` : ''}
+        </div>
+        ${houseRules ? `<div class="card"><h3 style="margin-top:0">House rules</h3><p style="white-space:pre-wrap;margin:0">${esc(houseRules)}</p></div>` : ''}
+        ${(inclusions.length || exclusions.length) ? `<div class="card">
+          <h3 style="margin-top:0">What is included</h3>
+          ${inclusions.length ? `<ul style="margin:6px 0 0 18px;font-size:14px">${inclusions.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="small muted">Nothing listed.</p>'}
+          ${exclusions.length ? `<h3 style="margin:14px 0 0">What is not included</h3><ul style="margin:6px 0 0 18px;font-size:14px">${exclusions.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        </div>` : ''}
+        <div class="card">
+          <h3 style="margin-top:0">Cancellation policy</h3>
+          <p style="margin:0"><b>${esc(expCancelSummary(e.cancellation_policy, e.listing_type))}</b></p>
+          <p class="small muted" style="margin:6px 0 0">The host chose this policy when they listed.</p>
+        </div>
+        <div class="card"><div class="safety-card"><span class="safety-ico">${icon('shield')}</span><div><b>Safety requirements</b>
+          ${e.safety_requirements ? `<p style="white-space:pre-wrap;margin:6px 0 0;font-size:14px">${esc(e.safety_requirements)}</p>` : ''}
+          <p class="small muted" style="margin:6px 0 0">2911 Jobs is a marketplace. The host is responsible for safety on the day. Read the requirements before you book.</p>
+        </div></div></div>
+        <div class="card">
+          <h3 style="margin-top:0">Reviews</h3>
+          <p style="margin:0">No reviews yet. Reviews appear here after guests complete a booking.</p>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">Availability</h3>
+          <p style="margin:0">${e.availability_text ? esc(e.availability_text) : 'Dates are confirmed with your host when you send a booking request.'}</p>
+          <button class="btn btn-outline btn-sm" id="exp-check-dates" type="button" style="margin-top:10px">Check dates</button>
+        </div>
+        ${related.length ? `<div class="section-title"><span>More like this</span><a href="#/experiences/category/${expCatSlug(cat.name)}">See all</a></div><div class="hscroll">${related.map(expCard).join('')}</div>` : ''}
+      </div>
+      <aside class="exp-book-col">
+        <div class="card" id="exp-book-box" style="margin-top:0">
+          <div class="exp-price lg">${expPriceText(e)}</div>
+          <div class="field" style="margin-top:12px"><label for="exp-bk-date">Date</label><input id="exp-bk-date" type="date" min="${today}"></div>
+          <div class="field"><label>Guests</label>
+            <div class="exp-guests"><span class="exp-guests-ctl">
+              <button type="button" id="exp-bk-minus" aria-label="Fewer guests">-</button>
+              <span class="exp-guests-count" id="exp-bk-count" aria-live="polite">2</span>
+              <button type="button" id="exp-bk-plus" aria-label="More guests">+</button>
+            </span></div>
+          </div>
+          <button class="btn btn-exp full" type="button" disabled>Bookings open soon</button>
+          <div class="exp-soon"><b>Bookings open soon.</b>Booking requests launch in the next phase. No payment is taken here.</div>
+        </div>
+      </aside>
+    </div>
+    <div class="sticky-cta exp-sticky-cta"><button class="btn btn-exp" type="button" disabled>Bookings open soon</button></div>`;
+
+  let bkGuests = 2;
+  const bkCount = document.getElementById('exp-bk-count');
+  const bkMinus = document.getElementById('exp-bk-minus');
+  const bkPlus = document.getElementById('exp-bk-plus');
+  const setBkGuests = (n) => {
+    bkGuests = Math.max(1, Math.min(Number(e.capacity_max || 16), n));
+    bkCount.textContent = String(bkGuests);
+    bkMinus.disabled = bkGuests <= 1;
+    bkPlus.disabled = bkGuests >= Number(e.capacity_max || 16);
+  };
+  bkMinus.addEventListener('click', () => setBkGuests(bkGuests - 1));
+  bkPlus.addEventListener('click', () => setBkGuests(bkGuests + 1));
+  setBkGuests(2);
+  box.querySelectorAll('[data-exp-thumb]').forEach((t) => t.addEventListener('click', () => {
+    const main = document.getElementById('exp-main');
+    if (main) main.src = t.dataset.expThumb;
+    const cnt = document.getElementById('exp-count');
+    if (cnt) cnt.textContent = (Number(t.dataset.expIdx || 0) + 1) + '/' + photos.length;
+    box.querySelectorAll('.pd-thumb').forEach((x) => x.classList.toggle('active', x === t));
+  }));
+  const mainImg = document.getElementById('exp-main');
+  if (mainImg) mainImg.addEventListener('click', () => {
+    const cur = document.getElementById('exp-count');
+    const idx = cur ? parseInt(String(cur.textContent).split('/')[0], 10) - 1 : 0;
+    expZoom(photos, Number.isFinite(idx) ? idx : 0);
+  });
+  document.getElementById('exp-check-dates').addEventListener('click', () => {
+    const bk = document.getElementById('exp-book-box');
+    if (bk) bk.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  document.getElementById('exp-msg-host').addEventListener('click', () => {
+    if (!requireAuth('#/experience/' + id)) return;
+    toast('You can message your host once bookings open.');
+  });
+  document.getElementById('exp-report').addEventListener('click', () => {
+    toast('Reporting for Experiences opens with host onboarding.');
+  });
 }
 
 async function viewProduct(id) {
@@ -5070,6 +5958,7 @@ function viewLandingApp() {
     <div class="lp-actions">
       <a class="lp-action" href="#/jobs"><span class="lp-action-ico">${icon('briefcase')}</span><b>Find work</b><span>Jobs near you</span></a>
       <a class="lp-action" href="#/post"><span class="lp-action-ico">${icon('users')}</span><b>Hire workers</b><span>Post a job in minutes</span></a>
+      <a class="lp-action" href="#/experiences"><span class="lp-action-ico">${icon('compass')}</span><b>Explore Zambia</b><span>Tours, stays and transport</span></a>
     </div>
 
     <div class="lp-title"><h2>Popular categories</h2><a href="#/categories">See all</a></div>
@@ -7069,6 +7958,10 @@ const routes = [
   [/^#\/market$/, viewMarket],
   [/^#\/sell$/, viewSell],
   [/^#\/selling$/, viewSelling],
+  [/^#\/experiences$/, viewExperiences],
+  [/^#\/experiences\/search/, () => viewExperienceSearch()],
+  [/^#\/experiences\/category\/([a-z-]+)/, (m) => viewExperienceCategory(m[1])],
+  [/^#\/experience\/(\d+)$/, (m) => viewExperience(m[1])],
   [/^#\/product\/(\d+)\/edit$/, (m) => viewProductEdit(m[1])],
   [/^#\/product\/(\d+)$/, (m) => viewProduct(m[1])],
   [/^#\/businesses$/, viewBusinesses],
@@ -7164,6 +8057,26 @@ document.addEventListener('click', (e) => {
     shareBusiness(businessShareBtn.dataset.shareBusiness, businessShareBtn.dataset.title || 'Storefront on 2911 Jobs');
     return;
   }
+  const expShareBtn = e.target.closest('[data-share-experience]');
+  if (expShareBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    shareExperience(expShareBtn.dataset.shareExperience, expShareBtn.dataset.title || 'Experience on 2911 Jobs');
+    return;
+  }
+  const expHostBtn = e.target.closest('[data-exp-host-soon]');
+  if (expHostBtn) {
+    e.preventDefault();
+    expHostSoon();
+    return;
+  }
+  const expsaveBtn = e.target.closest('[data-expsave]');
+  if (expsaveBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSaveExperience(expsaveBtn.dataset.expsave);
+    return;
+  }
   const saveBtn = e.target.closest('[data-save]');
   if (saveBtn) {
     e.preventDefault();
@@ -7183,6 +8096,10 @@ document.addEventListener('click', (e) => {
   if (pcard && !e.target.closest('a') && !e.target.closest('button')) {
     location.hash = '#/product/' + pcard.dataset.product;
   }
+  const expcard = e.target.closest('.exp-card[data-experience]');
+  if (expcard && !e.target.closest('a') && !e.target.closest('button')) {
+    location.hash = '#/experience/' + expcard.dataset.experience;
+  }
   const card = e.target.closest('.job-card[data-job], [data-cat-link]');
   if (card && card.dataset.job && !e.target.closest('a') && !e.target.closest('button')) {
     location.hash = '#/job/' + card.dataset.job;
@@ -7192,6 +8109,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     const card = e.target.closest && e.target.closest('.job-card[data-job]');
     if (card) location.hash = '#/job/' + card.dataset.job;
+    const expcard = e.target.closest && e.target.closest('.exp-card[data-experience]');
+    if (expcard) location.hash = '#/experience/' + expcard.dataset.experience;
   }
 });
 
