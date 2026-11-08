@@ -456,6 +456,162 @@ const SCHEMA = [
     question   TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  // 2911 Experiences Phase 2 (2026-11-08): location system, categories,
+  // listing data model. Additive only, FK-ordered (DB Design 6.2 steps
+  // 1, 4, 5, 6). Phase 3 tables (experience_hosts, experience_businesses,
+  // verifications) and Phase 4+ tables are NOT created here.
+  // NOTE on experience_listings.host_id: it is a plain INTEGER with NO
+  // REFERENCES clause in Phase 2. The FK parent experience_hosts does not
+  // exist until Phase 3, and SQLite rejects EVERY insert into a table
+  // whose FK parent table is missing (verified Nov 8, 2026: even a
+  // business-side row fails with "no such table: main.experience_hosts").
+  // Phase 3 must add REFERENCES experience_hosts(id) via the documented
+  // table-rebuild pattern when it creates the hosts table. Until then the
+  // host side is validated in code (the user must exist). The exactly-one
+  // host-side CHECK below is the enforcement that does exist in Phase 2.
+  `CREATE TABLE IF NOT EXISTS experience_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('stay', 'transport', 'tour', 'event', 'experience')),
+    active     INTEGER NOT NULL DEFAULT 1,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    icon       TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (name, kind)
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_locations (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id  INTEGER REFERENCES experience_locations(id) ON DELETE CASCADE,
+    level      TEXT NOT NULL CHECK (level IN ('country', 'province', 'district', 'town', 'area')),
+    name       TEXT NOT NULL,
+    slug       TEXT NOT NULL,
+    lat        REAL,
+    lng        REAL,
+    active     INTEGER NOT NULL DEFAULT 1,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (parent_id, slug)
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_listings (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_type   TEXT NOT NULL CHECK (listing_type IN ('stay', 'vehicle', 'tour', 'event', 'experience')),
+    category_id    INTEGER REFERENCES experience_categories(id) ON DELETE SET NULL,
+    host_id        INTEGER,
+    business_id    INTEGER REFERENCES businesses(id) ON DELETE CASCADE,
+    location_id    INTEGER REFERENCES experience_locations(id) ON DELETE SET NULL,
+    title          TEXT NOT NULL,
+    description    TEXT NOT NULL DEFAULT '',
+    city           TEXT NOT NULL,
+    area           TEXT DEFAULT '',
+    address        TEXT DEFAULT '',
+    lat            REAL,
+    lng            REAL,
+    price_from     INTEGER NOT NULL DEFAULT 0,
+    currency       TEXT NOT NULL DEFAULT 'ZMW',
+    status         TEXT NOT NULL DEFAULT 'draft'
+                   CHECK (status IN ('draft', 'active', 'paused', 'removed')),
+    view_count     INTEGER NOT NULL DEFAULT 0,
+    price_unit     TEXT NOT NULL DEFAULT 'per_person'
+                   CHECK (price_unit IN ('per_person', 'per_group', 'per_night', 'per_day', 'per_hour', 'per_trip', 'per_event', 'quote')),
+    capacity_max   INTEGER NOT NULL DEFAULT 1,
+    instant_book   INTEGER NOT NULL DEFAULT 0,
+    cancellation_policy TEXT NOT NULL DEFAULT 'Flexible'
+                   CHECK (cancellation_policy IN ('Flexible', 'Moderate', 'Strict', 'Event')),
+    inclusions     TEXT DEFAULT '',
+    exclusions     TEXT DEFAULT '',
+    safety_requirements TEXT DEFAULT '',
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK ((host_id IS NULL) != (business_id IS NULL))
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_listing_media (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id INTEGER NOT NULL REFERENCES experience_listings(id) ON DELETE CASCADE,
+    image      TEXT NOT NULL,
+    mime       TEXT NOT NULL DEFAULT 'image/jpeg',
+    sort       INTEGER NOT NULL DEFAULT 0,
+    caption    TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_properties (
+    listing_id     INTEGER PRIMARY KEY REFERENCES experience_listings(id) ON DELETE CASCADE,
+    property_type  TEXT NOT NULL CHECK (property_type IN ('hotel', 'lodge', 'guesthouse', 'homestay', 'campsite', 'apartment')),
+    star_rating    INTEGER CHECK (star_rating BETWEEN 1 AND 5),
+    check_in_time  TEXT DEFAULT '',
+    check_out_time TEXT DEFAULT '',
+    max_guests     INTEGER NOT NULL DEFAULT 2,
+    bedrooms       INTEGER DEFAULT 0,
+    bathrooms      INTEGER DEFAULT 0,
+    amenities      TEXT DEFAULT '',
+    house_rules    TEXT DEFAULT '',
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_vehicles (
+    listing_id       INTEGER PRIMARY KEY REFERENCES experience_listings(id) ON DELETE CASCADE,
+    vehicle_type     TEXT NOT NULL CHECK (vehicle_type IN ('sedan', 'suv', 'minibus', 'bus', 'truck', 'motorbike', 'other')),
+    make             TEXT DEFAULT '',
+    model            TEXT DEFAULT '',
+    year             INTEGER,
+    seats            INTEGER NOT NULL DEFAULT 4,
+    transmission     TEXT DEFAULT '' CHECK (transmission IN ('', 'manual', 'automatic')),
+    fuel             TEXT DEFAULT '' CHECK (fuel IN ('', 'petrol', 'diesel', 'electric', 'hybrid')),
+    driver_included  INTEGER NOT NULL DEFAULT 0,
+    price_per_day    INTEGER NOT NULL,
+    created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_tours (
+    listing_id      INTEGER PRIMARY KEY REFERENCES experience_listings(id) ON DELETE CASCADE,
+    duration_hours  REAL,
+    duration_days   INTEGER DEFAULT 0,
+    group_size_max  INTEGER NOT NULL DEFAULT 10,
+    group_size_min  INTEGER NOT NULL DEFAULT 1,
+    meeting_point   TEXT DEFAULT '',
+    meeting_lat     REAL,
+    meeting_lng     REAL,
+    itinerary       TEXT DEFAULT '',
+    included        TEXT DEFAULT '',
+    excluded        TEXT DEFAULT '',
+    price_per_person INTEGER NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_events (
+    listing_id      INTEGER PRIMARY KEY REFERENCES experience_listings(id) ON DELETE CASCADE,
+    venue_name      TEXT DEFAULT '',
+    event_date      TEXT NOT NULL,
+    doors_time      TEXT DEFAULT '',
+    ends_at         TEXT,
+    ticket_capacity INTEGER NOT NULL DEFAULT 0,
+    age_limit       INTEGER,
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_property_units (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id     INTEGER NOT NULL REFERENCES experience_properties(listing_id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    unit_type       TEXT NOT NULL CHECK (unit_type IN ('room', 'bed', 'tent', 'house', 'dorm_bed')),
+    sleeps          INTEGER NOT NULL DEFAULT 1,
+    quantity        INTEGER NOT NULL DEFAULT 1,
+    price_per_night INTEGER NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'removed')),
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_categories_kind_sort ON experience_categories(kind, sort)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_locations_parent_sort ON experience_locations(parent_id, sort)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_locations_active_name ON experience_locations(active, name)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_listings_status_type_created ON experience_listings(status, listing_type, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_listings_location_status ON experience_listings(location_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_listings_category_status ON experience_listings(category_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_listings_city_status ON experience_listings(city, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_listings_host_status ON experience_listings(host_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_listings_business_status ON experience_listings(business_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_listings_lat_lng ON experience_listings(lat, lng)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_media_listing_sort ON experience_listing_media(listing_id, sort, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_units_property_status ON experience_property_units(property_id, status)`,
 ];
 
 // Distance matching: precise coordinates are optional on users and jobs.

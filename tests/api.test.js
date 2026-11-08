@@ -649,8 +649,8 @@ async function registerUser(name, phone, city) {
   // ---------- Design alignment A: pay sort + poster verified ----------
   const daRich = await registerUser('DA Rich', '0970000901', 'Lusaka');
   const daCheap = await registerUser('DA Cheap', '0970000902', 'Lusaka');
-  const daR = await call('POST', '/api/jobs', { title: 'DA high pay job', category: 'Painting', description: 'High pay test job for the sort.', city: 'Lusaka', date_needed: '2026-11-05', pay_amount: 900, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, daRich.cookie);
-  const daC = await call('POST', '/api/jobs', { title: 'DA low pay job', category: 'Painting', description: 'Low pay test job for the sort.', city: 'Lusaka', date_needed: '2026-11-05', pay_amount: 90, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, daCheap.cookie);
+  const daR = await call('POST', '/api/jobs', { title: 'DA high pay job', category: 'Painting', description: 'High pay test job for the sort.', city: 'Lusaka', date_needed: '2027-11-05', pay_amount: 900, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, daRich.cookie);
+  const daC = await call('POST', '/api/jobs', { title: 'DA low pay job', category: 'Painting', description: 'Low pay test job for the sort.', city: 'Lusaka', date_needed: '2027-11-05', pay_amount: 90, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, daCheap.cookie);
   check('DA: sort fixture jobs created', (daR.status === 200 || daR.status === 201) && (daC.status === 200 || daC.status === 201), daR.status + '/' + daC.status);
   const daSorted = await call('GET', '/api/jobs?sort=pay_high&category=Painting', null, daRich.cookie);
   const daIds = (daSorted.json.jobs || []).map(j => j.id);
@@ -874,6 +874,7 @@ async function signupOtpTests() {
   await smsTests();
   await pushTests(admin.cookie);
   await adsTests({ admin, third, p2, bizId, bizSlug });
+  await experiencesTests(admin.cookie, worker.cookie, worker.id, third.id);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failures.length) console.log('Failures: ' + failures.join(' | '));
@@ -1252,7 +1253,7 @@ async function bigPhotoTests() {
   check('BIG: product with a ~900 KB photo is created', p.status === 201, 'status ' + p.status);
   const got = await call('GET', '/api/products/' + p.json.id, null, u.cookie);
   check('BIG: the large photo is stored and served back', got.status === 200 && (got.json.product.photos || []).length === 1);
-  const j = await call('POST', '/api/jobs', { title: 'Big photo job', category: 'Cleaning', description: 'A job posted with a full-size phone photo.', city: 'Lusaka', date_needed: '2026-11-05', pay_amount: 100, pay_type: 'per_job', workers_needed: 1, terms_accepted: true, photos: [big] }, u.cookie);
+  const j = await call('POST', '/api/jobs', { title: 'Big photo job', category: 'Cleaning', description: 'A job posted with a full-size phone photo.', city: 'Lusaka', date_needed: '2027-11-05', pay_amount: 100, pay_type: 'per_job', workers_needed: 1, terms_accepted: true, photos: [big] }, u.cookie);
   check('BIG: job with a ~900 KB photo is created', j.status === 201, 'status ' + j.status);
 }
 
@@ -1353,4 +1354,269 @@ async function selfieAndLogoTests(adminCookie, u) {
   const badLogo = await call('POST', '/api/businesses', {
     pacra_number: '120200012345', tpin: '1000000001', owner_legal_name: 'Test Owner', address: 'Plot 1, Test Road', certificate: IMG, name: 'Bad Logo Crafts', category: 'Other', city: 'Lusaka', description: 'This one carries a broken logo value.', logo: 'not-a-data-url' }, u.cookie);
   check('LOGO: a non-image logo is refused (422)', badLogo.status === 422, 'status ' + badLogo.status);
+}
+
+// 2911 Experiences Phase 2 backend (2026-11-08): location system,
+// categories, listing data model, public browse API. No write endpoints
+// exist in this phase, so fixtures are inserted directly into the
+// throwaway test database (the suite's dbExecute helper), exactly like
+// the OTP suite reads sms_log directly. Runs last: it inserts a verified
+// business of its own and must not disturb earlier suites.
+async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
+  const exp = require('../routes/experiences');
+  check('EXP: Zambia bounds helper accepts Lusaka/Mfuwe, rejects London and far lng',
+    exp.isInZambia(-15.3875, 28.3228) && exp.isInZambia(-13.0972, 31.7875)
+    && !exp.isInZambia(51.5074, -0.1278) && !exp.isInZambia(-15.3875, 150.0)
+    && exp.EXP_PRICE_MAX === 10000000 && exp.EXP_MAX_PHOTOS === 8
+    && exp.EXP_CANCELLATION_POLICIES.join(',') === 'Flexible,Moderate,Strict,Event');
+  check('EXP: listing CHECK rejects both host sides set',
+    await (async () => { try { await dbExecute("INSERT INTO experience_listings (listing_type, host_id, business_id, title, city) VALUES ('tour', 1, 1, 'x', 'Lusaka')"); return false; } catch { return true; } })());
+  check('EXP: listing CHECK rejects neither host side set',
+    await (async () => { try { await dbExecute("INSERT INTO experience_listings (listing_type, host_id, business_id, title, city) VALUES ('tour', NULL, NULL, 'x', 'Lusaka')"); return false; } catch { return true; } })());
+
+  // Whole-page empty state (UI Spec 3.6): no approved listings at all.
+  const empty = await call('GET', '/api/experiences');
+  check('EXP: empty browse returns total 0 (the "Experiences are coming soon" condition)',
+    empty.status === 200 && empty.json.total === 0 && Array.isArray(empty.json.experiences) && empty.json.experiences.length === 0,
+    JSON.stringify(empty.json).slice(0, 120));
+
+  // Seeds: 6 provisional categories, 10 provinces, ancestor chains.
+  const cats = await call('GET', '/api/experiences/categories');
+  const catNames = (cats.json.categories || []).map((c) => c.name + ':' + c.kind).join(',');
+  check('EXP: categories seed is the six launch categories with kind mapping',
+    cats.status === 200 && (cats.json.categories || []).length === 6
+    && catNames === 'Tours:tour,Stays:stay,Transport:transport,Adventure:experience,Cultural:experience,Events:event',
+    catNames);
+  const provs = await call('GET', '/api/experiences/locations');
+  check('EXP: locations without q returns the 10 provinces',
+    provs.status === 200 && (provs.json.locations || []).length === 10
+    && (provs.json.locations || []).every((l) => l.level === 'province'), JSON.stringify(provs.json).slice(0, 120));
+  const mfu = await call('GET', '/api/experiences/locations?q=Mfu');
+  const mfuRow = (mfu.json.locations || [])[0] || {};
+  check('EXP: autocomplete returns the full ancestor chain',
+    mfu.status === 200 && mfuRow.name === 'Mfuwe'
+    && mfuRow.chain === 'Mfuwe, Mambwe District, Eastern Province'
+    && (mfuRow.ancestors || []).map((a) => a.name).join('/') === 'Zambia/Eastern/Mambwe',
+    JSON.stringify(mfuRow).slice(0, 200));
+  const noLoc = await call('GET', '/api/experiences/locations?q=zzz-nomatch');
+  check('EXP: autocomplete with no match returns an empty list',
+    noLoc.status === 200 && (noLoc.json.locations || []).length === 0);
+
+  // Fixtures: 4 active listings (stay, tour, event, transport) + 1 draft.
+  const locId = async (level, name) => (await dbOne(
+    'SELECT id FROM experience_locations WHERE level = ? AND name = ?', [level, name])).id;
+  const catId = async (name) => (await dbOne(
+    'SELECT id FROM experience_categories WHERE name = ?', [name])).id;
+  const livingstone = await locId('town', 'Livingstone');
+  const mfuwe = await locId('town', 'Mfuwe');
+  const lusaka = await locId('town', 'Lusaka');
+  const staysCat = await catId('Stays');
+  const toursCat = await catId('Tours');
+  const eventsCat = await catId('Events');
+  const transportCat = await catId('Transport');
+  const biz = await dbExecute(
+    "INSERT INTO businesses (owner_id, name, slug, city, status, verification_status) VALUES (?, 'Exp Verified Lodge Co', 'exp-verified-lodge-co-1', 'Livingstone', 'active', 'verified')",
+    [otherId]);
+  const bizId = Number(biz.lastInsertRowid);
+  const mkListing = async (sql, args) => Number((await dbExecute(sql, args)).lastInsertRowid);
+  const stayId = await mkListing(
+    `INSERT INTO experience_listings (listing_type, category_id, host_id, business_id, location_id, title, description, city, price_from, price_unit, capacity_max, instant_book, cancellation_policy, inclusions, exclusions, safety_requirements, status)
+     VALUES ('stay', ?, NULL, ?, ?, 'EXP Riverside Guesthouse', 'A quiet guesthouse by the river in Livingstone.', 'Livingstone', 450, 'per_night', 4, 0, 'Flexible', ?, ?, 'Check in with the host on arrival.', 'active')`,
+    [staysCat, bizId, livingstone, JSON.stringify(['Wi-Fi', 'Breakfast']), JSON.stringify(['Airport transfer'])]);
+  await dbExecute(
+    `INSERT INTO experience_properties (listing_id, property_type, max_guests, bedrooms, bathrooms, amenities, check_in_time, check_out_time)
+     VALUES (?, 'guesthouse', 4, 2, 1, ?, '14:00', '11:00')`,
+    [stayId, JSON.stringify(['Wi-Fi', 'Parking'])]);
+  await dbExecute(
+    "INSERT INTO experience_property_units (property_id, name, unit_type, sleeps, quantity, price_per_night) VALUES (?, 'Double Room', 'room', 2, 2, 450)",
+    [stayId]);
+  await dbExecute("INSERT INTO experience_listing_media (listing_id, image, mime, sort) VALUES (?, ?, 'image/png', 0)", [stayId, IMG]);
+  await dbExecute("INSERT INTO experience_listing_media (listing_id, image, mime, sort) VALUES (?, ?, 'image/png', 1)", [stayId, IMG]);
+  const tourId = await mkListing(
+    `INSERT INTO experience_listings (listing_type, category_id, host_id, business_id, location_id, title, description, city, price_from, price_unit, capacity_max, instant_book, cancellation_policy, inclusions, exclusions, safety_requirements, status)
+     VALUES ('tour', ?, ?, NULL, ?, 'EXP South Luangwa Walking Safari', 'A guided walking safari in South Luangwa.', 'Mfuwe', 350, 'per_person', 12, 0, 'Moderate', ?, ?, 'Closed shoes required.', 'active')`,
+    [toursCat, memberId, mfuwe, JSON.stringify(['Guide', 'Park fees']), JSON.stringify([])]);
+  await dbExecute(
+    "INSERT INTO experience_tours (listing_id, duration_hours, group_size_max, group_size_min, meeting_point, price_per_person) VALUES (?, 4, 12, 2, 'Mfuwe Lodge car park', 350)",
+    [tourId]);
+  await dbExecute("INSERT INTO experience_listing_media (listing_id, image, mime, sort) VALUES (?, ?, 'image/png', 0)", [tourId, IMG]);
+  const eventId = await mkListing(
+    `INSERT INTO experience_listings (listing_type, category_id, host_id, business_id, location_id, title, description, city, price_from, price_unit, capacity_max, instant_book, cancellation_policy, status)
+     VALUES ('event', ?, NULL, ?, ?, 'EXP Traditional Music Evening', 'An evening of traditional Zambian music.', 'Lusaka', 100, 'per_person', 200, 0, 'Event', 'active')`,
+    [eventsCat, bizId, lusaka]);
+  await dbExecute(
+    "INSERT INTO experience_events (listing_id, venue_name, event_date, ticket_capacity) VALUES (?, 'Lusaka Showgrounds', '2027-03-15', 200)",
+    [eventId]);
+  const vehicleId = await mkListing(
+    `INSERT INTO experience_listings (listing_type, category_id, host_id, business_id, location_id, title, description, city, price_from, price_unit, capacity_max, instant_book, cancellation_policy, status)
+     VALUES ('vehicle', ?, ?, NULL, ?, 'EXP 4x4 Hire with Driver', 'A 4x4 with driver for day trips.', 'Lusaka', 1200, 'per_day', 5, 1, 'Strict', 'active')`,
+    [transportCat, memberId, lusaka]);
+  await dbExecute(
+    "INSERT INTO experience_vehicles (listing_id, vehicle_type, seats, driver_included, price_per_day) VALUES (?, 'suv', 5, 1, 1200)",
+    [vehicleId]);
+  const draftId = await mkListing(
+    `INSERT INTO experience_listings (listing_type, category_id, host_id, business_id, location_id, title, description, city, price_from, price_unit, capacity_max, status)
+     VALUES ('tour', ?, ?, NULL, ?, 'EXP Draft Tour Nobody Sees', 'A draft that must never appear.', 'Lusaka', 50, 'per_person', 2, 'draft')`,
+    [toursCat, memberId, lusaka]);
+
+  // The pre-fixture empty GET is cached for 60s; a write to the family
+  // busts it (this also proves the bust wiring before the cache test).
+  const bust0 = await call('POST', '/api/experiences', {});
+  check('EXP: a write to the family busts the list cache (404 route, cache dropped)',
+    bust0.status === 404, 'status ' + bust0.status);
+
+  const all = await call('GET', '/api/experiences');
+  const allIds = (all.json.experiences || []).map((e) => e.id);
+  check('EXP: signed-out browse lists the 4 active listings, never the draft',
+    all.status === 200 && all.json.total === 4 && allIds.includes(stayId) && allIds.includes(tourId)
+    && allIds.includes(eventId) && allIds.includes(vehicleId) && !allIds.includes(draftId),
+    JSON.stringify(all.json).slice(0, 200));
+  check('EXP: no phone number appears anywhere in a public list response',
+    !JSON.stringify(all.json).includes('phone') && !JSON.stringify(all.json).includes('0970')
+    && !JSON.stringify(all.json).includes('+260'), JSON.stringify(all.json).slice(0, 200));
+  check('EXP: list cards carry cover photo, price with unit, host card, location chain',
+    (all.json.experiences || []).every((e) => e.price_from >= 0 && e.currency === 'ZMW'
+      && e.host && e.host.name && e.host.verified !== undefined
+      && e.location && typeof e.location.chain === 'string'
+      && e.rating_avg === null && e.rating_count === 0),
+    JSON.stringify((all.json.experiences || [])[0]).slice(0, 300));
+
+  const provEast = await call('GET', '/api/experiences?province=Eastern');
+  check('EXP: province filter (Eastern) returns only the Mfuwe tour',
+    provEast.json.total === 1 && (provEast.json.experiences || [])[0].id === tourId, JSON.stringify(provEast.json).slice(0, 120));
+  const provSouth = await call('GET', '/api/experiences?province=Southern');
+  check('EXP: province filter (Southern) returns only the Livingstone stay',
+    provSouth.json.total === 1 && (provSouth.json.experiences || [])[0].id === stayId, JSON.stringify(provSouth.json).slice(0, 120));
+  const destLiv = await call('GET', '/api/experiences?destination=Livingstone');
+  check('EXP: destination filter (Livingstone) returns only the stay',
+    destLiv.json.total === 1 && (destLiv.json.experiences || [])[0].id === stayId, JSON.stringify(destLiv.json).slice(0, 120));
+  // Radius rule: a Lusaka viewer searching Livingstone still sees the
+  // result; the jobs 50 km default radius is NOT inherited. Straight-line
+  // distance is ~379 km (the ~470 km figure is the road distance).
+  const far = await call('GET', '/api/experiences?destination=Livingstone&lat=-15.3875&lng=28.3228');
+  const farItem = (far.json.experiences || [])[0] || {};
+  check('EXP: radius rule, Livingstone from Lusaka (~379 km straight line) still returns',
+    far.json.total === 1 && farItem.id === stayId && typeof farItem.distance_km === 'number' && farItem.distance_km > 300,
+    JSON.stringify(farItem).slice(0, 160));
+  const catTours = await call('GET', '/api/experiences?category=Tours');
+  check('EXP: category filter by name returns only tours',
+    catTours.json.total === 1 && (catTours.json.experiences || [])[0].id === tourId, JSON.stringify(catTours.json).slice(0, 120));
+  const catStaysById = await call('GET', '/api/experiences?category=' + staysCat);
+  check('EXP: category filter by id returns only stays',
+    catStaysById.json.total === 1 && (catStaysById.json.experiences || [])[0].id === stayId, JSON.stringify(catStaysById.json).slice(0, 120));
+  const catBogus = await call('GET', '/api/experiences?category=Bogus');
+  check('EXP: unknown category matches nothing (never silently shows everything)',
+    catBogus.json.total === 0, JSON.stringify(catBogus.json).slice(0, 120));
+  const price = await call('GET', '/api/experiences?min=400&max=500');
+  check('EXP: price filter (400-500 ZMW) returns only the K450 stay',
+    price.json.total === 1 && (price.json.experiences || [])[0].id === stayId, JSON.stringify(price.json).slice(0, 120));
+  const guests = await call('GET', '/api/experiences?guests=5');
+  const guestIds = (guests.json.experiences || []).map((e) => e.id);
+  check('EXP: guests filter (5) returns tour, event and transport, not the 4-sleeper stay',
+    guests.json.total === 3 && guestIds.includes(tourId) && guestIds.includes(eventId)
+    && guestIds.includes(vehicleId) && !guestIds.includes(stayId), JSON.stringify(guests.json).slice(0, 160));
+  const ver = await call('GET', '/api/experiences?verified=1');
+  const verIds = (ver.json.experiences || []).map((e) => e.id);
+  check('EXP: verified-hosts-only returns the verified-business listings',
+    ver.json.total === 2 && verIds.includes(stayId) && verIds.includes(eventId)
+    && !verIds.includes(tourId) && !verIds.includes(vehicleId), JSON.stringify(ver.json).slice(0, 160));
+  const inst = await call('GET', '/api/experiences?instant=1');
+  check('EXP: instant-booking-only returns the 4x4',
+    inst.json.total === 1 && (inst.json.experiences || [])[0].id === vehicleId, JSON.stringify(inst.json).slice(0, 120));
+  const inRange = await call('GET', '/api/experiences?from=2027-03-01&to=2027-03-31');
+  check('EXP: date range keeps the March event (non-events pass: no calendar until Phase 4)',
+    inRange.json.total === 4 && (inRange.json.experiences || []).some((e) => e.id === eventId),
+    JSON.stringify(inRange.json).slice(0, 120));
+  const outRange = await call('GET', '/api/experiences?from=2027-04-01&to=2027-04-30');
+  const outIds = (outRange.json.experiences || []).map((e) => e.id);
+  check('EXP: date range outside the event excludes the event only',
+    outRange.json.total === 3 && !outIds.includes(eventId), JSON.stringify(outRange.json).slice(0, 120));
+  const badDate = await call('GET', '/api/experiences?from=2027-13-40');
+  check('EXP: invalid date is refused (422)', badDate.status === 422, 'status ' + badDate.status);
+  const low = await call('GET', '/api/experiences?sort=price_low');
+  check('EXP: sort price_low puts the K100 event first',
+    (low.json.experiences || [])[0] && (low.json.experiences || [])[0].id === eventId, JSON.stringify((low.json.experiences || [])[0]).slice(0, 120));
+  const high = await call('GET', '/api/experiences?sort=price_high');
+  check('EXP: sort price_high puts the K1200 4x4 first',
+    (high.json.experiences || [])[0] && (high.json.experiences || [])[0].id === vehicleId, JSON.stringify((high.json.experiences || [])[0]).slice(0, 120));
+  const newest = await call('GET', '/api/experiences?sort=newest');
+  check('EXP: sort newest puts the last-inserted active listing first',
+    (newest.json.experiences || [])[0] && (newest.json.experiences || [])[0].id === vehicleId,
+    JSON.stringify((newest.json.experiences || [])[0]).slice(0, 120));
+  const p1 = await call('GET', '/api/experiences?limit=2&page=1');
+  check('EXP: pagination page 1 carries total, totalPages and remaining for Load more',
+    p1.json.total === 4 && p1.json.totalPages === 2 && p1.json.remaining === 2 && (p1.json.experiences || []).length === 2,
+    JSON.stringify(p1.json).slice(0, 160));
+  const p2 = await call('GET', '/api/experiences?limit=2&page=2');
+  check('EXP: pagination page 2 returns the rest with 0 remaining',
+    (p2.json.experiences || []).length === 2 && p2.json.remaining === 0, JSON.stringify(p2.json).slice(0, 160));
+
+  const tour = await call('GET', '/api/experiences/' + tourId);
+  const t = tour.json.experience || {};
+  check('EXP: detail shows gallery, price with unit, host card, subtype rows, policy',
+    tour.status === 200 && t.title === 'EXP South Luangwa Walking Safari'
+    && t.price_from === 350 && t.price_unit === 'per_person'
+    && Array.isArray(t.photos) && t.photos.length === 1
+    && String(t.photos[0].url || '').startsWith('/api/experiences/' + tourId + '/photos/')
+    && t.host && t.host.type === 'individual' && t.host.verified === false
+    && t.details && t.details.group_size_max === 12 && t.details.meeting_point === 'Mfuwe Lodge car park'
+    && t.cancellation_policy === 'Moderate'
+    && Array.isArray(t.inclusions) && t.inclusions.includes('Guide')
+    && t.safety_requirements === 'Closed shoes required.',
+    JSON.stringify(t).slice(0, 300));
+  check('EXP: detail shows no rating where there are no reviews, and no phone',
+    t.reviews && t.reviews.rating_avg === null && t.reviews.rating_count === 0
+    && Array.isArray(t.reviews.reviews) && t.reviews.reviews.length === 0
+    && t.availability_text === null && !JSON.stringify(tour.json).includes('phone'),
+    JSON.stringify(t.reviews).slice(0, 120));
+  const stay = await call('GET', '/api/experiences/' + stayId);
+  const s = stay.json.experience || {};
+  check('EXP: business-hosted detail shows verified host, property rows, units, amenities',
+    stay.status === 200 && s.host && s.host.type === 'business' && s.host.verified === true
+    && s.details && s.details.property_type === 'guesthouse' && s.details.max_guests === 4
+    && Array.isArray(s.details.amenities) && s.details.amenities.includes('Wi-Fi')
+    && Array.isArray(s.details.units) && s.details.units.length === 1
+    && s.details.units[0].name === 'Double Room'
+    && Array.isArray(s.photos) && s.photos.length === 2
+    && s.cover_photo === s.photos[0].url,
+    JSON.stringify(s.details).slice(0, 200));
+  check('EXP: cover photo is the lowest sort row',
+    s.cover_photo === '/api/experiences/' + stayId + '/photos/' + s.photos[0].id, String(s.cover_photo));
+  const missing = await call('GET', '/api/experiences/999999');
+  check('EXP: detail for a missing listing is 404', missing.status === 404, 'status ' + missing.status);
+  const draft = await call('GET', '/api/experiences/' + draftId);
+  check('EXP: draft listing is not public (404)', draft.status === 404, 'status ' + draft.status);
+
+  const photoRes = await fetch(BASE + t.photos[0].url);
+  check('EXP: cover photo endpoint serves the image',
+    photoRes.status === 200 && (photoRes.headers.get('content-type') || '').startsWith('image/'),
+    'status ' + photoRes.status);
+
+  const share = await fetch(BASE + '/s/experience/' + tourId);
+  const shareText = await share.text();
+  check('EXP: share preview carries OG tags and redirects into the hash route',
+    share.status === 200 && shareText.includes('EXP South Luangwa Walking Safari')
+    && shareText.includes('og:title') && shareText.includes('/#/experience/' + tourId),
+    shareText.slice(0, 160));
+  const shareMissing = await fetch(BASE + '/s/experience/999999');
+  const shareMissingText = await shareMissing.text();
+  check('EXP: share preview for a missing listing falls back to the generic page',
+    shareMissing.status === 200 && shareMissingText.includes('2911 Jobs: Quick jobs'),
+    shareMissingText.slice(0, 120));
+
+  // List cache: first read MISS, repeat HIT, a family write busts it.
+  const c1 = await fetch(BASE + '/api/experiences?category=Adventure');
+  const c1Cache = c1.headers.get('x-cache');
+  await c1.text();
+  const c2 = await fetch(BASE + '/api/experiences?category=Adventure');
+  const c2Cache = c2.headers.get('x-cache');
+  await c2.text();
+  check('EXP: list cache serves the repeat read (MISS then HIT)',
+    c1Cache === 'MISS' && c2Cache === 'HIT', c1Cache + '/' + c2Cache);
+  const bust = await call('POST', '/api/experiences', {});
+  const c3 = await fetch(BASE + '/api/experiences?category=Adventure');
+  const c3Cache = c3.headers.get('x-cache');
+  await c3.text();
+  check('EXP: a write to /api/experiences busts the family cache (MISS again)',
+    bust.status === 404 && c3Cache === 'MISS', bust.status + '/' + c3Cache);
 }
