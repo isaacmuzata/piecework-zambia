@@ -459,16 +459,13 @@ const SCHEMA = [
   // 2911 Experiences Phase 2 (2026-11-08): location system, categories,
   // listing data model. Additive only, FK-ordered (DB Design 6.2 steps
   // 1, 4, 5, 6). Phase 3 tables (experience_hosts, experience_businesses,
-  // verifications) and Phase 4+ tables are NOT created here.
-  // NOTE on experience_listings.host_id: it is a plain INTEGER with NO
-  // REFERENCES clause in Phase 2. The FK parent experience_hosts does not
-  // exist until Phase 3, and SQLite rejects EVERY insert into a table
-  // whose FK parent table is missing (verified Nov 8, 2026: even a
-  // business-side row fails with "no such table: main.experience_hosts").
-  // Phase 3 must add REFERENCES experience_hosts(id) via the documented
-  // table-rebuild pattern when it creates the hosts table. Until then the
-  // host side is validated in code (the user must exist). The exactly-one
-  // host-side CHECK below is the enforcement that does exist in Phase 2.
+  // verifications) are created below, after the Phase 2 tables.
+  // NOTE on experience_listings.host_id (Phase 3, 2026-11-08): it now
+  // carries REFERENCES experience_hosts(id) ON DELETE CASCADE. In Phase 2
+  // it was a plain INTEGER with no REFERENCES clause because the parent
+  // table did not exist yet. Existing Phase 2 databases are migrated by
+  // the experience_listings rebuild in init() below (idempotent guard:
+  // skipped once approval_status exists on the table).
   `CREATE TABLE IF NOT EXISTS experience_categories (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL,
@@ -496,7 +493,7 @@ const SCHEMA = [
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     listing_type   TEXT NOT NULL CHECK (listing_type IN ('stay', 'vehicle', 'tour', 'event', 'experience')),
     category_id    INTEGER REFERENCES experience_categories(id) ON DELETE SET NULL,
-    host_id        INTEGER,
+    host_id        INTEGER REFERENCES experience_hosts(id) ON DELETE CASCADE,
     business_id    INTEGER REFERENCES businesses(id) ON DELETE CASCADE,
     location_id    INTEGER REFERENCES experience_locations(id) ON DELETE SET NULL,
     title          TEXT NOT NULL,
@@ -509,7 +506,7 @@ const SCHEMA = [
     price_from     INTEGER NOT NULL DEFAULT 0,
     currency       TEXT NOT NULL DEFAULT 'ZMW',
     status         TEXT NOT NULL DEFAULT 'draft'
-                   CHECK (status IN ('draft', 'active', 'paused', 'removed')),
+                   CHECK (status IN ('draft', 'active', 'paused', 'removed', 'suspended')),
     view_count     INTEGER NOT NULL DEFAULT 0,
     price_unit     TEXT NOT NULL DEFAULT 'per_person'
                    CHECK (price_unit IN ('per_person', 'per_group', 'per_night', 'per_day', 'per_hour', 'per_trip', 'per_event', 'quote')),
@@ -520,6 +517,9 @@ const SCHEMA = [
     inclusions     TEXT DEFAULT '',
     exclusions     TEXT DEFAULT '',
     safety_requirements TEXT DEFAULT '',
+    approval_status TEXT NOT NULL DEFAULT 'draft'
+                   CHECK (approval_status IN ('draft', 'submitted', 'under_review', 'additional_info', 'approved', 'rejected')),
+    approval_note  TEXT DEFAULT '',
     created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK ((host_id IS NULL) != (business_id IS NULL))
@@ -600,6 +600,103 @@ const SCHEMA = [
     created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+  // 2911 Experiences Phase 3 (2026-11-08): host onboarding, verification,
+  // listing creation (DB Design 2.1, Implementation Plan Phase 3).
+  // FK-ordered: hosts and businesses first, then staff, then
+  // verifications, then document views. Additive only, except for the
+  // experience_listings rebuild in init() below.
+  // DEVIATION (experience_hosts.status): DB Design 2.1 said
+  // pending/active/suspended. The seven-status vocabulary below (draft,
+  // submitted, under_review, additional_info, approved, rejected,
+  // suspended) is used instead, per UI Spec 6.2, because the Phase 3
+  // acceptance criteria require the host to see each of the seven
+  // statuses with the admin note verbatim.
+  // BUILD ADDITIONS (experience_hosts): payout_method, payout_reference,
+  // languages, response_time, meeting_point, provinces. DB Design 2.1
+  // had no payout store on hosts and no wizard fields; UI Spec wizard
+  // steps 2, 3 and 6 require them. payout_method/payout_reference mirror
+  // the experience_businesses payout columns.
+  `CREATE TABLE IF NOT EXISTS experience_hosts (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id            INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    display_name       TEXT NOT NULL,
+    bio                TEXT DEFAULT '',
+    languages          TEXT DEFAULT '[]',
+    response_time      TEXT DEFAULT '',
+    phone_public       TEXT DEFAULT '',
+    city               TEXT NOT NULL,
+    area               TEXT DEFAULT '',
+    meeting_point      TEXT DEFAULT '',
+    provinces          TEXT DEFAULT '[]',
+    lat                REAL,
+    lng                REAL,
+    payout_method      TEXT DEFAULT '' CHECK (payout_method IN ('', 'mobile_money', 'bank')),
+    payout_reference   TEXT DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'draft'
+                       CHECK (status IN ('draft', 'submitted', 'under_review', 'additional_info', 'approved', 'rejected', 'suspended')),
+    verification_status TEXT NOT NULL DEFAULT 'unverified'
+                       CHECK (verification_status IN ('unverified', 'pending', 'verified', 'rejected')),
+    verification_note  TEXT DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_businesses (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id               INTEGER NOT NULL UNIQUE REFERENCES businesses(id) ON DELETE CASCADE,
+    commission_rate_override  INTEGER CHECK (commission_rate_override IS NULL OR (commission_rate_override BETWEEN 0 AND 100)),
+    payout_method             TEXT DEFAULT '' CHECK (payout_method IN ('', 'mobile_money', 'bank')),
+    payout_reference          TEXT DEFAULT '',
+    experiences_status        TEXT NOT NULL DEFAULT 'active' CHECK (experiences_status IN ('active', 'paused', 'suspended')),
+    created_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  // DEVIATIONS (experience_business_staff): role set is manager/staff
+  // per DB Design 2.1. The Architecture 2.3 owner/manager/agent/viewer
+  // set plus scope column is NOT built: the table is Experiences-only
+  // so it is tourism-scoped by definition; flag for Zac's confirmation.
+  // 'invited' status added (DB Design had active/revoked only) to
+  // support the invite-and-accept flow UI Spec 7.2.7 requires.
+  `CREATE TABLE IF NOT EXISTS experience_business_staff (
+    business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('manager', 'staff')),
+    invited_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status      TEXT NOT NULL DEFAULT 'invited' CHECK (status IN ('invited', 'active', 'revoked')),
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (business_id, user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS experience_host_verifications (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_id      INTEGER REFERENCES experience_hosts(id) ON DELETE CASCADE,
+    business_id  INTEGER REFERENCES businesses(id) ON DELETE CASCADE,
+    submitted_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL CHECK (kind IN ('nrc', 'passport', 'drivers_licence', 'tourism_licence', 'selfie', 'other')),
+    image        TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    reviewed_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    review_note  TEXT DEFAULT '',
+    expires_at   TEXT,
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK ((host_id IS NULL) != (business_id IS NULL))
+  )`,
+  // DB Design 4.3: verification document reads must be logged, same
+  // spirit as nrc_views. Unlike nrc_views (deliberately FK-free so the
+  // log survives deletion), this log references the document with
+  // ON DELETE CASCADE: a verification document deleted by admin takes
+  // its view log with it, so no orphan view rows point at documents
+  // that no longer exist.
+  `CREATE TABLE IF NOT EXISTS experience_document_views (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES experience_host_verifications(id) ON DELETE CASCADE,
+    viewer_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    viewed_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_hosts_status_verification ON experience_hosts(status, verification_status)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_staff_business ON experience_business_staff(business_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_verifications_host ON experience_host_verifications(host_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_verifications_business ON experience_host_verifications(business_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_exp_doc_views_doc ON experience_document_views(document_id)`,
   `CREATE INDEX IF NOT EXISTS idx_exp_categories_kind_sort ON experience_categories(kind, sort)`,
   `CREATE INDEX IF NOT EXISTS idx_exp_locations_parent_sort ON experience_locations(parent_id, sort)`,
   `CREATE INDEX IF NOT EXISTS idx_exp_locations_active_name ON experience_locations(active, name)`,
@@ -670,6 +767,87 @@ async function init() {
     const cols = (await client.execute(`PRAGMA table_info(${table})`)).rows.map((c) => c.name);
     if (!cols.includes(column)) {
       await client.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+  }
+  // Migration (Experiences Phase 3, 2026-11-08): experience_listings gains
+  // a real FK on host_id (REFERENCES experience_hosts(id)), approval
+  // columns (approval_status, approval_note), and 'suspended' in the
+  // status CHECK. SQLite cannot ALTER a CHECK or add a REFERENCES clause,
+  // so rebuild the table. Same pattern as the jobs pay_type migration
+  // above: create experience_listings_new, copy rows with an explicit
+  // column list, drop old, rename, PRAGMA foreign_keys = OFF during the
+  // copy, back ON in finally. Runs AFTER the SCHEMA batch above, so
+  // experience_hosts already exists when the new FK is declared.
+  // Idempotent: skipped once approval_status exists on the table.
+  // All 7 listing indexes are recreated after the rename (dropping the
+  // table drops its indexes).
+  const expListSql = (await client.execute(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'experience_listings'`
+  )).rows[0]?.sql || '';
+  if (expListSql && !expListSql.includes('approval_status')) {
+    await client.execute('DROP TABLE IF EXISTS experience_listings_new');
+    await client.execute('PRAGMA foreign_keys = OFF');
+    try {
+      await client.execute(`CREATE TABLE experience_listings_new (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        listing_type   TEXT NOT NULL CHECK (listing_type IN ('stay', 'vehicle', 'tour', 'event', 'experience')),
+        category_id    INTEGER REFERENCES experience_categories(id) ON DELETE SET NULL,
+        host_id        INTEGER REFERENCES experience_hosts(id) ON DELETE CASCADE,
+        business_id    INTEGER REFERENCES businesses(id) ON DELETE CASCADE,
+        location_id    INTEGER REFERENCES experience_locations(id) ON DELETE SET NULL,
+        title          TEXT NOT NULL,
+        description    TEXT NOT NULL DEFAULT '',
+        city           TEXT NOT NULL,
+        area           TEXT DEFAULT '',
+        address        TEXT DEFAULT '',
+        lat            REAL,
+        lng            REAL,
+        price_from     INTEGER NOT NULL DEFAULT 0,
+        currency       TEXT NOT NULL DEFAULT 'ZMW',
+        status         TEXT NOT NULL DEFAULT 'draft'
+                       CHECK (status IN ('draft', 'active', 'paused', 'removed', 'suspended')),
+        view_count     INTEGER NOT NULL DEFAULT 0,
+        price_unit     TEXT NOT NULL DEFAULT 'per_person'
+                       CHECK (price_unit IN ('per_person', 'per_group', 'per_night', 'per_day', 'per_hour', 'per_trip', 'per_event', 'quote')),
+        capacity_max   INTEGER NOT NULL DEFAULT 1,
+        instant_book   INTEGER NOT NULL DEFAULT 0,
+        cancellation_policy TEXT NOT NULL DEFAULT 'Flexible'
+                       CHECK (cancellation_policy IN ('Flexible', 'Moderate', 'Strict', 'Event')),
+        inclusions     TEXT DEFAULT '',
+        exclusions     TEXT DEFAULT '',
+        safety_requirements TEXT DEFAULT '',
+        approval_status TEXT NOT NULL DEFAULT 'draft'
+                       CHECK (approval_status IN ('draft', 'submitted', 'under_review', 'additional_info', 'approved', 'rejected')),
+        approval_note  TEXT DEFAULT '',
+        created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK ((host_id IS NULL) != (business_id IS NULL))
+      )`);
+      await client.execute(`INSERT INTO experience_listings_new
+        (id, listing_type, category_id, host_id, business_id, location_id,
+         title, description, city, area, address, lat, lng, price_from,
+         currency, status, view_count, price_unit, capacity_max,
+         instant_book, cancellation_policy, inclusions, exclusions,
+         safety_requirements, created_at, updated_at)
+        SELECT id, listing_type, category_id, host_id, business_id, location_id,
+         title, description, city, area, address, lat, lng, price_from,
+         currency, status, view_count, price_unit, capacity_max,
+         instant_book, cancellation_policy, inclusions, exclusions,
+         safety_requirements, created_at, updated_at
+        FROM experience_listings`);
+      await client.execute('DROP TABLE experience_listings');
+      await client.execute('ALTER TABLE experience_listings_new RENAME TO experience_listings');
+      for (const idx of [
+        `CREATE INDEX IF NOT EXISTS idx_exp_listings_status_type_created ON experience_listings(status, listing_type, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_exp_listings_location_status ON experience_listings(location_id, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_exp_listings_category_status ON experience_listings(category_id, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_exp_listings_city_status ON experience_listings(city, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_exp_listings_host_status ON experience_listings(host_id, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_exp_listings_business_status ON experience_listings(business_id, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_exp_listings_lat_lng ON experience_listings(lat, lng)`,
+      ]) await client.execute(idx);
+    } finally {
+      await client.execute('PRAGMA foreign_keys = ON');
     }
   }
   // Migration (2026-09-27): allow pay_type='per_month'. SQLite cannot ALTER a

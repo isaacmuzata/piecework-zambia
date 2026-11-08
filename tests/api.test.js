@@ -1418,6 +1418,16 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
     "INSERT INTO businesses (owner_id, name, slug, city, status, verification_status) VALUES (?, 'Exp Verified Lodge Co', 'exp-verified-lodge-co-1', 'Livingstone', 'active', 'verified')",
     [otherId]);
   const bizId = Number(biz.lastInsertRowid);
+  // Phase 3 (2026-11-08): experience_listings.host_id is now a FK to
+  // experience_hosts(id), NOT a user id as in the Phase 2 fixtures.
+  // Create the member's host profile with id = memberId, so the
+  // host-side fixtures below resolve through the FK and the Phase 2
+  // browse code (which still joins users on host_id, to be rewired by
+  // the Phase 3 backend worker) keeps showing the member's host card.
+  const hostRow = await dbExecute(
+    "INSERT INTO experience_hosts (id, user_id, display_name, city, status, verification_status) VALUES (?, ?, 'Worker Tester', 'Kitwe', 'approved', 'unverified')",
+    [memberId, memberId]);
+  const hostId = Number(hostRow.lastInsertRowid);
   const mkListing = async (sql, args) => Number((await dbExecute(sql, args)).lastInsertRowid);
   const stayId = await mkListing(
     `INSERT INTO experience_listings (listing_type, category_id, host_id, business_id, location_id, title, description, city, price_from, price_unit, capacity_max, instant_book, cancellation_policy, inclusions, exclusions, safety_requirements, status)
@@ -1435,7 +1445,7 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
   const tourId = await mkListing(
     `INSERT INTO experience_listings (listing_type, category_id, host_id, business_id, location_id, title, description, city, price_from, price_unit, capacity_max, instant_book, cancellation_policy, inclusions, exclusions, safety_requirements, status)
      VALUES ('tour', ?, ?, NULL, ?, 'EXP South Luangwa Walking Safari', 'A guided walking safari in South Luangwa.', 'Mfuwe', 350, 'per_person', 12, 0, 'Moderate', ?, ?, 'Closed shoes required.', 'active')`,
-    [toursCat, memberId, mfuwe, JSON.stringify(['Guide', 'Park fees']), JSON.stringify([])]);
+    [toursCat, hostId, mfuwe, JSON.stringify(['Guide', 'Park fees']), JSON.stringify([])]);
   await dbExecute(
     "INSERT INTO experience_tours (listing_id, duration_hours, group_size_max, group_size_min, meeting_point, price_per_person) VALUES (?, 4, 12, 2, 'Mfuwe Lodge car park', 350)",
     [tourId]);
@@ -1450,14 +1460,14 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
   const vehicleId = await mkListing(
     `INSERT INTO experience_listings (listing_type, category_id, host_id, business_id, location_id, title, description, city, price_from, price_unit, capacity_max, instant_book, cancellation_policy, status)
      VALUES ('vehicle', ?, ?, NULL, ?, 'EXP 4x4 Hire with Driver', 'A 4x4 with driver for day trips.', 'Lusaka', 1200, 'per_day', 5, 1, 'Strict', 'active')`,
-    [transportCat, memberId, lusaka]);
+    [transportCat, hostId, lusaka]);
   await dbExecute(
     "INSERT INTO experience_vehicles (listing_id, vehicle_type, seats, driver_included, price_per_day) VALUES (?, 'suv', 5, 1, 1200)",
     [vehicleId]);
   const draftId = await mkListing(
     `INSERT INTO experience_listings (listing_type, category_id, host_id, business_id, location_id, title, description, city, price_from, price_unit, capacity_max, status)
      VALUES ('tour', ?, ?, NULL, ?, 'EXP Draft Tour Nobody Sees', 'A draft that must never appear.', 'Lusaka', 50, 'per_person', 2, 'draft')`,
-    [toursCat, memberId, lusaka]);
+    [toursCat, hostId, lusaka]);
 
   // The pre-fixture empty GET is cached for 60s; a write to the family
   // busts it (this also proves the bust wiring before the cache test).
