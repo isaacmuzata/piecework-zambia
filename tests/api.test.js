@@ -1860,6 +1860,9 @@ async function experiencesPhase3Tests(adminCookie, memberCookie, memberId, other
   check('EXP3: a selfie document upload works',
     docSelfie.status === 200 && docSelfie.json.document && docSelfie.json.document.kind === 'selfie',
     'status ' + docSelfie.status);
+  const docLicInd = await call('POST', '/api/experiences/host/documents', { kind: 'tourism_licence', image: IMG, host_side: 'individual' }, expHost2.cookie);
+  check('EXP3: a tourism licence upload is 422 for an individual host (business hosts only)',
+    docLicInd.status === 422, 'status ' + docLicInd.status);
   const docs = await call('GET', '/api/experiences/host/documents', null, expHost2.cookie);
   check('EXP3: document list carries metadata only, never image data',
     docs.status === 200 && (docs.json.documents || []).length === 2
@@ -2074,6 +2077,11 @@ async function experiencesPhase3Tests(adminCookie, memberCookie, memberId, other
   check('EXP3: opting in twice returns the same link',
     bizOptAgain.status === 200 && bizOptAgain.json.link && bizOptAgain.json.link.id === linkId,
     'status ' + bizOptAgain.status);
+  const docBizLic = await call('POST', '/api/experiences/host/documents', { kind: 'tourism_licence', image: IMG, host_side: 'business', business_id: bizId }, otherCookie);
+  check('EXP3: a tourism licence upload works for a business host',
+    docBizLic.status === 200 && docBizLic.json.document && docBizLic.json.document.kind === 'tourism_licence'
+    && docBizLic.json.document.status === 'pending',
+    'status ' + docBizLic.status + ' ' + JSON.stringify(docBizLic.json).slice(0, 160));
   const bizPatch = await call('PATCH', '/api/experiences/host/business/' + linkId, {
     payout_method: 'mobile_money', payout_reference: '0771234567',
   }, otherCookie);
