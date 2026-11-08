@@ -17,7 +17,8 @@ const path = require('path');
 const webpush = require('web-push');
 
 const { client, init } = require('./db');
-const { parseLatLng, resolveCoords, haversineKm } = require('./geo');
+const { parseLatLng, resolveCoords, haversineKm, isValidLat, isValidLng } = require('./geo');
+const createExperiencesRouter = require('./routes/experiences');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || '';
@@ -54,6 +55,7 @@ const BIG_JSON_PREFIXES = [
   ['POST', '/api/products'], ['PATCH', '/api/products'],
   ['POST', '/api/businesses'], ['PATCH', '/api/businesses'],
   ['POST', '/api/applications'], ['PATCH', '/api/applications'],
+  ['POST', '/api/experiences'], ['PATCH', '/api/experiences'],
 ];
 app.use((req, res, next) => {
   if (req.method === 'PATCH' && req.path === '/api/users/me') return json10mb(req, res, next);
@@ -83,6 +85,11 @@ function bustListCache(path) {
     drop('/api/products'); drop('/api/ads');
   } else if (path.startsWith('/api/businesses')) {
     drop('/api/businesses'); drop('/api/ads');
+  } else if (path.startsWith('/api/experiences')) {
+    // 2911 Experiences Phase 2: the /api/experiences/* family is cached
+    // by listCache for up to 60s (stale to 5 min); a write to any of its
+    // routes must bust it or lists serve stale results after every write.
+    drop('/api/experiences');
   } else if (path.startsWith('/api/ads')) {
     drop('/api/ads');
   } else if (path.startsWith('/api/reviews')) {
@@ -161,6 +168,110 @@ async function seedCategories() {
   }
   await refreshCategories();
   await refreshMarketCategories();
+}
+// 2911 Experiences Phase 2 seeds (2026-11-08). Categories are the
+// PROVISIONAL six from the UI Spec, mapped to DB Design kind values:
+// Tours->tour, Stays->stay, Transport->transport, Adventure->experience,
+// Cultural->experience, Events->event. The DB Design 21-item seed list is
+// a pending Zac decision; categories are admin-managed data, so the seed
+// can change without a migration. Locations are admin-managed data too:
+// one country, the 10 provinces, districts for launch destinations
+// first, towns including the 12 geo.js city names and coordinates, plus
+// two example areas. COORDINATES ARE APPROXIMATE (provincial capitals,
+// district/town centres, national centre -13.1339, 27.8493 per DB Design
+// 3.1): use them for browse and distance display, never assert them as
+// surveyed. Rows are [level, name, slug, lat, lng, parentLevel, parentSlug]
+// in parent-first order; slugs repeat across levels (Lusaka is a province,
+// a district and a town) so parents resolve by level+slug, never slug alone.
+const EXP_CATEGORY_SEED = [
+  { name: 'Tours', kind: 'tour', icon: 'compass' },
+  { name: 'Stays', kind: 'stay', icon: 'bed' },
+  { name: 'Transport', kind: 'transport', icon: 'car' },
+  { name: 'Adventure', kind: 'experience', icon: 'mountain' },
+  { name: 'Cultural', kind: 'experience', icon: 'users' },
+  { name: 'Events', kind: 'event', icon: 'ticket' },
+];
+const EXP_LOCATION_SEED = [
+  ['country', 'Zambia', 'zambia', -13.1339, 27.8493, null, null],
+  ['province', 'Lusaka', 'lusaka', -15.3875, 28.3228, 'country', 'zambia'],
+  ['province', 'Copperbelt', 'copperbelt', -12.9584, 28.6366, 'country', 'zambia'],
+  ['province', 'Southern', 'southern', -16.8063, 26.9917, 'country', 'zambia'],
+  ['province', 'Central', 'central', -14.4469, 28.4464, 'country', 'zambia'],
+  ['province', 'Eastern', 'eastern', -13.6333, 32.6333, 'country', 'zambia'],
+  ['province', 'Western', 'western', -15.2544, 23.1278, 'country', 'zambia'],
+  ['province', 'Northern', 'northern', -10.2117, 31.1789, 'country', 'zambia'],
+  ['province', 'Muchinga', 'muchinga', -10.5486, 32.0696, 'country', 'zambia'],
+  ['province', 'Luapula', 'luapula', -11.1989, 28.8883, 'country', 'zambia'],
+  ['province', 'North-Western', 'north-western', -12.1833, 26.4000, 'country', 'zambia'],
+  ['district', 'Lusaka', 'lusaka', -15.3875, 28.3228, 'province', 'lusaka'],
+  ['district', 'Kitwe', 'kitwe', -12.8024, 28.2132, 'province', 'copperbelt'],
+  ['district', 'Ndola', 'ndola', -12.9584, 28.6366, 'province', 'copperbelt'],
+  ['district', 'Chingola', 'chingola', -12.5250, 27.8686, 'province', 'copperbelt'],
+  ['district', 'Luanshya', 'luanshya', -13.1333, 28.4000, 'province', 'copperbelt'],
+  ['district', 'Kabwe', 'kabwe', -14.4469, 28.4464, 'province', 'central'],
+  ['district', 'Chipata', 'chipata', -13.6333, 32.6333, 'province', 'eastern'],
+  ['district', 'Mambwe', 'mambwe', -13.1000, 31.7900, 'province', 'eastern'],
+  ['district', 'Livingstone', 'livingstone', -17.8419, 25.8543, 'province', 'southern'],
+  ['district', 'Choma', 'choma', -16.8063, 26.9917, 'province', 'southern'],
+  ['district', 'Mongu', 'mongu', -15.2544, 23.1278, 'province', 'western'],
+  ['district', 'Kasama', 'kasama', -10.2117, 31.1789, 'province', 'northern'],
+  ['district', 'Solwezi', 'solwezi', -12.1833, 26.4000, 'province', 'north-western'],
+  ['town', 'Lusaka', 'lusaka', -15.3875, 28.3228, 'district', 'lusaka'],
+  ['town', 'Kitwe', 'kitwe', -12.8024, 28.2132, 'district', 'kitwe'],
+  ['town', 'Ndola', 'ndola', -12.9584, 28.6366, 'district', 'ndola'],
+  ['town', 'Kabwe', 'kabwe', -14.4469, 28.4464, 'district', 'kabwe'],
+  ['town', 'Chipata', 'chipata', -13.6333, 32.6333, 'district', 'chipata'],
+  ['town', 'Livingstone', 'livingstone', -17.8419, 25.8543, 'district', 'livingstone'],
+  ['town', 'Chingola', 'chingola', -12.5250, 27.8686, 'district', 'chingola'],
+  ['town', 'Luanshya', 'luanshya', -13.1333, 28.4000, 'district', 'luanshya'],
+  ['town', 'Kasama', 'kasama', -10.2117, 31.1789, 'district', 'kasama'],
+  ['town', 'Solwezi', 'solwezi', -12.1833, 26.4000, 'district', 'solwezi'],
+  ['town', 'Mongu', 'mongu', -15.2544, 23.1278, 'district', 'mongu'],
+  ['town', 'Choma', 'choma', -16.8063, 26.9917, 'district', 'choma'],
+  ['town', 'Mfuwe', 'mfuwe', -13.0972, 31.7875, 'district', 'mambwe'],
+  ['area', 'Victoria Falls', 'victoria-falls', -17.9243, 25.8572, 'town', 'livingstone'],
+  ['area', 'South Luangwa National Park', 'south-luangwa-national-park', -13.1000, 31.8000, 'town', 'mfuwe'],
+];
+async function seedExperiences() {
+  for (let i = 0; i < EXP_CATEGORY_SEED.length; i++) {
+    const c = EXP_CATEGORY_SEED[i];
+    await runWrite('INSERT OR IGNORE INTO experience_categories (name, kind, icon, sort) VALUES (?, ?, ?, ?)',
+      [c.name, c.kind, c.icon, i]);
+  }
+  const ids = new Map(); // `${level}|${slug}` -> id
+  for (let i = 0; i < EXP_LOCATION_SEED.length; i++) {
+    const [level, name, slug, lat, lng, pLevel, pSlug] = EXP_LOCATION_SEED[i];
+    // Both coordinates or neither, never one alone (DB Design 3.3);
+    // validated with the geo.js helpers, like listing coordinates.
+    if ((lat == null) !== (lng == null) || (lat != null && (!isValidLat(lat) || !isValidLng(lng)))) {
+      console.error(`Experiences seed: skipping ${level} ${name}: invalid coordinates.`);
+      continue;
+    }
+    let parentId = null;
+    if (pLevel) {
+      parentId = ids.get(`${pLevel}|${pSlug}`);
+      if (parentId == null) {
+        console.error(`Experiences seed: skipping ${level} ${name}: parent ${pLevel}/${pSlug} not seeded.`);
+        continue;
+      }
+    }
+    // SQLite UNIQUE treats NULL parent_ids as distinct, so the country
+    // row cannot rely on INSERT OR IGNORE; resolve by lookup instead.
+    const existing = parentId == null
+      ? await getOne('SELECT id FROM experience_locations WHERE parent_id IS NULL AND slug = ?', [slug])
+      : await getOne('SELECT id FROM experience_locations WHERE parent_id = ? AND slug = ?', [parentId, slug]);
+    let id;
+    if (existing) {
+      id = existing.id;
+    } else {
+      const info = await runWrite(
+        'INSERT INTO experience_locations (parent_id, level, name, slug, lat, lng, sort) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [parentId, level, name, slug, lat, lng, i]
+      );
+      id = insertId(info);
+    }
+    ids.set(`${level}|${slug}`, id);
+  }
 }
 const CITIES = [
   'Lusaka', 'Kitwe', 'Ndola', 'Kabwe', 'Chipata', 'Livingstone',
@@ -3717,6 +3828,15 @@ const PRODUCT_CONDITIONS = ['New', 'Like new', 'Good', 'Fair'];
 const MAX_PRODUCT_PHOTOS = 5;
 const MAX_ACTIVE_LISTINGS = 30;
 const productLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 40, standardHeaders: true , handler: tooManyTries });
+// 2911 Experiences Phase 3 (Nov 8, 2026): host-onboarding writes (host
+// apply, verification document upload, business opt-in) get their own
+// 20/hr bucket with the same policy as businessLimiter, NOT the shared
+// businessLimiter instance: that budget is shared with POST
+// /api/businesses, whose validation loops already consume it in the API
+// suite (and a host applying right after a business-creation burst would
+// be wrongly throttled in production too). Listing creation and photo
+// uploads reuse the existing productLimiter (40/hr) directly.
+const expHostLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true, handler: tooManyTries });
 
 function serializeProduct(p) {
   return {
@@ -4318,6 +4438,16 @@ app.post('/api/conversations/:id/messages', ah(auth), msgLimiter, ah(async (req,
 }));
 
 
+// ---------------------------------------------------------------- 2911 Experiences (Phase 2 + Phase 3)
+// Public browse API lives in routes/experiences.js (module split decision,
+// Nov 8, 2026): the router shares auth, maybeAuth, ah, err, runWrite,
+// getOne, getAll, listCache, isAdmin, isSupport, logAdmin, CITIES and the
+// product/business rate limiters with this file. Phase 3 adds the host
+// onboarding, verification, listing management and admin decision
+// endpoints in the same router. Mounted here, before the share previews,
+// so /api/experiences/* resolves before the SPA fallback.
+app.use(createExperiencesRouter({ ah, err, maybeAuth, getOne, getAll, runWrite, listCache, auth, isAdmin, isSupport, logAdmin, CITIES, productLimiter, expHostLimiter }));
+
 // ---------------------------------------------------------------- share previews
 // Social apps (WhatsApp, Facebook) do not run the SPA and cannot read hash
 // routes, so every shared link used to preview with one static promo image
@@ -4440,6 +4570,18 @@ app.get('/s/job/:id', ah(async (req, res) => {
     image: j.cover_photo_id ? `${SHARE_ORIGIN}/api/jobs/${j.id}/photos/${j.cover_photo_id}` : BRAND_OG_IMAGE,
     target: `${SHARE_ORIGIN}/#/job/${j.id}`,
     self: `${SHARE_ORIGIN}/s/job/${j.id}`,
+  });
+}));
+
+app.get('/s/experience/:id', ah(async (req, res) => {
+  const e = await getOne(`SELECT l.*, (SELECT m.id FROM experience_listing_media m WHERE m.listing_id = l.id ORDER BY m.sort, m.id LIMIT 1) AS cover_photo_id FROM experience_listings l WHERE l.id = ?`, [req.params.id]);
+  if (!e || e.status !== 'active') return genericShare(res, SHARE_ORIGIN + '/#/experiences', `${SHARE_ORIGIN}/s/experience/${req.params.id}`);
+  return sharePreviewPage(res, {
+    title: `${e.title} · ${e.city} on 2911 Jobs`,
+    desc: excerpt(e.description, 180) || `${e.listing_type} in ${e.city}. See it on 2911 Jobs.`,
+    image: e.cover_photo_id ? `${SHARE_ORIGIN}/api/experiences/${e.id}/photos/${e.cover_photo_id}` : BRAND_OG_IMAGE,
+    target: `${SHARE_ORIGIN}/#/experience/${e.id}`,
+    self: `${SHARE_ORIGIN}/s/experience/${req.params.id}`,
   });
 }));
 
@@ -4830,6 +4972,7 @@ app.use((e, req, res, next) => {
 init()
   .then(async () => {
     await seedCategories();
+    await seedExperiences();
     app.listen(PORT, () => {
       console.log(`2911 Jobs running on http://localhost:${PORT}`);
     });

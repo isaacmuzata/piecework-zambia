@@ -62,6 +62,14 @@ const ICONS = {
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   facebook: '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>',
+  /* 2911 Experiences (Phase 2): same 24x24, stroke 2, round caps/joins. */
+  compass: '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+  backpack: '<path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"/><path d="M8 10h8"/><path d="M8 17h8"/>',
+  bed: '<path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/>',
+  bus: '<path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/>',
+  mountain: '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>',
+  drum: '<path d="m2 2 8 8"/><path d="m22 2-8 8"/><ellipse cx="12" cy="9" rx="10" ry="5"/><path d="M7 13.4v7.9"/><path d="M12 14v8"/><path d="M17 13.4v7.9"/><path d="M2 9v8"/>',
+  ticket: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2M13 11v2M13 17v2"/>',
 };
 function icon(name) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -573,6 +581,9 @@ function renderChrome() {
   const nav = document.getElementById('drawer-nav');
   const link = (href, ic, label, extra = '') =>
     `<a href="${href}" class="${h === href ? 'active' : ''}">${icon(ic)}<span>${label}</span>${extra}</a>`;
+  // Starts-with match, so a listing detail page highlights Experiences Home.
+  const linkStarts = (href, ic, label, extra = '') =>
+    `<a href="${href}" class="${h === href || h.startsWith(href + '/') || (href === '#/experiences' && h.startsWith('#/experience/')) ? 'active' : ''}">${icon(ic)}<span>${label}</span>${extra}</a>`;
   const group = (title, links) => `<div class="drawer-group"><h4>${title}</h4>${links.join('')}</div>`;
   nav.innerHTML =
     (currentUser
@@ -586,6 +597,21 @@ function renderChrome() {
       link('#/categories', 'grid', 'Categories'),
     ])
     + group('Buy and sell', [link('#/market', 'tag', 'Marketplace'), link('#/businesses', 'grid', 'Businesses')])
+    // Experiences (Phase 2). PROVISIONAL, pending Zac's confirmation of
+    // the no-sixth-tab decision: reached from Home, this drawer group and
+    // desktop nav, with no tab active on Experiences pages. Phase 3 adds
+    // Become a Host here; the label switches to My Host Dashboard once
+    // the user is an approved host (expHostCache, warmed by host pages).
+    + group('Travel and stays', [
+      linkStarts('#/experiences', 'compass', 'Experiences'),
+      link('#/experiences/category/tours', 'compass', 'Tours'),
+      link('#/experiences/category/stays', 'bed', 'Stays'),
+      link('#/experiences/category/transport', 'bus', 'Transport'),
+      link('#/experiences/category/adventure', 'mountain', 'Adventure'),
+      link('#/experiences/category/cultural', 'drum', 'Cultural'),
+      link('#/experiences/category/events', 'ticket', 'Events'),
+      link(expHostCache && expHostCache.individual && expHostCache.individual.status === 'approved' ? '#/host/dashboard' : '#/host/apply', 'plus', expHostCache && expHostCache.individual && expHostCache.individual.status === 'approved' ? 'My Host Dashboard' : 'Become a Host'),
+    ])
     + (currentUser ? group('Your account', [
       link('#/messages', 'message', 'Messages', '<span class="drawer-badge js-msg-badge" hidden></span>'),
       link('#/dashboard', 'clipboard', 'My Gigs'),
@@ -605,11 +631,14 @@ function renderChrome() {
       if (href === '#/jobs') return h === '#/jobs' || h.startsWith('#/job/') || h.startsWith('#/categories') || h.startsWith('#/search');
       if (href === '#/messages') return h.startsWith('#/messages') || h.startsWith('#/chat/');
       if (href === '#/market') return h.startsWith('#/market') || h.startsWith('#/product/') || h.startsWith('#/sell') || h.startsWith('#/selling');
+      // Experiences (Phase 2, PROVISIONAL no-sixth-tab decision): the
+      // desktop nav item covers home, search, category, detail and host pages.
+      if (href === '#/experiences') return h === '#/experiences' || h.startsWith('#/experiences/') || h.startsWith('#/experience/') || h.startsWith('#/host/');
       return h.startsWith(href);
     };
     const ditems = currentUser
-      ? [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/messages', 'Messages'], ['#/dashboard', 'My Gigs']]
-      : [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/how', 'Help']];
+      ? [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/experiences', 'Experiences'], ['#/messages', 'Messages'], ['#/dashboard', 'My Gigs']]
+      : [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/experiences', 'Experiences'], ['#/how', 'Help']];
     dnav.innerHTML = ditems.map(([href, label]) =>
       `<a href="${href}" class="${dMatch(href) ? 'active' : ''}">${label}${href === '#/messages' ? '<span class="dnav-badge js-msg-badge" hidden></span>' : ''}</a>`
     ).join('');
@@ -894,6 +923,7 @@ async function viewHome() {
       <a class="entry-card" href="#/jobs"><span class="entry-ico">${icon('briefcase')}</span><span class="entry-text"><b>Find work</b><span>Piece work a few kilometres from home</span></span>${icon('chevR')}</a>
       <a class="entry-card" href="#/post"><span class="entry-ico">${icon('users')}</span><span class="entry-text"><b>Hire help</b><span>Post a job. People nearby apply</span></span>${icon('chevR')}</a>
       <a class="entry-card" href="#/market"><span class="entry-ico">${icon('tag')}</span><span class="entry-text"><b>Buy &amp; sell</b><span>Phones, furniture, produce and more</span></span>${icon('chevR')}</a>
+      <a class="entry-card" href="#/experiences"><span class="entry-ico">${icon('compass')}</span><span class="entry-text"><b>Explore Zambia</b><span>Tours, stays, transport and experiences</span></span>${icon('chevR')}</a>
     </div>
     <div class="page" style="padding-top:6px">
       <div id="home-ads"></div>
@@ -914,6 +944,7 @@ async function viewHome() {
       <div class="section-title"><span>${getLoc() ? 'Jobs Near You' : 'Recent Jobs'}</span><a href="#/jobs">See all</a></div>
       <div id="home-jobs">${skeletonCards(3)}</div>
       <div id="home-picks"></div>
+      <div id="home-exp"></div>
       <div class="section-title"><span>How it works</span><a href="#/how">More detail</a></div>
       <div class="steps">
         <div class="card"><div class="step-n">1</div><div><h4>Sign up free</h4><p>Your name, phone, a photo and a selfie.</p></div></div>
@@ -1031,6 +1062,17 @@ async function viewHome() {
         location.hash = '#/product/' + el.dataset.product;
       });
     });
+  }).catch(() => {});
+  // 2911 Experiences (Phase 2): real listings only; the section hides
+  // entirely when there are none yet.
+  api('/api/experiences?sort=newest&limit=8').then((d) => {
+    const slot = document.getElementById('home-exp');
+    if (!slot) return;
+    const es = (d.experiences || []).slice(0, 8);
+    if (!es.length) return;
+    slot.innerHTML = `
+      <div class="section-title"><span>Experiences in Zambia</span><a href="#/experiences">See all</a></div>
+      <div class="hscroll">${es.map(expCard).join('')}</div>`;
   }).catch(() => {});
   try {
     const loc = getLoc();
@@ -1355,6 +1397,163 @@ const MARKET_CAT_PHOTOS = { 'Vehicles & Parts': 'vehicles', 'Electronics': 'elec
 
 function fmtK(n) { return 'K' + Number(n || 0).toLocaleString('en-ZM'); }
 
+/* ---------------- 2911 Experiences (Phase 2, Nov 8, 2026) ----------------
+   Public browse frontend for the tourism module inside 2911 Jobs. Prices
+   are ZMW primary via fmtZMW(); fmtK() is never used for Experiences.
+   No fabricated stats, reviews, providers or availability anywhere: every
+   count, rating and date comes from the /api/experiences responses, and
+   sections hide entirely when they have no real data. No write endpoints
+   exist in this phase: host onboarding is Phase 3, bookings Phase 4, so
+   every Become a Host / Book / Message action that has no backend yet
+   shows an honest "coming soon" state instead of a dead link or a fake
+   checkout. Navigation decision (PROVISIONAL, pending Zac's confirmation):
+   no sixth bottom tab; Experiences is reached from a Home card, a drawer
+   group and a desktop nav link. */
+
+/** ZMW primary, integer Kwacha: "ZMW 1,250". Never fmtK() for Experiences. */
+function fmtZMW(n) { return 'ZMW ' + Number(n || 0).toLocaleString('en-ZM'); }
+
+const EXP_PRICE_UNIT_LABELS = {
+  per_person: 'per person', per_group: 'per group', per_night: 'per night',
+  per_day: 'per day', per_hour: 'per hour', per_trip: 'per trip',
+  per_event: 'per event', quote: 'price on request',
+};
+/* Fallback when /api/experiences/categories cannot be reached; the live
+   list from the API always wins. Slug is the lowercase name. */
+const EXP_CATEGORIES_FALLBACK = [
+  { name: 'Tours', kind: 'tour', icon: 'compass' },
+  { name: 'Stays', kind: 'stay', icon: 'bed' },
+  { name: 'Transport', kind: 'transport', icon: 'bus' },
+  { name: 'Adventure', kind: 'experience', icon: 'mountain' },
+  { name: 'Cultural', kind: 'experience', icon: 'drum' },
+  { name: 'Events', kind: 'event', icon: 'ticket' },
+];
+/* Category colour-dot mapping: [icon, colour]. Unknown categories fall
+   back to the backpack tile. */
+const EXP_CAT_STYLE = {
+  Tours: ['compass', '#4C1D95'],
+  Stays: ['bed', '#2563EB'],
+  Transport: ['bus', '#0E7490'],
+  Adventure: ['mountain', '#1E8A44'],
+  Cultural: ['drum', '#B45309'],
+  Events: ['ticket', '#DB2777'],
+};
+function expCatSlug(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+function expCatStyle(name) {
+  const s = EXP_CAT_STYLE[name];
+  return s ? { icon: s[0], color: s[1] } : { icon: 'backpack', color: '#4C1D95' };
+}
+function expCatName(slug) {
+  const found = EXP_CATEGORIES_FALLBACK.find((c) => expCatSlug(c.name) === String(slug || '').toLowerCase());
+  return found ? found.name : String(slug || '').replace(/(^|-)(\w)/g, (m, d, c) => (d ? ' ' : '') + c.toUpperCase());
+}
+/** "ZMW 450 per night" (or "Free" for a zero price). Unit in a grey span. */
+function expPriceText(e) {
+  if (!e) return '';
+  if (Number(e.price_from) === 0) return 'Free';
+  const unit = EXP_PRICE_UNIT_LABELS[e.price_unit];
+  return fmtZMW(e.price_from) + (unit ? ` <span class="exp-per">${unit}</span>` : '');
+}
+function expCapacityText(e) {
+  const n = Number(e.capacity_max || 1);
+  if (e.listing_type === 'stay') return `Sleeps ${n}`;
+  if (e.listing_type === 'vehicle') return `Seats ${n}`;
+  return `Up to ${n} guest${n === 1 ? '' : 's'}`;
+}
+function expRatingHtml(e) {
+  if (e.rating_avg == null || !e.rating_count) return '';
+  return `<span class="pg-meta">${icon('star')}<span>${Number(e.rating_avg).toFixed(1)} (${e.rating_count})</span></span>`;
+}
+/** Honest stand-in for actions whose backend lands in a later phase. */
+function expBookingSoon() { toast('Bookings open soon. Booking requests launch in the next phase.'); }
+
+/* ---------------- saved experiences (on this device) ---------------- */
+function getSavedExperiences() {
+  try {
+    const v = JSON.parse(localStorage.getItem('pw_saved_experiences') || '[]');
+    return Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : [];
+  } catch { return []; }
+}
+function isSavedExperience(id) { return getSavedExperiences().includes(Number(id)); }
+function toggleSaveExperience(id) {
+  id = Number(id);
+  let s = getSavedExperiences();
+  if (s.includes(id)) {
+    s = s.filter((x) => x !== id);
+    toast('Removed from saved experiences.');
+  } else {
+    s.push(id);
+    toast('Experience saved on this device.');
+  }
+  localStorage.setItem('pw_saved_experiences', JSON.stringify(s));
+  document.querySelectorAll(`[data-expsave="${id}"]`).forEach((b) => {
+    b.classList.toggle('saved', s.includes(id));
+    b.setAttribute('aria-pressed', s.includes(id) ? 'true' : 'false');
+  });
+}
+
+function shareExperience(id, title) {
+  const url = PUBLIC_ORIGIN + '/s/experience/' + id;
+  openShareSheet({
+    heading: 'Share this experience',
+    url,
+    text: '"' + title + '" — see this experience on 2911 Jobs',
+    copiedMessage: 'Experience link copied. Paste it anywhere to share.',
+  });
+}
+
+/** Photo-led result card. No rating shown where there are no reviews;
+ * no availability date invented (the API returns availability_text null
+ * until Phase 4, so the card says "Check dates"). */
+function expCard(e) {
+  const cat = e.category || {};
+  const style = expCatStyle(cat.name);
+  const saved = isSavedExperience(e.id);
+  const loc = e.location && e.location.chain ? e.location.chain : [e.city, e.area].filter(Boolean).join(' · ');
+  return `
+  <article class="product-card-g exp-card" data-experience="${e.id}" tabindex="0" role="link" aria-label="${esc(e.title)}">
+    <div class="pg-media">
+      ${e.cover_photo
+        ? `<img src="${esc(e.cover_photo)}" alt="${esc(e.title)}" loading="lazy">`
+        : `<div class="job-thumb product-thumb">${icon(style.icon)}</div>`}
+      <span class="pg-cond">${esc(cat.name || e.listing_type || '')}</span>
+      ${e.photo_count > 1 ? `<span class="pd-count">1/${e.photo_count}</span>` : ''}
+      <button class="job-save product-share" data-share-experience="${e.id}" data-title="${esc(e.title)}" aria-label="Share this experience">${icon('share')}</button>
+      <button class="job-save ${saved ? 'saved' : ''}" data-expsave="${e.id}" aria-label="Save this experience" aria-pressed="${saved ? 'true' : 'false'}">${icon('heart')}</button>
+    </div>
+    <div class="pg-body">
+      <h3>${esc(e.title)}</h3>
+      <div class="exp-price">${expPriceText(e)}</div>
+      <div class="pg-meta">${icon('pin')}<span>${esc(loc)}${e.distance_km != null ? ` · ${e.distance_km} km away` : ''}</span></div>
+      ${expRatingHtml(e)}
+      <div class="pg-meta">${icon('users')}<span>${esc(expCapacityText(e))}</span></div>
+      ${e.host && e.host.verified ? `<div><span class="exp-verified">${icon('check')} Verified host</span></div>` : ''}
+      <div class="exp-avail"><span class="exp-dot"></span>Check dates</div>
+    </div>
+  </article>`;
+}
+let expBrowseState = { destination: '', province: '', from: '', to: '', guests: '', category: '', min: '', max: '', capacity: '', verified: false, instant: false, sort: '', page: 1 };
+let expCategoriesCache = null;
+async function expCategories() {
+  if (expCategoriesCache) return expCategoriesCache;
+  try {
+    const d = await api('/api/experiences/categories');
+    if (d && Array.isArray(d.categories) && d.categories.length) {
+      expCategoriesCache = d.categories;
+      return expCategoriesCache;
+    }
+  } catch { /* fallback below */ }
+  expCategoriesCache = EXP_CATEGORIES_FALLBACK;
+  return expCategoriesCache;
+}
+async function expProvinces() {
+  try {
+    const d = await api('/api/experiences/locations');
+    if (d && Array.isArray(d.locations)) return d.locations;
+  } catch { /* no province data: the control is hidden, never hard-coded */ }
+  return [];
+}
+
 function productCard(p) {
   const savedP = isSavedProduct(p.id);
   return `
@@ -1481,6 +1680,707 @@ async function viewMarket() {
   /* condition is owned by the quick chips (All / New / Used) */
   document.getElementById('m-sort').addEventListener('change', (e) => { marketState.sort = e.target.value; load(true); });
   load(true);
+}
+
+/* ---------------- Experiences homepage (#/experiences) ---------------- */
+async function viewExperiences() {
+  const today = new Date().toISOString().slice(0, 10);
+  app.innerHTML = `
+  <div class="view">
+    <section class="exp-hero-search">
+      <span class="exp-kicker">2911 Experiences</span>
+      <h1>Discover Zambia. Experience More. Earn Locally.</h1>
+      <p class="exp-sub">Tours, stays, transport, and local experiences, from verified Zambian hosts.</p>
+      <div class="exp-search-card">
+        <div class="exp-search-row">
+          <div class="field exp-dest-wrap" style="margin-bottom:12px">
+            <label for="exp-dest">Where to?</label>
+            <input id="exp-dest" type="text" placeholder="Try Livingstone, Lusaka, or South Luangwa" autocomplete="off" aria-label="Destination">
+            <div class="exp-suggest" id="exp-dest-suggest" hidden></div>
+          </div>
+          <div class="field">
+            <label for="exp-province">Province</label>
+            <select id="exp-province" aria-label="Province"><option value="">All provinces</option></select>
+          </div>
+          <div class="field">
+            <label for="exp-date">Date</label>
+            <input id="exp-date" type="date" min="${today}" aria-label="Date">
+          </div>
+          <div class="field exp-guests-field">
+            <label>Guests</label>
+            <div class="exp-guests">
+              
+              <span class="exp-guests-ctl">
+                <button type="button" id="exp-guests-minus" aria-label="Fewer guests">-</button>
+                <span class="exp-guests-count" id="exp-guests-count" aria-live="polite">2</span>
+                <button type="button" id="exp-guests-plus" aria-label="More guests">+</button>
+              </span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="exp-cat">Category</label>
+            <select id="exp-cat" aria-label="Category"><option value="">All categories</option></select>
+          </div>
+        </div>
+        <p class="ferr" id="exp-search-err" hidden></p>
+        <button class="btn btn-exp full" id="exp-search-go" type="button">${icon('search')} Search experiences</button>
+      </div>
+      <p class="exp-search-note">No payment needed to send a booking request.</p>
+    </section>
+    <div class="page" style="padding-top:6px">
+      <div class="section-title"><span>Browse by category</span></div>
+      <div class="cat-strip" id="exp-cats">${skeletonCards(1)}</div>
+      <div id="exp-sections"></div>
+      <div id="exp-sec-new"></div>
+      <div id="exp-sec-stays"></div>
+      <div id="exp-sec-tours"></div>
+      <div id="exp-sec-events"></div>
+      <div id="exp-sec-vtransport"></div>
+      <div id="exp-sec-hosts"></div>
+      <div id="exp-sec-saved"></div>
+      <a class="promo-card" href="#/host/apply" data-exp-host-cta style="background:linear-gradient(135deg,#0B1F3B,#4C1D95);text-decoration:none;color:#fff;display:flex;align-items:center;gap:14px;padding:18px">
+        <div style="font-size:34px">${icon('compass')}</div>
+        <div class="promo-text" style="background:none;padding:0"><h3>Earn from what you know</h3><p>List a room, a vehicle, a tour, or an experience. You set the price and the dates.</p></div>
+      </a>
+      <div class="card" style="margin-top:16px"><div class="safety-card"><span class="safety-ico">${icon('shield')}</span><div><b>Travel safe</b><ul><li>Meet your host in a public place first</li><li>Never pay outside a booking request</li><li>Report anything that feels wrong</li></ul><a class="small" href="#/how">Help and safety</a></div></div></div>
+      <div class="cta-final">
+        <h3>Your next Zambian experience is a few taps away.</h3>
+        <p>Search by place and date, send a booking request, and hear back from your host.</p>
+        <div class="btn-row"><a class="btn btn-exp" href="#/experiences/search">Search experiences</a><a class="btn btn-outline" href="#/host/apply" data-exp-host-cta>Become a Host</a></div>
+      </div>
+    </div>
+  </div>`;
+
+  /* Hero search wiring. */
+  let guests = 2;
+  const gCount = document.getElementById('exp-guests-count');
+  const gMinus = document.getElementById('exp-guests-minus');
+  const gPlus = document.getElementById('exp-guests-plus');
+  const setGuests = (n) => {
+    guests = Math.max(1, Math.min(16, n));
+    gCount.textContent = String(guests);
+    gMinus.disabled = guests <= 1;
+    gPlus.disabled = guests >= 16;
+  };
+  gMinus.addEventListener('click', () => setGuests(guests - 1));
+  gPlus.addEventListener('click', () => setGuests(guests + 1));
+  setGuests(2);
+  const destInput = document.getElementById('exp-dest');
+  const suggest = document.getElementById('exp-dest-suggest');
+  let destTimer;
+  destInput.addEventListener('input', () => {
+    clearTimeout(destTimer);
+    const v = destInput.value.trim();
+    if (v.length < 2) { suggest.hidden = true; suggest.innerHTML = ''; return; }
+    destTimer = setTimeout(async () => {
+      try {
+        const d = await api('/api/experiences/locations?q=' + encodeURIComponent(v) + '&limit=6');
+        const locs = d.locations || [];
+        if (!locs.length || document.activeElement !== destInput) { suggest.hidden = true; return; }
+        suggest.innerHTML = locs.map((l) => `<button type="button" data-exp-loc="${esc(l.name)}"><b>${esc(l.name)}</b><small>${esc(l.chain || '')}</small></button>`).join('');
+        suggest.hidden = false;
+        suggest.querySelectorAll('[data-exp-loc]').forEach((b) => b.addEventListener('click', () => {
+          destInput.value = b.dataset.expLoc;
+          suggest.hidden = true;
+          suggest.innerHTML = '';
+        }));
+      } catch { suggest.hidden = true; }
+    }, 250);
+  });
+  destInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') { suggest.hidden = true; } });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest || !e.target.closest('.exp-dest-wrap')) { suggest.hidden = true; }
+  });
+  expProvinces().then((provs) => {
+    const sel = document.getElementById('exp-province');
+    if (!sel) return;
+    provs.forEach((p) => {
+      const o = document.createElement('option');
+      o.value = p.name; o.textContent = p.name + ' Province';
+      sel.appendChild(o);
+    });
+  });
+  const cats = await expCategories();
+  const catSel = document.getElementById('exp-cat');
+  if (catSel) cats.forEach((c) => {
+    const o = document.createElement('option');
+    o.value = c.name; o.textContent = c.name;
+    catSel.appendChild(o);
+  });
+  document.getElementById('exp-search-go').addEventListener('click', () => {
+    const err = document.getElementById('exp-search-err');
+    const from = document.getElementById('exp-date').value;
+    if (from && from < today) {
+      err.textContent = 'The date cannot be in the past.';
+      err.hidden = false;
+      return;
+    }
+    err.hidden = true;
+    const params = new URLSearchParams();
+    const dest = destInput.value.trim();
+    if (dest) params.set('destination', dest);
+    const prov = document.getElementById('exp-province').value;
+    if (prov) params.set('province', prov);
+    if (from) params.set('from', from);
+    if (guests !== 2) params.set('guests', String(guests));
+    const cat = document.getElementById('exp-cat').value;
+    if (cat) params.set('category', cat);
+    const qs = params.toString();
+    location.hash = '#/experiences/search' + (qs ? '?' + qs : '');
+  });
+
+  /* Category strip: always all six, even when a category has no listings. */
+  const catsSlot = document.getElementById('exp-cats');
+  if (catsSlot) {
+    catsSlot.innerHTML = cats.map((c) => {
+      const st = expCatStyle(c.name);
+      return `<a class="cat-card exp-cat-card" href="#/experiences/category/${expCatSlug(c.name)}"><span class="cat-ico" style="background:${st.color}">${icon(st.icon)}</span><b>${esc(c.name)}</b><span class="exp-cat-dot" style="background:${st.color}"></span></a>`;
+    }).join('');
+  }
+
+  /* Sections: each hides entirely when it has no real data. */
+  async function expSection(slotId, title, link, promise) {
+    try {
+      const d = await promise;
+      const items = d.experiences || [];
+      if (!items.length) return;
+      const el = document.getElementById(slotId);
+      if (!el) return;
+      el.innerHTML = `<div class="section-title"><span>${esc(title)}</span><a href="${link}">See all</a></div><div class="hscroll">${items.map(expCard).join('')}</div>`;
+    } catch { /* section stays hidden */ }
+  }
+  async function expHostsSection() {
+    try {
+      const d = await api('/api/experiences?verified=1&sort=newest&limit=20');
+      const seen = new Set();
+      const hosts = [];
+      for (const e of d.experiences || []) {
+        if (!e.host || !e.host.verified) continue;
+        const key = e.host.type + ':' + e.host.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        hosts.push(e.host);
+      }
+      if (!hosts.length) return;
+      const el = document.getElementById('exp-sec-hosts');
+      if (!el) return;
+      el.innerHTML = `<div class="section-title"><span>Verified hosts</span><a href="#/experiences/search?verified=1">See all</a></div><div class="fw-scroll">${hosts.slice(0, 8).map((h) => {
+        const href = h.type === 'business' ? '#/business/' + encodeURIComponent(h.slug || '') : '#/user/' + h.id;
+        return `<a class="fw-card" href="${href}">${avatarHtml({ name: h.name, avatar: h.avatar }, 'lg')}<b>${esc(h.name)}</b><span class="fw-city">${icon('pin')}${esc(h.city || '')}</span><span class="exp-verified">${icon('check')} Verified host</span></a>`;
+      }).join('')}</div>`;
+    } catch { /* section stays hidden */ }
+  }
+  async function expSavedSection() {
+    if (!currentUser) return;
+    const ids = getSavedExperiences();
+    if (!ids.length) return;
+    const items = [];
+    for (const id of ids.slice(0, 8)) {
+      try {
+        const d = await api('/api/experiences/' + id);
+        if (d.experience) items.push(d.experience);
+      } catch { /* a removed listing drops out of the saved strip */ }
+    }
+    if (!items.length) return;
+    const el = document.getElementById('exp-sec-saved');
+    if (!el) return;
+    el.innerHTML = `<div class="section-title"><span>Your saved experiences</span></div><div class="hscroll">${items.map(expCard).join('')}</div>`;
+  }
+
+  try {
+    const totalRes = await api('/api/experiences?limit=1');
+    if (totalRes.total === 0) {
+      const slot = document.getElementById('exp-sections');
+      if (slot) {
+        slot.innerHTML = emptyHtml('compass', 'Experiences are coming soon',
+          'Hosts are signing up now. Check back soon, or become one of the first hosts.',
+          `<a class="btn btn-sm btn-primary" href="#/host/apply" data-exp-host-cta>Become a Host</a>`);
+      }
+      return;
+    }
+  } catch { /* if the total check fails, try the sections anyway */ }
+  expSection('exp-sec-new', 'Newly added', '#/experiences/search?sort=newest', api('/api/experiences?sort=newest&limit=8'));
+  expSection('exp-sec-stays', 'New stays', '#/experiences/category/stays', api('/api/experiences?category=Stays&sort=newest&limit=8'));
+  expSection('exp-sec-tours', 'New tours', '#/experiences/category/tours', api('/api/experiences?category=Tours&sort=newest&limit=8'));
+  expSection('exp-sec-events', 'New events', '#/experiences/category/events', api('/api/experiences?category=Events&sort=newest&limit=8'));
+  expSection('exp-sec-vtransport', 'Verified transport', '#/experiences/search?category=Transport&verified=1', api('/api/experiences?category=Transport&verified=1&sort=newest&limit=8'));
+  expHostsSection();
+  expSavedSection();
+  // Approved hosts see "My Host Dashboard" on the Become a Host CTAs.
+  if (currentUser) expHostMe().then(() => expWireHostCta());
+}
+
+/* ---------------- Experiences search + category (#/experiences/search,
+   #/experiences/category/:slug) ----------------
+   One layout, server-side filters via query parameters, Load more (never
+   infinite scroll), count from the API response only. The category page is
+   the same view pre-filtered by category. */
+async function viewExperienceSearch(presetSlug) {
+  const query = new URLSearchParams(location.hash.split('?')[1] || '');
+  const isCategory = !!presetSlug;
+  const catName = isCategory ? expCatName(presetSlug) : '';
+  const catStyle = isCategory ? expCatStyle(catName) : null;
+  expBrowseState = {
+    destination: query.get('destination') || '',
+    province: query.get('province') || '',
+    from: query.get('from') || '',
+    to: query.get('to') || '',
+    guests: query.get('guests') || '',
+    category: isCategory ? catName : (query.get('category') || ''),
+    min: query.get('min') || '',
+    max: query.get('max') || '',
+    capacity: query.get('capacity') || '',
+    verified: query.get('verified') === '1',
+    instant: query.get('instant') === '1',
+    sort: query.get('sort') || '',
+    page: Math.max(1, parseInt(query.get('page') || '1', 10) || 1),
+  };
+  const title = isCategory ? catName : 'Search experiences';
+  const sub = isCategory ? 'Browse ' + catName.toLowerCase() + ' across Zambia.' : 'Search by place, date and price.';
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <div class="page-band"><h1 class="page-title">${esc(title)}</h1><p class="page-sub">${esc(sub)}</p></div>
+    <div class="search-again">
+      <div class="searchbar">${icon('search')}<input id="exp-q" type="search" placeholder="Where to? Try Livingstone or Mfuwe" value="${esc(expBrowseState.destination)}" aria-label="Search by destination"></div>
+      <button class="btn btn-primary" id="exp-q-go" type="button">Search</button>
+    </div>
+    <div class="chips" id="exp-chips"><button class="chip ${!expBrowseState.category ? 'active' : ''}" data-exp-cat="">All</button></div>
+    <div class="filters" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
+      <button class="btn btn-outline btn-sm" id="exp-filters-btn" type="button">${icon('sliders')} Filters</button>
+      <select id="exp-sort" aria-label="Sort experiences" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)">
+        <option value="" ${!expBrowseState.sort ? 'selected' : ''}>Recommended</option>
+        <option value="newest" ${expBrowseState.sort === 'newest' ? 'selected' : ''}>Newest</option>
+        <option value="price_low" ${expBrowseState.sort === 'price_low' ? 'selected' : ''}>Price: low to high</option>
+        <option value="price_high" ${expBrowseState.sort === 'price_high' ? 'selected' : ''}>Price: high to low</option>
+        <option value="rating" ${expBrowseState.sort === 'rating' ? 'selected' : ''}>Highest rated</option>
+      </select>
+    </div>
+    <div class="split" style="margin:6px 2px 10px"><span class="small muted" id="exp-count"></span><span class="small muted" id="exp-order"></span></div>
+    <div id="exp-results">${skeletonCards(3)}</div>
+    <div id="exp-more" style="text-align:center;margin:8px 0 16px"></div>
+    <div style="text-align:center;margin:18px 0 8px"><a class="link-btn" href="#/how">How 2911 Jobs works</a></div>
+  </div></div>`;
+
+  const cats = await expCategories();
+  const chips = document.getElementById('exp-chips');
+  chips.innerHTML = `<button class="chip ${!expBrowseState.category ? 'active' : ''}" data-exp-cat="">All</button>` +
+    cats.map((c) => `<button class="chip ${expCatSlug(c.name) === expCatSlug(expBrowseState.category) ? 'active' : ''}" data-exp-cat="${esc(c.name)}">${esc(c.name)}</button>`).join('');
+  chips.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-exp-cat]');
+    if (!btn) return;
+    expBrowseState.category = btn.dataset.expCat;
+    expBrowseState.page = 1;
+    chips.querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c === btn));
+    syncExpHash();
+    loadExp(true);
+  });
+  document.getElementById('exp-sort').addEventListener('change', (e) => {
+    expBrowseState.sort = e.target.value;
+    expBrowseState.page = 1;
+    syncExpHash();
+    loadExp(true);
+  });
+  const runSearchAgain = () => {
+    expBrowseState.destination = document.getElementById('exp-q').value.trim();
+    expBrowseState.page = 1;
+    syncExpHash();
+    loadExp(true);
+  };
+  document.getElementById('exp-q-go').addEventListener('click', runSearchAgain);
+  document.getElementById('exp-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearchAgain(); });
+  document.getElementById('exp-more').addEventListener('click', (e) => {
+    if (e.target.id === 'exp-load-more') { expBrowseState.page++; syncExpHash(); loadExp(false); }
+  });
+  document.getElementById('exp-filters-btn').addEventListener('click', openExpFilters);
+  await loadExp(true);
+
+  function expParams() {
+    const s = expBrowseState;
+    const params = new URLSearchParams({ page: String(s.page) });
+    if (s.sort) params.set('sort', s.sort);
+    if (s.destination) params.set('destination', s.destination);
+    if (s.province) params.set('province', s.province);
+    if (s.from) params.set('from', s.from);
+    if (s.to) params.set('to', s.to);
+    if (s.guests) params.set('guests', s.guests);
+    if (s.category) params.set('category', s.category);
+    if (s.min) params.set('min', s.min);
+    if (s.max) params.set('max', s.max);
+    if (s.capacity) params.set('capacity', s.capacity);
+    if (s.verified) params.set('verified', '1');
+    if (s.instant) params.set('instant', '1');
+    return params;
+  }
+  /* Keep the filter state in the URL hash (replaceState: no reload, no
+     router re-run) so a filtered results link can be shared and reloaded. */
+  function syncExpHash() {
+    const qs = expParams().toString();
+    const base = isCategory ? '#/experiences/category/' + expCatSlug(expBrowseState.category || presetSlug) : '#/experiences/search';
+    try { history.replaceState(null, '', base + (qs ? '?' + qs : '')); } catch { /* ignore */ }
+  }
+  async function loadExp(reset) {
+    const results = document.getElementById('exp-results');
+    const more = document.getElementById('exp-more');
+    if (!results) return;
+    if (reset) results.innerHTML = skeletonCards(3);
+    try {
+      const data = await api('/api/experiences?' + expParams().toString());
+      const count = document.getElementById('exp-count');
+      if (count) count.textContent = `${data.total} ${data.total === 1 ? 'experience' : 'experiences'}`;
+      const order = document.getElementById('exp-order');
+      if (order) {
+        order.textContent = expBrowseState.sort === 'price_low' ? 'Price: low to high'
+          : expBrowseState.sort === 'price_high' ? 'Price: high to low'
+          : expBrowseState.sort === 'rating' ? 'Highest rated first'
+          : expBrowseState.sort === 'newest' ? 'Newest first' : 'Recommended';
+      }
+      if (reset) {
+        if (!data.experiences.length) {
+          if (isCategory) {
+            const plural = catName.toLowerCase();
+            results.innerHTML = emptyHtml(catStyle.icon, 'No ' + plural + ' yet',
+              'No ' + plural + ' are listed in this category yet. Check back soon, or be the first host to list one.',
+              currentUser ? `<a class="btn btn-sm btn-primary" href="#/host/apply" data-exp-host-cta>Become a Host</a>` : `<a class="btn btn-sm btn-primary" href="#/experiences">Browse all experiences</a>`);
+          } else {
+            results.innerHTML = emptyHtml('search', 'No experiences found',
+              'Try different dates, a nearby town, or a wider price range.',
+              `<button class="btn btn-sm btn-primary" id="exp-clear-filters">Clear filters</button>`);
+            const clearBtn = document.getElementById('exp-clear-filters');
+            if (clearBtn) clearBtn.addEventListener('click', () => {
+              expBrowseState = { destination: '', province: '', from: '', to: '', guests: '', category: '', min: '', max: '', capacity: '', verified: false, instant: false, sort: '', page: 1 };
+              document.getElementById('exp-q').value = '';
+              document.getElementById('exp-sort').value = '';
+              chips.querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c.dataset.expCat === ''));
+              syncExpHash();
+              loadExp(true);
+            });
+          }
+        } else {
+          results.innerHTML = `<div class="product-grid">${data.experiences.map(expCard).join('')}</div>`;
+        }
+      } else {
+        const grid = results.querySelector('.product-grid');
+        if (grid) grid.insertAdjacentHTML('beforeend', data.experiences.map(expCard).join(''));
+      }
+      if (more) {
+        more.innerHTML = data.page < data.totalPages
+          ? `<button id="exp-load-more" class="btn btn-ghost btn-sm">Load more (${data.remaining} remaining)</button>` : '';
+      }
+    } catch (e) {
+      if (reset) results.innerHTML = errorHtml(e.message);
+    }
+  }
+  async function openExpFilters() {
+    const s = expBrowseState;
+    const provs = await expProvinces();
+    const overlay = document.createElement('div');
+    overlay.className = 'share-overlay';
+    overlay.innerHTML = `
+    <div class="share-sheet exp-sheet" role="dialog" aria-label="Filters">
+      <h3>Filters</h3>
+      <p class="share-sub">Prices are per night, per person, or per trip, as shown on each listing.</p>
+      <div class="field"><label for="exp-f-dest">Destination</label><input id="exp-f-dest" type="text" placeholder="Town or place" value="${esc(s.destination)}"></div>
+      ${provs.length ? `<div class="field"><label for="exp-f-prov">Province</label><select id="exp-f-prov"><option value="">All provinces</option>${provs.map((p) => `<option ${s.province === p.name ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>` : ''}
+      <div class="exp-date">
+        <div class="field"><label for="exp-f-from">From</label><input id="exp-f-from" type="date" value="${esc(s.from)}"></div>
+        <div class="field"><label for="exp-f-to">To</label><input id="exp-f-to" type="date" value="${esc(s.to)}"></div>
+      </div>
+      <div class="exp-date">
+        <div class="field"><label for="exp-f-min">Min price (ZMW)</label><input id="exp-f-min" type="number" min="0" inputmode="numeric" placeholder="0" value="${esc(s.min)}"></div>
+        <div class="field"><label for="exp-f-max">Max price (ZMW)</label><input id="exp-f-max" type="number" min="0" inputmode="numeric" placeholder="No max" value="${esc(s.max)}"></div>
+      </div>
+      <div class="field"><label>Minimum guests</label>
+        <div class="exp-guests"><span class="exp-guests-ctl">
+          <button type="button" id="exp-f-cap-minus" aria-label="Fewer guests">-</button>
+          <span class="exp-guests-count" id="exp-f-cap-count" aria-live="polite">${esc(s.capacity || '1')}</span>
+          <button type="button" id="exp-f-cap-plus" aria-label="More guests">+</button>
+        </span></div>
+      </div>
+      <label class="switch-row"><span>Verified hosts only</span><input type="checkbox" id="exp-f-verified" ${s.verified ? 'checked' : ''}><span class="switch"></span></label>
+      <label class="switch-row"><span>Instant booking only</span><input type="checkbox" id="exp-f-instant" ${s.instant ? 'checked' : ''}><span class="switch"></span></label>
+      <div class="exp-sheet-actions">
+        <button class="btn btn-ghost" id="exp-f-clear" type="button">Clear all</button>
+        <button class="btn btn-primary" id="exp-f-apply" type="button">Show results</button>
+      </div>
+    </div>`;
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    let cap = Math.max(1, Math.min(16, parseInt(s.capacity || '1', 10) || 1));
+    const capCount = overlay.querySelector('#exp-f-cap-count');
+    const setCap = (n) => {
+      cap = Math.max(1, Math.min(16, n));
+      capCount.textContent = String(cap);
+      overlay.querySelector('#exp-f-cap-minus').disabled = cap <= 1;
+      overlay.querySelector('#exp-f-cap-plus').disabled = cap >= 16;
+    };
+    overlay.querySelector('#exp-f-cap-minus').addEventListener('click', () => setCap(cap - 1));
+    overlay.querySelector('#exp-f-cap-plus').addEventListener('click', () => setCap(cap + 1));
+    setCap(cap);
+    overlay.querySelector('#exp-f-clear').addEventListener('click', () => {
+      expBrowseState = { destination: '', province: '', from: '', to: '', guests: '', category: isCategory ? catName : '', min: '', max: '', capacity: '', verified: false, instant: false, sort: expBrowseState.sort, page: 1 };
+      document.getElementById('exp-q').value = '';
+      close();
+      syncExpHash();
+      loadExp(true);
+    });
+    overlay.querySelector('#exp-f-apply').addEventListener('click', () => {
+      const from = overlay.querySelector('#exp-f-from').value;
+      const to = overlay.querySelector('#exp-f-to').value;
+      if (from && to && from > to) { toast('Check out must be after check in.', true); return; }
+      expBrowseState.destination = overlay.querySelector('#exp-f-dest').value.trim();
+      const provSel = overlay.querySelector('#exp-f-prov');
+      expBrowseState.province = provSel ? provSel.value : '';
+      expBrowseState.from = from;
+      expBrowseState.to = to;
+      expBrowseState.min = overlay.querySelector('#exp-f-min').value.trim();
+      expBrowseState.max = overlay.querySelector('#exp-f-max').value.trim();
+      expBrowseState.capacity = cap > 1 ? String(cap) : '';
+      expBrowseState.verified = overlay.querySelector('#exp-f-verified').checked;
+      expBrowseState.instant = overlay.querySelector('#exp-f-instant').checked;
+      expBrowseState.page = 1;
+      document.getElementById('exp-q').value = expBrowseState.destination;
+      close();
+      syncExpHash();
+      loadExp(true);
+    });
+    document.body.appendChild(overlay);
+  }
+}
+async function viewExperienceCategory(slug) { return viewExperienceSearch(slug); }
+
+/* ---------------- Listing detail (#/experience/:id) ---------------- */
+function expZoom(photos, startIdx) {
+  closeAvatarZoom();
+  let idx = startIdx;
+  const overlay = document.createElement('div');
+  overlay.id = 'avatar-zoom';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-label', 'Listing photos enlarged');
+  const render = () => {
+    overlay.innerHTML = `
+      <button class="avatar-zoom-close" aria-label="Close">${icon('x')}</button>
+      ${photos.length > 1 ? `<button class="exp-zoom-prev" aria-label="Previous photo">${icon('chevL')}</button><button class="exp-zoom-next" aria-label="Next photo">${icon('chevR')}</button>` : ''}
+      <img src="${esc(photos[idx].url)}" alt="Photo ${idx + 1} of ${photos.length}">`;
+    overlay.querySelector('.avatar-zoom-close').addEventListener('click', closeAvatarZoom);
+    const prev = overlay.querySelector('.exp-zoom-prev');
+    if (prev) prev.addEventListener('click', (ev) => { ev.stopPropagation(); idx = (idx - 1 + photos.length) % photos.length; render(); });
+    const next = overlay.querySelector('.exp-zoom-next');
+    if (next) next.addEventListener('click', (ev) => { ev.stopPropagation(); idx = (idx + 1) % photos.length; render(); });
+  };
+  render();
+  overlay.addEventListener('click', (ev) => { if (ev.target === overlay || ev.target.tagName === 'IMG') closeAvatarZoom(); });
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', escCloseAvatarZoom);
+}
+function expCancelSummary(policy, listingType) {
+  const when = listingType === 'stay' ? 'check in' : 'start time';
+  if (policy === 'Flexible') return `Free cancellation up to 48 hours before ${when}.`;
+  if (policy === 'Moderate') return `Free cancellation up to 7 days before ${when}.`;
+  if (policy === 'Strict') return 'No free cancellation. Cancellation fees apply as shown at booking.';
+  if (policy === 'Event') return 'Tickets are non refundable unless the event is cancelled.';
+  return policy || '';
+}
+function expDetailRows(e) {
+  const d = e.details || {};
+  const row = (label, value) => (value === undefined || value === null || value === '' ? '' : `<div class="drow"><span>${esc(label)}</span><b>${esc(String(value))}</b></div>`);
+  let rows = '';
+  if (e.listing_type === 'stay') {
+    rows += row('Property type', d.property_type);
+    rows += row('Sleeps', d.max_guests);
+    rows += row('Bedrooms', d.bedrooms);
+    rows += row('Bathrooms', d.bathrooms);
+    rows += row('Check in', d.check_in_time ? 'From ' + d.check_in_time : '');
+    rows += row('Check out', d.check_out_time ? 'By ' + d.check_out_time : '');
+    if (Array.isArray(d.units) && d.units.length) {
+      rows += `<div class="drow"><span>Rooms</span><b>${d.units.map((u) => esc(u.name) + ' · sleeps ' + u.sleeps + ' · ' + fmtZMW(u.price_per_night) + ' per night').join('<br>')}</b></div>`;
+    }
+  } else if (e.listing_type === 'vehicle') {
+    rows += row('Vehicle type', d.vehicle_type);
+    rows += row('Vehicle', [d.make, d.model, d.year].filter(Boolean).join(' '));
+    rows += row('Seats', d.seats);
+    rows += row('Driver', d.driver_included === true ? 'With driver' : (d.driver_included === false ? 'Self drive' : ''));
+    rows += row('Transmission', d.transmission);
+    rows += row('Fuel', d.fuel);
+    rows += row('Price per day', d.price_per_day ? fmtZMW(d.price_per_day) : '');
+  } else if (e.listing_type === 'tour') {
+    rows += row('Duration', d.duration_hours ? d.duration_hours + ' hours' : (d.duration_days ? d.duration_days + (d.duration_days === 1 ? ' day' : ' days') : ''));
+    rows += row('Group size', (d.group_size_min || d.group_size_max) ? `Up to ${d.group_size_max || ''} guests${d.group_size_min ? ' (min ' + d.group_size_min + ')' : ''}` : '');
+    rows += row('Meeting point', d.meeting_point);
+    rows += row('Price per person', d.price_per_person ? fmtZMW(d.price_per_person) : '');
+  } else if (e.listing_type === 'event') {
+    rows += row('Date', d.event_date ? fmtDate(d.event_date) : '');
+    rows += row('Venue', d.venue_name);
+    rows += row('Doors open', d.doors_time);
+    rows += row('Ends', d.ends_at);
+    rows += row('Capacity', d.ticket_capacity);
+    rows += row('Age limit', d.age_limit);
+  }
+  rows += row('Capacity', expCapacityText(e));
+  rows += row('Location', e.location ? e.location.chain : [e.city, e.area].filter(Boolean).join(' · '));
+  rows += row('Cancellation', e.cancellation_policy);
+  return rows;
+}
+async function viewExperience(id) {
+  app.innerHTML = `<div class="view"><div class="page"><div id="exp-box">${skeletonCards(2)}</div></div></div>`;
+  const box = document.getElementById('exp-box');
+  let data;
+  try {
+    data = await api('/api/experiences/' + id);
+  } catch (e) {
+    box.innerHTML = emptyHtml('compass', 'This listing is not available',
+      'This listing is no longer available.',
+      `<a class="btn btn-sm btn-primary" href="#/experiences">Back to Experiences</a>`);
+    return;
+  }
+  const e = data.experience;
+  if (data.suspended) {
+    box.innerHTML = emptyHtml('compass', 'This listing is not available',
+      'This listing is not available.',
+      `<a class="btn btn-sm btn-primary" href="#/experiences">Back to Experiences</a>`);
+    return;
+  }
+  const related = data.related || [];
+  const cat = e.category || {};
+  const style = expCatStyle(cat.name);
+  const host = e.host || {};
+  const today = new Date().toISOString().slice(0, 10);
+  const photos = e.photos || [];
+  const inclusions = e.inclusions || [];
+  const exclusions = e.exclusions || [];
+  const amenities = (e.details && Array.isArray(e.details.amenities)) ? e.details.amenities : [];
+  const houseRules = e.details && e.details.house_rules;
+  box.innerHTML = `
+    <a class="small" href="#/experiences">Back to Experiences</a>
+    ${e.is_owner ? `<div class="exp-owner-banner"><b>You own this listing</b>
+      ${e.approval_status ? expStatusBadge(e.approval_status) : ''}
+      <span style="margin-left:auto;display:flex;gap:8px"><a class="btn btn-sm btn-outline" href="#/host/listings/${e.id}/edit">Edit</a><a class="btn btn-sm btn-ghost" href="#/host/dashboard">Dashboard</a></span></div>` : ''}
+    ${photos.length ? `<div class="exp-gallery">
+      <img class="pd-main" id="exp-main" src="${esc(photos[0].url)}" alt="${esc(e.title)}">
+      <span class="pd-count" id="exp-count">1/${photos.length}</span>
+      ${photos.length > 1 ? `<div class="pd-thumbs">${photos.map((ph, i) => `<img class="pd-thumb ${i === 0 ? 'active' : ''}" data-exp-thumb="${esc(ph.url)}" data-exp-idx="${i}" src="${esc(ph.url)}" alt="Photo ${i + 1} of this experience" loading="lazy">`).join('')}</div>` : ''}
+    </div>` : ''}
+    <div class="exp-detail" style="margin-top:12px">
+      <div class="exp-main-col">
+        <div class="card" style="margin-top:0">
+          ${!photos.length ? `<div class="job-thumb product-thumb" style="width:100%;height:120px;border-radius:14px;margin-bottom:10px">${icon(style.icon)}</div>` : ''}
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+            <h1 class="page-title" style="font-size:22px;margin:0">${esc(e.title)}</h1>
+            <span style="display:inline-flex;gap:8px;flex:none"><button class="icon-btn" data-share-experience="${e.id}" data-title="${esc(e.title)}" aria-label="Share this experience">${icon('share')}</button><button class="icon-btn ${isSavedExperience(e.id) ? 'saved' : ''}" data-expsave="${e.id}" aria-label="Save this experience" aria-pressed="${isSavedExperience(e.id) ? 'true' : 'false'}">${icon('heart')}</button></span>
+          </div>
+          <div class="exp-price lg" style="margin-top:6px">${expPriceText(e)}</div>
+          <div class="job-meta" style="margin-top:6px">
+            <span class="badge badge-cat">${esc(cat.name || e.listing_type || '')}</span>
+            <span>${icon('pin')} ${esc(e.location ? e.location.chain : [e.city, e.area].filter(Boolean).join(' · '))}</span>
+            <span>${icon('users')} ${esc(expCapacityText(e))}</span>
+          </div>
+          <div class="pd-stats">
+            <div class="pd-stat"><span>Category</span><b>${esc(cat.name || '')}</b></div>
+            <div class="pd-stat"><span>Location</span><b>${esc(e.city || '')}</b></div>
+            <div class="pd-stat"><span>Posted</span><b>${esc(relTime(e.created_at))}</b></div>
+          </div>
+          <p style="margin-top:12px;white-space:pre-wrap">${esc(e.description)}</p>
+          ${e.view_count ? `<p class="small muted" style="margin-top:8px"><span class="job-meta" style="display:inline-flex;align-items:center;gap:4px">${icon('eye')} ${e.view_count} views</span></p>` : ''}
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">Your host</h3>
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            ${avatarHtml({ name: host.name, avatar: host.avatar }, 'md')}
+            <span><b>${esc(host.name || '')}</b>
+            <span class="small muted" style="display:block">${esc(host.city || '')}${host.member_since ? ' · Member since ' + esc(String(host.member_since).slice(0, 4)) : ''}</span>
+            ${host.verified ? '<span class="badge badge-verified">Verified host</span>' : ''}</span>
+          </div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn btn-primary" id="exp-msg-host">${icon('message')} Message host</button>
+            <button class="btn btn-outline" data-share-experience="${e.id}" data-title="${esc(e.title)}">${icon('share')} Share</button>
+            <button class="btn btn-outline" id="exp-report">${icon('shield')} Report</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">Details</h3>
+          <div class="detail-rows">${expDetailRows(e)}</div>
+          ${amenities.length ? `<div class="tagrow">${amenities.map((a) => `<span class="tag">${esc(a)}</span>`).join('')}</div>` : ''}
+        </div>
+        ${houseRules ? `<div class="card"><h3 style="margin-top:0">House rules</h3><p style="white-space:pre-wrap;margin:0">${esc(houseRules)}</p></div>` : ''}
+        ${(inclusions.length || exclusions.length) ? `<div class="card">
+          <h3 style="margin-top:0">What is included</h3>
+          ${inclusions.length ? `<ul style="margin:6px 0 0 18px;font-size:14px">${inclusions.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="small muted">Nothing listed.</p>'}
+          ${exclusions.length ? `<h3 style="margin:14px 0 0">What is not included</h3><ul style="margin:6px 0 0 18px;font-size:14px">${exclusions.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        </div>` : ''}
+        <div class="card">
+          <h3 style="margin-top:0">Cancellation policy</h3>
+          <p style="margin:0"><b>${esc(expCancelSummary(e.cancellation_policy, e.listing_type))}</b></p>
+          <p class="small muted" style="margin:6px 0 0">The host chose this policy when they listed.</p>
+        </div>
+        <div class="card"><div class="safety-card"><span class="safety-ico">${icon('shield')}</span><div><b>Safety requirements</b>
+          ${e.safety_requirements ? `<p style="white-space:pre-wrap;margin:6px 0 0;font-size:14px">${esc(e.safety_requirements)}</p>` : ''}
+          <p class="small muted" style="margin:6px 0 0">2911 Jobs is a marketplace. The host is responsible for safety on the day. Read the requirements before you book.</p>
+        </div></div></div>
+        <div class="card">
+          <h3 style="margin-top:0">Reviews</h3>
+          <p style="margin:0">No reviews yet. Reviews appear here after guests complete a booking.</p>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">Availability</h3>
+          <p style="margin:0">${e.availability_text ? esc(e.availability_text) : 'Dates are confirmed with your host when you send a booking request.'}</p>
+          <button class="btn btn-outline btn-sm" id="exp-check-dates" type="button" style="margin-top:10px">Check dates</button>
+        </div>
+        ${related.length ? `<div class="section-title"><span>More like this</span><a href="#/experiences/category/${expCatSlug(cat.name)}">See all</a></div><div class="hscroll">${related.map(expCard).join('')}</div>` : ''}
+      </div>
+      <aside class="exp-book-col">
+        <div class="card" id="exp-book-box" style="margin-top:0">
+          <div class="exp-price lg">${expPriceText(e)}</div>
+          <div class="field" style="margin-top:12px"><label for="exp-bk-date">Date</label><input id="exp-bk-date" type="date" min="${today}"></div>
+          <div class="field"><label>Guests</label>
+            <div class="exp-guests"><span class="exp-guests-ctl">
+              <button type="button" id="exp-bk-minus" aria-label="Fewer guests">-</button>
+              <span class="exp-guests-count" id="exp-bk-count" aria-live="polite">2</span>
+              <button type="button" id="exp-bk-plus" aria-label="More guests">+</button>
+            </span></div>
+          </div>
+          <button class="btn btn-exp full" type="button" disabled>Bookings open soon</button>
+          <div class="exp-soon"><b>Bookings open soon.</b>Booking requests launch in the next phase. No payment is taken here.</div>
+        </div>
+      </aside>
+    </div>
+    <div class="sticky-cta exp-sticky-cta"><button class="btn btn-exp" type="button" disabled>Bookings open soon</button></div>`;
+
+  let bkGuests = 2;
+  const bkCount = document.getElementById('exp-bk-count');
+  const bkMinus = document.getElementById('exp-bk-minus');
+  const bkPlus = document.getElementById('exp-bk-plus');
+  const setBkGuests = (n) => {
+    bkGuests = Math.max(1, Math.min(Number(e.capacity_max || 16), n));
+    bkCount.textContent = String(bkGuests);
+    bkMinus.disabled = bkGuests <= 1;
+    bkPlus.disabled = bkGuests >= Number(e.capacity_max || 16);
+  };
+  bkMinus.addEventListener('click', () => setBkGuests(bkGuests - 1));
+  bkPlus.addEventListener('click', () => setBkGuests(bkGuests + 1));
+  setBkGuests(2);
+  box.querySelectorAll('[data-exp-thumb]').forEach((t) => t.addEventListener('click', () => {
+    const main = document.getElementById('exp-main');
+    if (main) main.src = t.dataset.expThumb;
+    const cnt = document.getElementById('exp-count');
+    if (cnt) cnt.textContent = (Number(t.dataset.expIdx || 0) + 1) + '/' + photos.length;
+    box.querySelectorAll('.pd-thumb').forEach((x) => x.classList.toggle('active', x === t));
+  }));
+  const mainImg = document.getElementById('exp-main');
+  if (mainImg) mainImg.addEventListener('click', () => {
+    const cur = document.getElementById('exp-count');
+    const idx = cur ? parseInt(String(cur.textContent).split('/')[0], 10) - 1 : 0;
+    expZoom(photos, Number.isFinite(idx) ? idx : 0);
+  });
+  document.getElementById('exp-check-dates').addEventListener('click', () => {
+    const bk = document.getElementById('exp-book-box');
+    if (bk) bk.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  document.getElementById('exp-msg-host').addEventListener('click', () => {
+    if (!requireAuth('#/experience/' + id)) return;
+    toast('You can message your host once bookings open.');
+  });
+  document.getElementById('exp-report').addEventListener('click', () => {
+    toast('Reporting for Experiences opens with host onboarding.');
+  });
 }
 
 async function viewProduct(id) {
@@ -5070,6 +5970,7 @@ function viewLandingApp() {
     <div class="lp-actions">
       <a class="lp-action" href="#/jobs"><span class="lp-action-ico">${icon('briefcase')}</span><b>Find work</b><span>Jobs near you</span></a>
       <a class="lp-action" href="#/post"><span class="lp-action-ico">${icon('users')}</span><b>Hire workers</b><span>Post a job in minutes</span></a>
+      <a class="lp-action" href="#/experiences"><span class="lp-action-ico">${icon('compass')}</span><b>Explore Zambia</b><span>Tours, stays and transport</span></a>
     </div>
 
     <div class="lp-title"><h2>Popular categories</h2><a href="#/categories">See all</a></div>
@@ -7061,6 +7962,1689 @@ async function viewGiveawayDraw(id) {
   }
 }
 
+/* ================= 2911 Experiences Phase 3: host onboarding,
+   verification, listing creation (frontend) =================
+   Host-side UI only. No admin UI (Phase 5), no availability editor
+   (Phase 4), no booking or payment code: payouts are collected now and
+   stay disabled until payments are approved. No fabricated data: every
+   count, status and masked value comes from the Phase 3 API, and empty
+   states say so honestly. Backend contract: see
+   Experiences_Phase3_API.md. Deviations from the UI Spec that the
+   Phase 3 API forces are marked DEVIATION below. */
+
+const EXP_HOST_STATUS_LABELS = {
+  draft: 'Draft', submitted: 'Submitted', under_review: 'Under Review',
+  additional_info: 'Additional Info', approved: 'Approved',
+  rejected: 'Rejected', suspended: 'Suspended',
+};
+function expStatusBadge(status) {
+  const s = String(status || 'draft');
+  return `<span class="badge exp-status-${s}">${esc(EXP_HOST_STATUS_LABELS[s] || s)}</span>`;
+}
+/** Mirror of the server maskPayout rule: provider from the Zambian
+ * mobile prefix, last 3 digits only. The full reference is never
+ * rendered anywhere in the UI. */
+function expMaskPayout(method, ref) {
+  const r = String(ref || '').trim();
+  if (!r) return '';
+  const tail = r.slice(-3);
+  if (method === 'mobile_money') {
+    const d = r.replace(/\D/g, '');
+    let core = d;
+    if (core.startsWith('260')) core = core.slice(3);
+    else if (core.startsWith('0')) core = core.slice(1);
+    const p = core.slice(0, 2);
+    const prov = (p === '96' || p === '97') ? 'Airtel'
+      : (p === '76' || p === '77') ? 'MTN'
+      : (p === '95' || p === '75') ? 'Zamtel' : '';
+    return (prov ? prov + ' Mobile Money' : 'Mobile Money') + ', ending ' + tail;
+  }
+  if (method === 'bank') return 'Bank transfer, ending ' + tail;
+  return 'Ending ' + tail;
+}
+const EXP_PAYOUT_NOTICE = 'Payments are disabled at launch. This information is collected now so payouts can start when payments are approved. No money moves until then.';
+const EXP_DOC_LABELS = {
+  nrc: 'NRC', passport: 'Passport', drivers_licence: 'Driving licence',
+  tourism_licence: 'Tourism licence', selfie: 'Verification selfie', other: 'Other document',
+};
+const EXP_DOC_HINT = 'JPG, PNG, WebP or PDF, up to 2 MB';
+const EXP_LANGS = ['English', 'Bemba', 'Nyanja', 'Tonga', 'Lozi', 'Other'];
+const EXP_RESPONSE_TIMES = ['Within an hour', 'Within a few hours', 'Within a day'];
+const EXP_BANKS = ['Zanaco', 'Stanbic Bank', 'FNB Zambia', 'Absa Bank Zambia', 'Standard Chartered', 'Investrust Bank', 'Atlas Mara', 'Bank of China (Zambia)', 'Citibank Zambia', 'Indo Zambia Bank', 'First Alliance Bank', 'Other'];
+const EXP_CANCEL_POLICIES = ['Flexible', 'Moderate', 'Strict', 'Event'];
+const EXP_PROPERTY_TYPES = ['hotel', 'lodge', 'guesthouse', 'homestay', 'campsite', 'apartment'];
+const EXP_VEHICLE_TYPES = ['sedan', 'suv', 'minibus', 'bus', 'truck', 'motorbike', 'other'];
+/* The host's own host row + business links, cached so the drawer and
+ * the Become a Host CTA can point at the dashboard once approved. */
+let expHostCache = null;
+async function expHostMe(force) {
+  if (expHostCache && !force) return expHostCache;
+  try {
+    expHostCache = await api('/api/experiences/host/me');
+  } catch { expHostCache = { individual: null, businesses: [] }; }
+  return expHostCache;
+}
+/** Point every Become a Host CTA at the dashboard once the user is an
+ * approved host, otherwise at the application. */
+function expWireHostCta() {
+  const me = expHostCache;
+  if (!me) return;
+  const approved = me.individual && me.individual.status === 'approved';
+  const href = approved ? '#/host/dashboard' : '#/host/apply';
+  const label = approved ? 'My Host Dashboard' : 'Become a Host';
+  document.querySelectorAll('[data-exp-host-cta]').forEach((a) => {
+    a.setAttribute('href', href);
+    if (a.dataset.expHostCta === 'label') a.textContent = label;
+  });
+}
+/** Read a file as a data URI (used for PDF documents, which the image
+ * resizer cannot handle). */
+function expFileToDataUri(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || ''));
+    r.onerror = () => reject(new Error('Could not read that file.'));
+    r.readAsDataURL(file);
+  });
+}
+/** Document data URI: images are resized like other uploads, PDFs are
+ * read as-is. Rejects anything over the 2,500,000-char server cap. */
+async function expDocToDataUri(file) {
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+  const uri = isPdf ? await expFileToDataUri(file) : await fileToDoc(file);
+  if (uri.length > 2500000) throw new Error('That file is too large. Keep documents under about 2 MB.');
+  return uri;
+}
+/** Focus the first field named in a server 422 fields map. */
+function expFocusFirstInvalid(form, fields) {
+  if (!fields) return;
+  for (const name of Object.keys(fields)) {
+    const input = form.querySelector(`[name="${name}"]`);
+    if (input) { input.scrollIntoView({ block: 'center', behavior: 'smooth' }); input.focus(); return; }
+  }
+}
+function expLines(v) {
+  return String(v || '').split('\n').map((s) => s.trim()).filter(Boolean);
+}
+function expListingTypeForCategory(cat) {
+  const kind = cat && cat.kind;
+  if (kind === 'stay') return 'stay';
+  if (kind === 'transport') return 'vehicle';
+  if (kind === 'tour') return 'tour';
+  if (kind === 'event') return 'event';
+  return 'experience';
+}
+/** Price-unit options, with a sensible default per listing type. */
+function expPriceUnitOptions(type, current) {
+  const byType = {
+    stay: ['per_night', 'per_person'],
+    vehicle: ['per_day', 'per_trip', 'per_hour'],
+    tour: ['per_person', 'per_group', 'per_trip'],
+    event: ['per_event', 'per_person'],
+    experience: ['per_person', 'per_trip', 'per_hour', 'per_day'],
+  };
+  const list = byType[type] || Object.keys(EXP_PRICE_UNIT_LABELS);
+  const rest = Object.keys(EXP_PRICE_UNIT_LABELS).filter((u) => !list.includes(u));
+  return [...list, ...rest].map((u) =>
+    `<option value="${u}" ${current === u ? 'selected' : ''}>${esc(EXP_PRICE_UNIT_LABELS[u] || u)}</option>`).join('');
+}
+
+/* ---------------- listing form component (shared by the wizard step 5
+   and #/host/listings/new + :id/edit) ---------------- */
+let expListing = null; // one form on screen at a time
+function expListingFormHtml(prefill, opts) {
+  const p = prefill || {};
+  const d = p.details || {};
+  const type = p.listing_type || 'tour';
+  const sub = (t) => `data-exp-sub="${t}" ${t === type ? '' : 'hidden'}`;
+  return `
+  <form id="exp-listing-form" class="card" style="padding:20px">
+    <div class="wiz-steps" id="el-steps">
+      <div class="wiz-step active" data-wstep="1"><span class="n">1</span>Details</div>
+      <div class="wiz-step" data-wstep="2"><span class="n">2</span>Photos</div>
+      <div class="wiz-step" data-wstep="3"><span class="n">3</span>Review</div>
+    </div>
+    <div data-wiz="1">
+      ${opts.showHostSide ? `<div class="field"><label for="el-hostside">List as</label>
+        <select id="el-hostside" name="host_side">
+          <option value="individual">Myself (individual host)</option>
+          ${(opts.businesses || []).map((b) => `<option value="business:${b.business_id}" ${opts.businessId === b.business_id ? 'selected' : ''}>${esc(b.business_name)} (business)</option>`).join('')}
+        </select></div>` : ''}
+      <div class="field"><label for="el-title">Title *</label>
+        <input id="el-title" name="title" maxlength="120" required value="${esc(p.title || '')}" placeholder="e.g. Sunset cruise on Lake Kariba"></div>
+      <div class="field"><label for="el-category">Category *</label>
+        <select id="el-category" name="category_id" required>
+          <option value="">Choose a category</option>
+          ${(opts.categories || []).map((c) => `<option value="${c.id}" data-kind="${esc(c.kind || '')}" ${Number(p.category && p.category.id) === Number(c.id) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select></div>
+      <div class="field"><label for="el-desc">Description *</label>
+        <textarea id="el-desc" name="description" rows="4" maxlength="2000" required placeholder="Describe the place, vehicle, tour or event: what guests get, what to expect, where you meet">${esc(p.description || '')}</textarea></div>
+      <div class="form-2col">
+        <div class="field"><label for="el-city">Town *</label>
+          <select id="el-city" name="city" required>${CITIES.map((c) => `<option ${p.city === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+        <div class="field"><label for="el-area">Area</label>
+          <input id="el-area" name="area" maxlength="80" value="${esc(p.area || '')}" placeholder="e.g. Victoria Falls town"></div>
+      </div>
+      <div class="field"><label for="el-address">Address</label>
+        <input id="el-address" name="address" maxlength="200" value="${esc(p.address || '')}" placeholder="Street address (only you see this before booking)"></div>
+      <div class="form-2col">
+        <div class="field"><label for="el-price">Price (ZMW) *</label>
+          <input id="el-price" name="price_from" type="number" min="0" max="10000000" step="1" inputmode="numeric" required value="${p.price_from != null && p.price_from !== '' ? esc(String(p.price_from)) : ''}" placeholder="e.g. 450">
+          <div class="hint">Whole Kwacha, K1 to K10,000,000. Events may be free (0).</div></div>
+        <div class="field"><label for="el-unit">Price unit</label>
+          <select id="el-unit" name="price_unit">${expPriceUnitOptions(type, p.price_unit || '')}</select></div>
+      </div>
+      <div class="form-2col">
+        <div class="field"><label for="el-capacity">Guests (capacity) *</label>
+          <input id="el-capacity" name="capacity_max" type="number" min="1" step="1" inputmode="numeric" value="${esc(String(p.capacity_max || 2))}"></div>
+        <div class="field"><label for="el-cancel">Cancellation policy</label>
+          <select id="el-cancel" name="cancellation_policy">${EXP_CANCEL_POLICIES.map((c) => `<option ${p.cancellation_policy === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+      </div>
+      <div data-exp-sub-wrap>
+        <div ${sub('stay')}>
+          <div class="form-2col">
+            <div class="field"><label for="el-property-type">Property type</label>
+              <select id="el-property-type" name="property_type">${EXP_PROPERTY_TYPES.map((t) => `<option ${d.property_type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+            <div class="field"><label for="el-bedrooms">Bedrooms</label>
+              <input id="el-bedrooms" name="bedrooms" type="number" min="0" step="1" value="${esc(String(d.bedrooms != null ? d.bedrooms : ''))}"></div>
+          </div>
+          <div class="form-2col">
+            <div class="field"><label for="el-bathrooms">Bathrooms</label>
+              <input id="el-bathrooms" name="bathrooms" type="number" min="0" step="1" value="${esc(String(d.bathrooms != null ? d.bathrooms : ''))}"></div>
+            <div class="field"><label for="el-checkin">Check in from</label>
+              <input id="el-checkin" name="check_in_time" type="time" value="${esc(d.check_in_time || '')}"></div>
+          </div>
+          <div class="field"><label for="el-checkout">Check out by</label>
+            <input id="el-checkout" name="check_out_time" type="time" value="${esc(d.check_out_time || '')}"></div>
+          <div class="field"><label for="el-amenities">Amenities (one per line)</label>
+            <textarea id="el-amenities" name="amenities" rows="3" placeholder="Wi-Fi&#10;Hot water&#10;Secure parking">${esc(Array.isArray(d.amenities) ? d.amenities.join('\n') : (d.amenities || ''))}</textarea></div>
+          <div class="field"><label for="el-house-rules">House rules</label>
+            <textarea id="el-house-rules" name="house_rules" rows="3" placeholder="e.g. No smoking indoors. Quiet hours from 10pm.">${esc(d.house_rules || '')}</textarea></div>
+        </div>
+        <div ${sub('vehicle')}>
+          <div class="form-2col">
+            <div class="field"><label for="el-vehicle-type">Vehicle type</label>
+              <select id="el-vehicle-type" name="vehicle_type">${EXP_VEHICLE_TYPES.map((t) => `<option ${d.vehicle_type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+            <div class="field"><label for="el-seats">Seats</label>
+              <input id="el-seats" name="seats" type="number" min="1" step="1" value="${esc(String(d.seats != null ? d.seats : ''))}"></div>
+          </div>
+          <div class="form-2col">
+            <div class="field"><label for="el-make">Make</label><input id="el-make" name="make" value="${esc(d.make || '')}" placeholder="e.g. Toyota"></div>
+            <div class="field"><label for="el-model">Model</label><input id="el-model" name="model" value="${esc(d.model || '')}" placeholder="e.g. Land Cruiser"></div>
+          </div>
+          <div class="form-2col">
+            <div class="field"><label for="el-year">Year</label><input id="el-year" name="year" type="number" min="1900" max="2100" step="1" value="${esc(String(d.year != null ? d.year : ''))}"></div>
+            <div class="field"><label for="el-transmission">Transmission</label>
+              <select id="el-transmission" name="transmission"><option value="">Not specified</option><option value="manual" ${d.transmission === 'manual' ? 'selected' : ''}>Manual</option><option value="automatic" ${d.transmission === 'automatic' ? 'selected' : ''}>Automatic</option></select></div>
+          </div>
+          <div class="form-2col">
+            <div class="field"><label for="el-fuel">Fuel</label>
+              <select id="el-fuel" name="fuel"><option value="">Not specified</option>${['petrol', 'diesel', 'electric', 'hybrid'].map((f) => `<option ${d.fuel === f ? 'selected' : ''}>${f}</option>`).join('')}</select></div>
+            <div class="field"><label for="el-price-day">Price per day (ZMW)</label>
+              <input id="el-price-day" name="price_per_day" type="number" min="0" step="1" value="${esc(String(d.price_per_day != null ? d.price_per_day : ''))}" placeholder="Leave blank to use the main price"></div>
+          </div>
+          <label class="check-row"><span>Driver included</span><input type="checkbox" id="el-driver" name="driver_included" ${d.driver_included ? 'checked' : ''}></label>
+        </div>
+        <div ${sub('tour')}>
+          <div class="form-2col">
+            <div class="field"><label for="el-duration-h">Duration (hours)</label>
+              <input id="el-duration-h" name="duration_hours" type="number" min="0" step="0.5" value="${esc(String(d.duration_hours != null ? d.duration_hours : ''))}" placeholder="e.g. 4"></div>
+            <div class="field"><label for="el-duration-d">Duration (days)</label>
+              <input id="el-duration-d" name="duration_days" type="number" min="0" step="1" value="${esc(String(d.duration_days != null ? d.duration_days : ''))}"></div>
+          </div>
+          <div class="form-2col">
+            <div class="field"><label for="el-group-min">Smallest group</label>
+              <input id="el-group-min" name="group_size_min" type="number" min="1" step="1" value="${esc(String(d.group_size_min != null ? d.group_size_min : ''))}"></div>
+            <div class="field"><label for="el-group-max">Largest group</label>
+              <input id="el-group-max" name="group_size_max" type="number" min="1" step="1" value="${esc(String(d.group_size_max != null ? d.group_size_max : ''))}"></div>
+          </div>
+          <div class="field"><label for="el-meeting">Meeting point</label>
+            <input id="el-meeting" name="meeting_point" value="${esc(d.meeting_point || '')}" placeholder="Where guests meet you"></div>
+          <div class="field"><label for="el-price-person">Price per person (ZMW)</label>
+            <input id="el-price-person" name="price_per_person" type="number" min="0" step="1" value="${esc(String(d.price_per_person != null ? d.price_per_person : ''))}" placeholder="Leave blank to use the main price"></div>
+          <div class="field"><label for="el-itinerary">Itinerary</label>
+            <textarea id="el-itinerary" name="itinerary" rows="3" placeholder="What happens, in order">${esc(d.itinerary || '')}</textarea></div>
+        </div>
+        <div ${sub('event')}>
+          <div class="form-2col">
+            <div class="field"><label for="el-event-date">Event date *</label>
+              <input id="el-event-date" name="event_date" type="date" value="${esc(d.event_date || '')}"></div>
+            <div class="field"><label for="el-venue">Venue</label>
+              <input id="el-venue" name="venue_name" value="${esc(d.venue_name || '')}" placeholder="Venue name"></div>
+          </div>
+          <div class="form-2col">
+            <div class="field"><label for="el-doors">Doors open</label>
+              <input id="el-doors" name="doors_time" type="time" value="${esc(d.doors_time || '')}"></div>
+            <div class="field"><label for="el-ends">Ends</label>
+              <input id="el-ends" name="ends_at" type="time" value="${esc(d.ends_at || '')}"></div>
+          </div>
+          <div class="form-2col">
+            <div class="field"><label for="el-tickets">Ticket capacity</label>
+              <input id="el-tickets" name="ticket_capacity" type="number" min="0" step="1" value="${esc(String(d.ticket_capacity != null ? d.ticket_capacity : ''))}"></div>
+            <div class="field"><label for="el-age">Age limit</label>
+              <input id="el-age" name="age_limit" type="number" min="0" step="1" value="${esc(String(d.age_limit != null ? d.age_limit : ''))}" placeholder="Leave blank for all ages"></div>
+          </div>
+        </div>
+      </div>
+      <div class="field"><label for="el-inclusions">What is included (one per line)</label>
+        <textarea id="el-inclusions" name="inclusions" rows="3" placeholder="e.g. Return transport&#10;Bottled water">${esc(Array.isArray(p.inclusions) ? p.inclusions.join('\n') : '')}</textarea></div>
+      <div class="field"><label for="el-exclusions">What is not included (one per line)</label>
+        <textarea id="el-exclusions" name="exclusions" rows="3">${esc(Array.isArray(p.exclusions) ? p.exclusions.join('\n') : '')}</textarea></div>
+      <div class="field"><label for="el-safety">Safety requirements</label>
+        <textarea id="el-safety" name="safety_requirements" rows="3" placeholder="Anything guests must know to stay safe">${esc(p.safety_requirements || '')}</textarea></div>
+      ${p.approval_note && ['additional_info', 'rejected'].includes(p.approval_status) ? `<div class="exp-note-card"><b>Note from the 2911 Jobs team:</b><p style="margin:6px 0 0">${esc(p.approval_note)}</p></div>` : ''}
+    </div>
+    <div data-wiz="2" hidden>
+      <div class="field"><label for="el-photos">Photos (up to 8)</label>
+        <input id="el-photos" type="file" accept="image/*" multiple>
+        <div id="el-photo-previews" class="exp-photo-grid" style="margin-top:10px"></div>
+        <div class="hint">Real photos of the actual place, vehicle, or experience. No stock photos. Each photo under about 2 MB. The first photo is the cover.</div>
+        <p class="ferr" id="el-photo-err" hidden></p></div>
+    </div>
+    <div data-wiz="3" hidden>
+      <h3 style="margin-top:0">Review your listing</h3>
+      <div id="el-review"></div>
+    </div>
+    <div class="wiz-nav">
+      <button class="btn btn-outline" type="button" id="el-back" hidden>Back</button>
+      <button class="btn btn-primary" type="button" id="el-next">Continue</button>
+      <span id="el-actions" hidden style="display:flex;gap:8px;flex:1">
+        <button class="btn btn-outline" type="button" id="el-draft" style="flex:1">Save as Draft</button>
+        <button class="btn btn-primary" type="button" id="el-submit" style="flex:1">Submit for approval</button>
+      </span>
+    </div>
+    <p class="hint" id="el-publish-hint" hidden style="text-align:center;margin:8px 0 0">Your host application must be approved before you can publish.</p>
+  </form>`;
+}
+
+function expCollectListing(form) {
+  const v = (id) => { const el = form.querySelector('#' + id); return el ? el.value.trim() : ''; };
+  const n = (id) => { const s = v(id); return s === '' ? undefined : Number(s); };
+  const catSel = form.querySelector('#el-category');
+  const cat = (form._categories || []).find((c) => Number(c.id) === Number(catSel.value));
+  const type = expListingTypeForCategory(cat);
+  const body = {
+    listing_type: type,
+    category_id: catSel.value ? Number(catSel.value) : '',
+    title: v('el-title'), description: v('el-desc'), city: v('el-city'), area: v('el-area'),
+    address: v('el-address'),
+    price_from: v('el-price') === '' ? '' : Number(v('el-price')),
+    price_unit: v('el-unit'), capacity_max: n('el-capacity') || 1,
+    cancellation_policy: v('el-cancel'),
+    inclusions: expLines(v('el-inclusions')), exclusions: expLines(v('el-exclusions')),
+    safety_requirements: v('el-safety'),
+    details: {},
+  };
+  if (type === 'stay') {
+    body.details = {
+      property_type: v('el-property-type'), bedrooms: n('el-bedrooms'), bathrooms: n('el-bathrooms'),
+      check_in_time: v('el-checkin'), check_out_time: v('el-checkout'),
+      amenities: expLines(v('el-amenities')), house_rules: v('el-house-rules'),
+      max_guests: body.capacity_max,
+    };
+  } else if (type === 'vehicle') {
+    body.details = {
+      vehicle_type: v('el-vehicle-type'), make: v('el-make'), model: v('el-model'),
+      year: n('el-year'), seats: n('el-seats'), transmission: v('el-transmission'), fuel: v('el-fuel'),
+      driver_included: !!form.querySelector('#el-driver').checked,
+      price_per_day: n('el-price-day'),
+    };
+  } else if (type === 'tour') {
+    body.details = {
+      duration_hours: v('el-duration-h') === '' ? undefined : Number(v('el-duration-h')),
+      duration_days: n('el-duration-d'), group_size_min: n('el-group-min'), group_size_max: n('el-group-max'),
+      meeting_point: v('el-meeting'), price_per_person: n('el-price-person'), itinerary: v('el-itinerary'),
+    };
+  } else if (type === 'event') {
+    body.details = {
+      event_date: v('el-event-date'), venue_name: v('el-venue'), doors_time: v('el-doors'),
+      ends_at: v('el-ends'), ticket_capacity: n('el-tickets'), age_limit: n('el-age'),
+    };
+  }
+  const hs = form.querySelector('#el-hostside');
+  if (hs) {
+    const val = hs.value;
+    if (val.startsWith('business:')) { body.host_side = 'business'; body.business_id = Number(val.split(':')[1]); }
+    else { body.host_side = 'individual'; }
+  } else if (expListing && expListing.hostSide) {
+    body.host_side = expListing.hostSide;
+    if (expListing.businessId) body.business_id = expListing.businessId;
+  }
+  return body;
+}
+function expValidListingStep1(form) {
+  const errs = {};
+  const d = expCollectListing(form);
+  if (!d.title || d.title.length < 3) errs.title = 'Give the listing a title (3+ characters).';
+  if (!d.category_id) errs.category_id = 'Choose a category.';
+  if (!d.description || d.description.length < 10) errs.description = 'Describe the listing (10+ characters).';
+  if (!CITIES.includes(d.city)) errs.city = 'Choose a valid town.';
+  if (d.price_from === '' || !Number.isInteger(d.price_from)) errs.price_from = 'Set a price in Kwacha (whole numbers).';
+  else if (d.listing_type === 'event' ? d.price_from < 0 : d.price_from < 1) errs.price_from = d.listing_type === 'event' ? 'Set a price in Kwacha (whole numbers).' : 'Set a price of at least K1 (events may be free).';
+  else if (d.price_from > 10000000) errs.price_from = 'Price must be K10,000,000 or less.';
+  if (d.listing_type === 'event' && !d.details.event_date) errs.event_date = 'An event needs a date.';
+  showFieldErrors(form, errs);
+  if (Object.keys(errs).length) { expFocusFirstInvalid(form, errs); return false; }
+  return true;
+}
+function expListingPhotoCount() {
+  return (expListing.existingPhotos.length + expListing.addedPhotos.length);
+}
+function expRenderListingPhotos(form) {
+  const box = form.querySelector('#el-photo-previews');
+  const total = expListingPhotoCount();
+  const rows = [];
+  expListing.existingPhotos.forEach((ph, i) => {
+    rows.push(`<div class="exp-photo"><img src="${esc(ph.url)}" alt="Listing photo ${i + 1}">
+      <span class="exp-photo-tag">${i === 0 ? 'Cover' : ''}</span>
+      <span class="exp-photo-btns">
+        ${ph.id ? `<button type="button" class="btn btn-sm btn-outline" data-exp-cover="${ph.id}">Set as cover</button>
+        <button type="button" class="btn btn-sm btn-danger" data-exp-rmphoto="${ph.id}">Remove</button>`
+        : `<span class="small muted">On file</span>`}
+      </span></div>`);
+  });
+  expListing.addedPhotos.forEach((src, i) => {
+    const idx = expListing.existingPhotos.length + i;
+    rows.push(`<div class="exp-photo"><img src="${esc(src)}" alt="New photo ${i + 1}">
+      <span class="exp-photo-tag">${idx === 0 ? 'Cover' : ''}</span>
+      <span class="exp-photo-btns"><button type="button" class="btn btn-sm btn-danger" data-exp-rmadded="${i}">Remove</button></span></div>`);
+  });
+  box.innerHTML = rows.join('') || '<p class="small muted">No photos yet. Add at least one before submitting.</p>';
+  const err = form.querySelector('#el-photo-err');
+  if (err) err.hidden = true;
+  box.querySelectorAll('[data-exp-rmadded]').forEach((b) => b.addEventListener('click', () => {
+    expListing.addedPhotos.splice(Number(b.dataset.expRmadded), 1);
+    expRenderListingPhotos(form);
+  }));
+  box.querySelectorAll('[data-exp-rmphoto]').forEach((b) => b.addEventListener('click', async () => {
+    if (!expListing.id) return;
+    b.disabled = true;
+    try {
+      await api(`/api/experiences/${expListing.id}/photos/${b.dataset.expRmphoto}`, { method: 'DELETE' });
+      expListing.existingPhotos = expListing.existingPhotos.filter((p) => String(p.id) !== String(b.dataset.expRmphoto));
+      expRenderListingPhotos(form);
+      toast('Photo removed.');
+    } catch (e) { toast(e.message, true); b.disabled = false; }
+  }));
+  box.querySelectorAll('[data-exp-cover]').forEach((b) => b.addEventListener('click', async () => {
+    if (!expListing.id) return;
+    b.disabled = true;
+    try {
+      await api(`/api/experiences/${expListing.id}/photos/${b.dataset.expCover}/cover`, { method: 'POST' });
+      const ph = expListing.existingPhotos.find((p) => String(p.id) === String(b.dataset.expCover));
+      expListing.existingPhotos = expListing.existingPhotos.filter((p) => p !== ph);
+      expListing.existingPhotos.unshift(ph);
+      expListing.existingPhotos.forEach((p) => { p.isCover = false; });
+      if (ph) ph.isCover = true;
+      expRenderListingPhotos(form);
+      toast('Cover photo updated.');
+    } catch (e) { toast(e.message, true); b.disabled = false; }
+  }));
+  const input = form.querySelector('#el-photos');
+  input.onchange = async () => {
+    const files = Array.from(input.files || []);
+    if (!files.length) return;
+    const room = 8 - expListingPhotoCount();
+    if (room <= 0) { toast('Up to 8 photos per listing.', true); input.value = ''; return; }
+    const take = files.slice(0, room);
+    if (files.length > room) toast(`Only ${room} more photo${room === 1 ? '' : 's'} fit (up to 8 per listing).`);
+    try {
+      for (const f of take) {
+        const uri = await fileToDoc(f);
+        if (uri.length > 2500000) { toast('One photo was too large (over about 2 MB) and was skipped.', true); continue; }
+        expListing.addedPhotos.push(uri);
+      }
+      expRenderListingPhotos(form);
+    } catch { toast('Could not read that photo.', true); }
+    input.value = '';
+  };
+}
+async function expSaveListingDraft(form, { quiet } = {}) {
+  if (!expValidListingStep1(form)) return null;
+  const body = expCollectListing(form);
+  try {
+    let listing;
+    if (expListing.id) {
+      // PATCH refuses host-side changes, so the host side is sent only
+      // on create. The form prefills every field from the owner detail
+      // response, so a full update is sent on save.
+      const patchBody = { ...body };
+      delete patchBody.host_side;
+      delete patchBody.business_id;
+      const { listing: l } = await api('/api/experiences/' + expListing.id, { method: 'PATCH', body: JSON.stringify(patchBody) });
+      listing = l;
+    } else {
+      const createBody = { ...body };
+      const { listing: l } = await api('/api/experiences', { method: 'POST', body: JSON.stringify(createBody) });
+      listing = l;
+      expListing.id = listing.id;
+    }
+    if (expListing.addedPhotos.length) {
+      const { photos } = await api(`/api/experiences/${expListing.id}/photos`, { method: 'POST', body: JSON.stringify({ photos: expListing.addedPhotos }) });
+      (photos || []).forEach((ph) => expListing.existingPhotos.push({ id: ph.id, url: `/api/experiences/${expListing.id}/photos/${ph.id}` }));
+      expListing.addedPhotos = [];
+      expRenderListingPhotos(form);
+    }
+    expListing.saved = listing;
+    if (!quiet) toast('Listing saved as a draft.');
+    return listing;
+  } catch (e) {
+    if (e.fields) { showFieldErrors(form, e.fields); expFocusFirstInvalid(form, e.fields); }
+    toast(e.message, true);
+    return null;
+  }
+}
+function expListingReviewHtml(form) {
+  const d = expCollectListing(form);
+  const cat = (form._categories || []).find((c) => Number(c.id) === Number(d.category_id));
+  const row = (label, value, step) => `<div class="drow"><span>${esc(label)}</span><b>${esc(String(value || ''))}</b></div>`;
+  return `<div class="detail-rows">
+    ${row('Title', d.title)}${row('Category', cat ? cat.name : '')}${row('Price', d.price_from === 0 ? 'Free' : fmtZMW(d.price_from) + ' ' + (EXP_PRICE_UNIT_LABELS[d.price_unit] || ''))}
+    ${row('Town', d.city + (d.area ? ' · ' + d.area : ''))}${row('Guests', d.capacity_max)}${row('Cancellation', d.cancellation_policy)}
+    ${row('Photos', expListingPhotoCount() + ' photo' + (expListingPhotoCount() === 1 ? '' : 's'))}
+  </div>
+  <p style="margin-top:10px;white-space:pre-wrap">${esc(d.description || '')}</p>
+  <p class="small"><a href="#" data-exp-edit-step="1">Edit details</a> · <a href="#" data-exp-edit-step="2">Edit photos</a></p>`;
+}
+/** Render + wire the shared listing form into a container. opts:
+ * mode 'wizard' (inside onboarding step 5) or 'page'; prefill listing
+ * object or null; hostSide 'individual'|'business'; businessId;
+ * showHostSide bool; canPublish bool; isApprovedEdit bool;
+ * onDraftSaved(listing); submitLabel override. */
+async function expRenderListingForm(container, opts) {
+  const categories = await expCategories();
+  expListing = {
+    id: opts.prefill ? opts.prefill.id : null,
+    hostSide: opts.hostSide || 'individual',
+    businessId: opts.businessId || null,
+    existingPhotos: [],
+    addedPhotos: [],
+    saved: opts.prefill || null,
+    opts,
+  };
+  const prefill = opts.prefill || {};
+  if (prefill.cover_photo) expListing.existingPhotos.push({ id: null, url: prefill.cover_photo });
+  if (Array.isArray(prefill.photos)) {
+    expListing.existingPhotos = prefill.photos.map((ph) => ({ id: ph.id, url: ph.url, isCover: false }));
+    if (expListing.existingPhotos[0]) expListing.existingPhotos[0].isCover = true;
+  }
+  container.innerHTML = expListingFormHtml(prefill, { ...opts, categories });
+  const form = container.querySelector('#exp-listing-form');
+  form._categories = categories;
+  const catSel = form.querySelector('#el-category');
+  const syncType = () => {
+    const cat = categories.find((c) => Number(c.id) === Number(catSel.value));
+    const type = expListingTypeForCategory(cat);
+    form.querySelectorAll('[data-exp-sub]').forEach((el) => { el.hidden = el.dataset.expSub !== type; });
+    const unit = form.querySelector('#el-unit');
+    const cur = unit.value;
+    unit.innerHTML = expPriceUnitOptions(type, cur);
+    if (type === 'event') { const p = form.querySelector('#el-price'); if (p) p.min = '0'; }
+  };
+  catSel.addEventListener('change', syncType);
+  syncType();
+  expRenderListingPhotos(form);
+  let step = 1;
+  const sections = { 1: form.querySelector('[data-wiz="1"]'), 2: form.querySelector('[data-wiz="2"]'), 3: form.querySelector('[data-wiz="3"]') };
+  const back = form.querySelector('#el-back');
+  const next = form.querySelector('#el-next');
+  const actions = form.querySelector('#el-actions');
+  const draftBtn = form.querySelector('#el-draft');
+  const submitBtn = form.querySelector('#el-submit');
+  const hint = form.querySelector('#el-publish-hint');
+  function show(n) {
+    step = n;
+    Object.entries(sections).forEach(([k, el]) => { if (el) el.hidden = Number(k) !== n; });
+    form.querySelectorAll('.wiz-step').forEach((el) => {
+      const k = Number(el.dataset.wstep);
+      el.classList.toggle('active', k === n);
+      el.classList.toggle('done', k < n);
+    });
+    back.hidden = n === 1;
+    next.hidden = n === 3;
+    actions.hidden = n !== 3;
+    if (n === 3) form.querySelector('#el-review').innerHTML = expListingReviewHtml(form);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  async function goNext() {
+    if (step === 1 && !expValidListingStep1(form)) return;
+    if (step === 2) {
+      const saved = await expSaveListingDraft(form, { quiet: true });
+      if (!saved) { show(1); return; }
+    }
+    show(step + 1);
+  }
+  next.addEventListener('click', goNext);
+  back.addEventListener('click', () => show(step - 1));
+  form.addEventListener('submit', (e) => { e.preventDefault(); if (step !== 3) goNext(); });
+  form.querySelector('#el-review').addEventListener('click', (e) => {
+    const link = e.target.closest('[data-exp-edit-step]');
+    if (!link) return;
+    e.preventDefault();
+    show(Number(link.dataset.expEditStep));
+  });
+  // Submit-button state: disabled with the publish-gate hint until the
+  // host is approved (individual) or the storefront is active (business).
+  if (opts.mode === 'page') {
+    if (opts.isApprovedEdit) submitBtn.textContent = 'Publish';
+    else if (opts.submitLabel) submitBtn.textContent = opts.submitLabel;
+    if (opts.canPublish === false) {
+      submitBtn.disabled = true;
+      hint.hidden = false;
+    }
+    draftBtn.addEventListener('click', async () => {
+      const saved = await expSaveListingDraft(form);
+      if (saved) { if (opts.onDraftSaved) opts.onDraftSaved(saved); else location.hash = '#/host/listings'; }
+    });
+    submitBtn.addEventListener('click', async () => {
+      const saved = await expSaveListingDraft(form, { quiet: true });
+      if (!saved) return;
+      if (opts.isApprovedEdit) {
+        toast('Listing updated and still live.');
+        location.hash = '#/host/listings';
+        return;
+      }
+      if (expListingPhotoCount() < 1) {
+        const err = form.querySelector('#el-photo-err');
+        err.textContent = 'Add at least one photo before submitting.';
+        err.hidden = false;
+        show(2);
+        return;
+      }
+      submitBtn.disabled = true;
+      try {
+        await api(`/api/experiences/${saved.id}/submit`, { method: 'POST' });
+        toast('Listing sent for approval. The 2911 Jobs team will review it.');
+        location.hash = '#/host/listings';
+      } catch (e) {
+        if (e.fields) { showFieldErrors(form, e.fields); expFocusFirstInvalid(form, e.fields); }
+        toast(e.message, true);
+        submitBtn.disabled = false;
+      }
+    });
+  } else {
+    // Wizard mode: the review step has one action, saving the first
+    // listing as a draft so onboarding can continue.
+    draftBtn.textContent = 'Save listing draft';
+    submitBtn.remove();
+    draftBtn.addEventListener('click', async () => {
+      const saved = await expSaveListingDraft(form);
+      if (saved) {
+        if (opts.onDraftSaved) opts.onDraftSaved(saved);
+        toast('First listing saved as a draft.');
+      }
+    });
+  }
+  show(opts.startStep || 1);
+  return expListing;
+}
+
+/* ---------------- payout form (shared by wizard step 6 and #/host/payouts) ---------------- */
+function expPayoutFieldsHtml(current) {
+  const c = current || {};
+  const isBank = c.payout_method === 'bank';
+  return `
+  <div class="field"><label for="exp-pay-method">Payout method *</label>
+    <select id="exp-pay-method" name="payout_method">
+      <option value="">Choose how you want to be paid</option>
+      <option value="mobile_money" ${c.payout_method === 'mobile_money' ? 'selected' : ''}>Mobile Money (MTN, Airtel, Zamtel)</option>
+      <option value="bank" ${c.payout_method === 'bank' ? 'selected' : ''}>Bank Transfer</option>
+    </select></div>
+  <div id="exp-pay-momo" ${isBank ? 'hidden' : ''}>
+    <div class="field"><label for="exp-pay-number">Mobile money number *</label>
+      <input id="exp-pay-number" name="payout_number" type="tel" inputmode="tel" value="${esc(c.payout_number || '')}" placeholder="e.g. 0971234567">
+      <div class="hint">This number is seen only by the 2911 Jobs team, not by guests.</div></div>
+    <div class="field"><label for="exp-pay-name">Account name *</label>
+      <input id="exp-pay-name" name="payout_name" value="${esc(c.payout_name || '')}" placeholder="Name on the mobile money account"></div>
+  </div>
+  <div id="exp-pay-bank" ${isBank ? '' : 'hidden'}>
+    <div class="field"><label for="exp-pay-bankname">Bank *</label>
+      <select id="exp-pay-bankname" name="bank_name">${EXP_BANKS.map((b) => `<option ${c.bank_name === b ? 'selected' : ''}>${b}</option>`).join('')}</select></div>
+    <div class="field"><label for="exp-pay-acct">Account number *</label>
+      <input id="exp-pay-acct" name="bank_account" inputmode="numeric" value="${esc(c.bank_account || '')}" placeholder="Account number"></div>
+    <div class="field"><label for="exp-pay-acctname">Account name *</label>
+      <input id="exp-pay-acctname" name="bank_account_name" value="${esc(c.bank_account_name || '')}" placeholder="Name on the account"></div>
+    <div class="field"><label for="exp-pay-branch">Branch</label>
+      <input id="exp-pay-branch" name="bank_branch" value="${esc(c.bank_branch || '')}" placeholder="Branch name"></div>
+  </div>
+  <div class="momo-note">${EXP_PAYOUT_NOTICE}</div>
+  <label class="check-row"><span>I confirm the payout details are mine and correct.</span><input type="checkbox" id="exp-pay-confirm" name="payout_confirm"></label>`;
+}
+function expWirePayoutMethod(scope) {
+  const sel = scope.querySelector('#exp-pay-method');
+  const momo = scope.querySelector('#exp-pay-momo');
+  const bank = scope.querySelector('#exp-pay-bank');
+  if (!sel) return;
+  sel.addEventListener('change', () => {
+    const isBank = sel.value === 'bank';
+    if (momo) momo.hidden = isBank;
+    if (bank) bank.hidden = !isBank;
+  });
+}
+/** Validate + pack the payout fields into the single payout_reference
+ * the Phase 3 API stores. DEVIATION: the backend keeps one reference
+ * string, so bank name, branch and account name are packed into it
+ * (account number last, so the masked "ending 123" still shows the
+ * account number). The owner re-enters the full details to change them. */
+function expCollectPayout(scope) {
+  const v = (id) => { const el = scope.querySelector('#' + id); return el ? el.value.trim() : ''; };
+  const method = v('exp-pay-method');
+  const errs = {};
+  if (!method) errs.payout_method = 'Choose how you want to be paid.';
+  let reference = '';
+  if (method === 'mobile_money') {
+    const num = v('exp-pay-number');
+    const name = v('exp-pay-name');
+    if (!/^\d{9,12}$/.test(num.replace(/[\s+]/g, '').replace(/^260/, '0'))) errs.payout_number = 'Enter a Zambian mobile number, e.g. 0971234567.';
+    if (!name) errs.payout_name = 'Add the name on the account.';
+    reference = name && num ? `${name} | ${num}` : num;
+  } else if (method === 'bank') {
+    const bank = v('exp-pay-bankname');
+    const acct = v('exp-pay-acct');
+    const name = v('exp-pay-acctname');
+    const branch = v('exp-pay-branch');
+    if (!acct) errs.bank_account = 'Add your account number.';
+    if (!name) errs.bank_account_name = 'Add the name on the account.';
+    reference = [bank, branch, name, acct].filter(Boolean).join(' | ');
+  }
+  const confirmed = !!scope.querySelector('#exp-pay-confirm').checked;
+  if (!confirmed) errs.payout_confirm = 'Confirm the payout details are yours and correct.';
+  return { method, reference, errs };
+}
+
+/* ---------------- host onboarding wizard (#/host/apply, #/host/onboarding) ---------------- */
+const EXP_WIZ_STEPS = ['Account type', 'Profile', 'Location', 'Documents', 'First listing', 'Payout', 'Review'];
+let expWiz = null;
+function expWizCollectStep(n) {
+  const form = document.getElementById('exp-wiz-form');
+  if (!form) return {};
+  const v = (name) => { const el = form.querySelector(`[name="${name}"]`); return el ? el.value.trim() : ''; };
+  if (n === 2) {
+    const langs = [...form.querySelectorAll('[name="languages"]:checked')].map((c) => c.value);
+    const other = v('language_other');
+    if (langs.includes('Other') && other && !langs.includes(other)) langs.push(other);
+    return { display_name: v('display_name'), bio: v('bio'), city: v('city'), languages: langs, response_time: v('response_time') };
+  }
+  if (n === 3) {
+    const provinces = [...form.querySelectorAll('[name="provinces"]:checked')].map((c) => c.value);
+    return { city: v('city'), area: v('area'), provinces, meeting_point: v('meeting_point') };
+  }
+  return {};
+}
+async function expWizSaveStep(n) {
+  if (!expWiz || expWiz.editMode) {
+    // Approved hosts edit through PATCH, not the apply endpoint.
+    if (expWiz && expWiz.editMode && (n === 2 || n === 3)) {
+      const body = expWizCollectStep(n);
+      if (!Object.keys(body).length) return true;
+      try { await api('/api/experiences/host/me', { method: 'PATCH', body: JSON.stringify(body) }); return true; }
+      catch (e) { toast(e.message, true); return false; }
+    }
+    return true;
+  }
+  if (n === 1 || n === 4 || n === 5 || n === 7) return true;
+  const body = expWizCollectStep(n);
+  if (!Object.keys(body).length) return true;
+  try {
+    const { host } = await api('/api/experiences/host/apply', { method: 'POST', body: JSON.stringify({ account_type: 'individual', ...body }) });
+    expWiz.host = host;
+    return true;
+  } catch (e) {
+    if (e.fields) { const form = document.getElementById('exp-wiz-form'); showFieldErrors(form, e.fields); expFocusFirstInvalid(form, e.fields); }
+    toast(e.message, true);
+    return false;
+  }
+}
+function expWizStepHtml(n) {
+  const w = expWiz;
+  const h = w.host || {};
+  const d = w.data;
+  if (n === 1) {
+    const biz = w.businesses || [];
+    const opted = (w.meBusinesses || []).find((b) => b.experiences_status === 'active');
+    return `<form id="exp-wiz-form">
+      <h3 style="margin-top:0">Are you listing as an individual or a business?</h3>
+      <div class="seg" id="exp-wiz-acct">
+        <button type="button" class="seg-btn ${w.accountType === 'individual' ? 'active' : ''}" data-acct="individual">Individual</button>
+        <button type="button" class="seg-btn ${w.accountType === 'business' ? 'active' : ''}" data-acct="business" ${biz.length ? '' : 'disabled'}>Business</button>
+      </div>
+      <p class="hint">Individuals list rooms, vehicles, tours, and experiences under their own name. Businesses list under a registered business name, with staff and branches.</p>
+      <div id="exp-wiz-bizslot" ${w.accountType === 'business' ? '' : 'hidden'}>
+        <div class="field"><label for="exp-wiz-biz">Your business</label>
+          <select id="exp-wiz-biz" name="business_id">
+            ${biz.map((b) => `<option value="${b.id}" ${((opted && opted.business_id === b.id) || (!opted && w.businessId === b.id)) ? 'selected' : ''}>${esc(b.name)} · ${esc(b.city)}</option>`).join('')}
+          </select></div>
+        ${opted ? `<p class="small"><b>${esc(opted.business_name)}</b> is already an Experiences host. <a href="#/host/business?business=${opted.business_id}">Go to the business dashboard</a>.</p>` : ''}
+        <p class="small"><a href="#/business/apply">Use a different business</a> (open a new storefront first, then come back here).</p>
+      </div>
+      ${biz.length ? '' : `<p class="hint">No approved storefront yet. To list as a business, <a href="#/business/apply">open a storefront</a> first.</p>`}
+    </form>`;
+  }
+  if (n === 2) {
+    const langs = Array.isArray(h.languages) ? h.languages : [];
+    return `<form id="exp-wiz-form">
+      <h3 style="margin-top:0">Your host profile</h3>
+      <div class="field"><label for="exp-wiz-name">Display name *</label>
+        <input id="exp-wiz-name" name="display_name" value="${esc(d.display_name || h.display_name || (currentUser && currentUser.name) || '')}" required></div>
+      <div class="field"><label for="exp-wiz-bio">Bio *</label>
+        <textarea id="exp-wiz-bio" name="bio" rows="4" required placeholder="Tell guests who you are and what you offer.">${esc(d.bio || h.bio || '')}</textarea>
+        <div class="hint">At least 20 characters.</div></div>
+      <div class="field"><label>Profile photo</label>
+        <p class="small" style="margin:0">${currentUser && currentUser.avatar ? 'Your profile photo is set.' : 'No profile photo yet.'} Change it from <a href="#/profile/edit">Profile, Edit Profile</a>.</p></div>
+      <div class="field"><label for="exp-wiz-town">Town *</label>
+        <select id="exp-wiz-town" name="city" required>${CITIES.map((c) => `<option ${(d.city || h.city || (currentUser && currentUser.city)) === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      <div class="field"><label>Languages you speak</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${EXP_LANGS.map((l) => `<label class="check-row" style="flex:1 1 40%"><span>${l}</span><input type="checkbox" name="languages" value="${l}" ${langs.includes(l) ? 'checked' : ''}></label>`).join('')}</div>
+        <input name="language_other" style="margin-top:8px" placeholder="Other language (if you ticked Other)" value="${esc(langs.find((l) => !EXP_LANGS.includes(l)) || '')}"></div>
+      <div class="field"><label for="exp-wiz-resp">How fast do you reply?</label>
+        <select id="exp-wiz-resp" name="response_time">${EXP_RESPONSE_TIMES.map((t) => `<option ${(d.response_time || h.response_time) === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    </form>`;
+  }
+  if (n === 3) {
+    const provs = w.provinces || [];
+    const selected = Array.isArray(h.provinces) ? h.provinces : [];
+    return `<form id="exp-wiz-form">
+      <h3 style="margin-top:0">Where do you operate?</h3>
+      <div class="field"><label for="exp-wiz-op-town">Operating town *</label>
+        <select id="exp-wiz-op-town" name="city" required>${CITIES.map((c) => `<option ${(d.city || h.city || (currentUser && currentUser.city)) === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      <div class="field"><label for="exp-wiz-area">Area or neighbourhood</label>
+        <input id="exp-wiz-area" name="area" value="${esc(d.area || h.area || '')}" placeholder="e.g. Kabulonga"></div>
+      ${provs.length ? `<div class="field"><label>Provinces covered</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${provs.map((p) => `<label class="check-row" style="flex:1 1 40%"><span>${esc(p.name)}</span><input type="checkbox" name="provinces" value="${esc(p.name)}" ${selected.includes(p.name) ? 'checked' : ''}></label>`).join('')}</div></div>` : ''}
+      <div class="field"><label for="exp-wiz-meet">Meeting point or address for guests</label>
+        <input id="exp-wiz-meet" name="meeting_point" value="${esc(d.meeting_point || h.meeting_point || '')}" placeholder="Where guests meet you">
+        <div class="hint">This is shown to guests only after a booking is confirmed, not on the public listing. The exact address is never shown publicly before booking.</div></div>
+    </form>`;
+  }
+  if (n === 4) {
+    const docs = w.docs || [];
+    const kinds = new Set(docs.map((x) => x.kind));
+    const hasId = kinds.has('nrc') || kinds.has('passport');
+    const hasSelfie = kinds.has('selfie');
+    const row = (kind, label, note) => {
+      const mine = docs.filter((x) => x.kind === kind);
+      return `<div class="exp-doc-row">
+        <div style="flex:1;min-width:0"><b>${label}</b>
+          ${note ? `<span class="small muted" style="display:block">${note}</span>` : ''}
+          ${mine.length ? mine.map((x) => `<span class="small" style="display:block">${esc(x.name || EXP_DOC_LABELS[kind])} · ${esc(x.status)}${x.status === 'pending' ? ` <button type="button" class="btn btn-sm btn-ghost" data-exp-doc-rm="${x.id}">Remove</button>` : ''}</span>`).join('') : '<span class="small muted" style="display:block">Not uploaded yet</span>'}
+        </div>
+        <label class="btn btn-sm btn-outline" style="flex:none">Upload<input type="file" accept="image/*,.pdf" data-exp-doc-kind="${kind}" hidden></label>
+      </div>`;
+    };
+    return `<form id="exp-wiz-form">
+      <h3 style="margin-top:0">Verify your identity and your listing</h3>
+      <p class="hint">Documents are seen only by the 2911 Jobs team, not by guests. ${EXP_DOC_HINT}.</p>
+      ${row('nrc', 'NRC *', 'Or a passport below. At least one identity document is required.')}
+      ${row('passport', 'Passport', 'An alternative to the NRC.')}
+      <div style="margin:12px 0">${selfieGuideHtml()}</div>
+      ${row('selfie', 'Verification selfie *', 'A clear photo of only you, face to the camera, in good light.')}
+      ${(currentUser && currentUser.selfie_status && currentUser.selfie_status !== 'approved') ? `<p class="small">Your account selfie is not approved yet. Upload one from <a href="#/profile/edit">Profile, Edit Profile</a> too.</p>` : ''}
+      ${row('drivers_licence', 'Driving licence', 'Required for transport listings.')}
+      ${row('tourism_licence', 'Tourism licence or permit', 'Optional, for tours, adventure, and cultural activities that need one.')}
+      ${row('other', 'Proof of ownership or venue permission', 'For stays: proof you may let the property. For events: venue permission. Optional.')}
+      <p class="ferr" id="exp-wiz-doc-err" hidden></p>
+      <p class="small muted">Required before you can continue: an NRC or passport, and a verification selfie.</p>
+      <p class="small" id="exp-wiz-doc-state">${hasId && hasSelfie ? 'Identity document and selfie on file.' : 'Still needed: ' + [!hasId ? 'NRC or passport' : '', !hasSelfie ? 'verification selfie' : ''].filter(Boolean).join(' and ') + '.'}</p>
+    </form>`;
+  }
+  if (n === 5) {
+    return `<div id="exp-wiz-listing"><p class="small muted">Loading the listing form…</p></div>
+      <p class="small" id="exp-wiz-listing-state">${w.listingId ? 'First listing draft saved.' : 'Save your first listing as a draft to continue.'}</p>`;
+  }
+  if (n === 6) {
+    return `<form id="exp-wiz-form">
+      <h3 style="margin-top:0">How do you want to be paid?</h3>
+      ${expPayoutFieldsHtml(w.payout)}
+      <p class="small muted">Your payout details are saved with your application. No money moves until payments are approved.</p>
+    </form>`;
+  }
+  // Step 7: review.
+  const docs = w.docs || [];
+  const docCounts = {};
+  docs.forEach((x) => { docCounts[x.kind] = docCounts[x.kind] || []; docCounts[x.kind].push(x.name || EXP_DOC_LABELS[x.kind]); });
+  const l = w.listingSummary || {};
+  const payoutMasked = w.payout && w.payout.method ? expMaskPayout(w.payout.method, w.payout.reference) : (h.payout_reference_masked || '');
+  const editLink = (step) => `<a href="#" data-exp-wiz-goto="${step}">Edit</a>`;
+  return `<form id="exp-wiz-form">
+    <h3 style="margin-top:0">Review and submit</h3>
+    <div class="detail-rows">
+      <div class="drow"><span>Account type</span><b>Individual ${editLink(1)}</b></div>
+      <div class="drow"><span>Display name</span><b>${esc(d.display_name || h.display_name || '')} ${editLink(2)}</b></div>
+      <div class="drow"><span>Town</span><b>${esc(d.city || h.city || '')} ${editLink(2)}</b></div>
+      <div class="drow"><span>Operating area</span><b>${esc((d.area || h.area || '') + (d.meeting_point || h.meeting_point ? ' · ' + (d.meeting_point || h.meeting_point) : ''))} ${editLink(3)}</b></div>
+      <div class="drow"><span>Documents</span><b>${Object.keys(docCounts).length ? Object.entries(docCounts).map(([k, names]) => esc(EXP_DOC_LABELS[k] || k) + ' (' + names.length + '): ' + names.map((x) => esc(x)).join(', ')).join('; ') : 'None yet'} ${editLink(4)}</b></div>
+      <div class="drow"><span>First listing</span><b>${l.title ? esc(l.title) + ' · ' + esc(l.category || '') + ' · ' + fmtZMW(l.price_from || 0) + ' · ' + (l.photos || 0) + ' photo' + ((l.photos || 0) === 1 ? '' : 's') : 'No listing draft yet'} ${editLink(5)}</b></div>
+      ${l.title && l.description ? `<div class="drow"><span>Listing description</span><b>${esc(String(l.description).slice(0, 120))}</b></div>` : ''}
+      <div class="drow"><span>Payout</span><b>${esc(payoutMasked || 'Not set')} ${editLink(6)}</b></div>
+    </div>
+    <label class="check-row" style="margin-top:12px"><span>I confirm the information is true and I agree to the <a href="#/terms">host terms</a>.</span><input type="checkbox" id="exp-wiz-terms" name="terms"></label>
+    <p class="ferr" id="exp-wiz-submit-err" hidden></p>
+  </form>`;
+}
+
+async function viewHostApply() {
+  if (!requireAuth('#/host/apply')) return;
+  const q = new URLSearchParams((location.hash.split('?')[1] || ''));
+  const entryStep = Math.min(7, Math.max(1, parseInt(q.get('step') || '1', 10) || 1));
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading your host application…')}</div></div>`;
+  let me;
+  try { me = await expHostMe(true); } catch (e) {
+    app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
+    return;
+  }
+  const h = me.individual;
+  const status = h ? h.status : null;
+  // A live application goes to the dashboard, which shows the status and
+  // the next action. Drafts and additional-info resume here; approved
+  // hosts may edit their profile; a direct step-4 entry lets a host add
+  // documents while under review.
+  const docsOnly = entryStep === 4 && ['submitted', 'under_review'].includes(status);
+  if (h && ['submitted', 'under_review', 'rejected', 'suspended'].includes(status) && !docsOnly) {
+    toast('Your host application is ' + (EXP_HOST_STATUS_LABELS[status] || status) + '.');
+    location.hash = '#/host/dashboard';
+    return;
+  }
+  let businesses = [];
+  try {
+    const mine = await api('/api/businesses/mine');
+    businesses = (mine.businesses || []).filter((b) => b.status === 'active');
+  } catch { /* individual only */ }
+  const provinces = await expProvinces();
+  let docs = [];
+  try { const d = await api('/api/experiences/host/documents'); docs = d.documents || []; } catch { /* none yet */ }
+  let firstListing = null;
+  try {
+    const dl = await api('/api/experiences/host/listings?limit=20');
+    // The host list is newest first; the first listing is the wizard's.
+    firstListing = (dl.listings || [])[0] || null;
+    if (firstListing) {
+      // The owner detail serves non-active listings in full, so a draft
+      // first listing prefills completely (same as the edit page); the
+      // form sends full updates on save, so partial prefill would wipe
+      // fields the host did not touch.
+      try {
+        const det = await api('/api/experiences/' + firstListing.id);
+        if (det.experience) firstListing = { ...firstListing, ...(det.experience || {}) };
+      } catch { /* keep the host-list shape */ }
+    }
+  } catch { /* no listings yet */ }
+  expWiz = {
+    step: docsOnly ? 4 : (status === 'approved' ? entryStep : (h ? entryStep : 1)),
+    accountType: 'individual',
+    businessId: businesses.length ? businesses[0].id : null,
+    businesses, meBusinesses: me.businesses || [],
+    provinces, docs, host: h, data: {},
+    listingId: firstListing ? firstListing.id : null,
+    listingSummary: firstListing ? {
+      title: firstListing.title, category: firstListing.category ? firstListing.category.name : '',
+      price_from: firstListing.price_from, photos: firstListing.photo_count || (firstListing.photos ? firstListing.photos.length : 0),
+      description: firstListing.description || '',
+    } : null,
+    payout: h && h.payout_method ? { method: h.payout_method, reference: '' } : null,
+    editMode: status === 'approved',
+    resubmit: status === 'additional_info',
+    docsOnly,
+    firstListing,
+  };
+  if (h) {
+    expWiz.data = {
+      display_name: h.display_name, bio: h.bio, city: h.city, area: h.area,
+      meeting_point: h.meeting_point, response_time: h.response_time,
+    };
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/experiences">Back to Experiences</a>
+    <h1 class="page-title">${expWiz.editMode ? 'Edit host profile' : 'Become a Host'}</h1>
+    <p class="page-sub">${expWiz.editMode ? 'Update your host profile. Changes save when you move between steps.' : 'List a room, a vehicle, a tour, or an experience. You set the price and the dates.'}</p>
+    ${docsOnly ? '' : `<div class="wiz-steps" id="exp-wiz-steps">
+      ${EXP_WIZ_STEPS.map((s, i) => `<div class="wiz-step" data-wstep="${i + 1}"><span class="n">${i + 1}</span>${s}</div>`).join('')}
+    </div>`}
+    <div class="card" id="exp-wiz-body" style="padding:20px"></div>
+    <div class="wiz-nav" id="exp-wiz-nav">
+      <button class="btn btn-outline" type="button" id="exp-wiz-back">Back</button>
+      <button class="btn btn-primary" type="button" id="exp-wiz-next">Next</button>
+    </div>
+    <p style="text-align:center;margin-top:10px"><button class="btn btn-ghost btn-sm" type="button" id="exp-wiz-savedraft">Save draft</button></p>
+  </div></div>`;
+  const body = document.getElementById('exp-wiz-body');
+  const nav = document.getElementById('exp-wiz-nav');
+  const backBtn = document.getElementById('exp-wiz-back');
+  const nextBtn = document.getElementById('exp-wiz-next');
+  const saveDraftBtn = document.getElementById('exp-wiz-savedraft');
+  function showStep(n) {
+    expWiz.step = n;
+    document.querySelectorAll('#exp-wiz-steps .wiz-step').forEach((el) => {
+      const k = Number(el.dataset.wstep);
+      el.classList.toggle('active', k === n);
+      el.classList.toggle('done', k < n);
+    });
+    body.innerHTML = expWizStepHtml(n);
+    backBtn.hidden = n === 1 && !expWiz.docsOnly;
+    backBtn.textContent = n === 1 ? 'Back to Experiences' : 'Back';
+    nextBtn.textContent = expWiz.docsOnly ? 'Done' : n === 7 ? (expWiz.editMode ? 'Save changes' : 'Submit for review') : n === 5 ? 'Continue to payout' : n === 6 ? 'Review' : 'Next';
+    nextBtn.disabled = n === 5 && !expWiz.listingId && !expWiz.docsOnly;
+    saveDraftBtn.style.display = expWiz.docsOnly ? 'none' : '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    wireStep(n);
+  }
+  function wireStep(n) {
+    if (n === 1) {
+      const seg = document.getElementById('exp-wiz-acct');
+      seg.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-acct]');
+        if (!btn || btn.disabled) return;
+        expWiz.accountType = btn.dataset.acct;
+        seg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b === btn));
+        document.getElementById('exp-wiz-bizslot').hidden = expWiz.accountType !== 'business';
+      });
+      const bizSel = document.getElementById('exp-wiz-biz');
+      if (bizSel) bizSel.addEventListener('change', () => { expWiz.businessId = Number(bizSel.value); });
+    }
+    if (n === 4) wireDocStep();
+    if (n === 5) {
+      const slot = document.getElementById('exp-wiz-listing');
+      expRenderListingForm(slot, {
+        mode: 'wizard', prefill: expWiz.firstListing, hostSide: 'individual',
+        onDraftSaved: (listing) => {
+          expWiz.listingId = listing.id;
+          expWiz.firstListing = listing;
+          expWiz.listingSummary = {
+            title: listing.title, category: listing.category ? listing.category.name : '',
+            price_from: listing.price_from, photos: listing.photo_count || 0, description: listing.description || '',
+          };
+          const st = document.getElementById('exp-wiz-listing-state');
+          if (st) st.textContent = 'First listing draft saved.';
+          nextBtn.disabled = false;
+        },
+      }).catch((e) => { slot.innerHTML = errorHtml(e.message); });
+    }
+    if (n === 6) expWirePayoutMethod(body);
+    if (n === 7) {
+      body.querySelectorAll('[data-exp-wiz-goto]').forEach((a) => a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        showStep(Number(a.dataset.expWizGoto));
+      }));
+    }
+  }
+  async function wireDocStep() {
+    const form = document.getElementById('exp-wiz-form');
+    form.querySelectorAll('[data-exp-doc-kind]').forEach((input) => input.addEventListener('change', async () => {
+      const file = (input.files || [])[0];
+      if (!file) return;
+      const kind = input.dataset.expDocKind;
+      input.disabled = true;
+      try {
+        const image = await expDocToDataUri(file);
+        const { document: doc } = await api('/api/experiences/host/documents', { method: 'POST', body: JSON.stringify({ kind, image, host_side: 'individual' }) });
+        const mine = await api('/api/experiences/host/documents');
+        expWiz.docs = mine.documents || [];
+        // Keep the file name locally: the API never returns file names.
+        const saved = expWiz.docs.find((x) => x.id === doc.id);
+        if (saved) saved.name = file.name;
+        toast('Document uploaded. The 2911 Jobs team will review it.');
+        showStep(4);
+      } catch (e) { toast(e.message, true); input.disabled = false; }
+    }));
+    form.querySelectorAll('[data-exp-doc-rm]').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        await api('/api/experiences/host/documents/' + b.dataset.expDocRm, { method: 'DELETE' });
+        expWiz.docs = expWiz.docs.filter((x) => String(x.id) !== String(b.dataset.expDocRm));
+        toast('Document removed.');
+        showStep(4);
+      } catch (e) { toast(e.message, true); b.disabled = false; }
+    }));
+  }
+  function validStep(n) {
+    const form = document.getElementById('exp-wiz-form');
+    if (n === 2) {
+      const errs = {};
+      const data = expWizCollectStep(2);
+      if (!data.display_name) errs.display_name = 'Add a display name.';
+      if (!data.bio || data.bio.length < 20) errs.bio = 'Write a bio of at least 20 characters.';
+      if (!data.city) errs.city = 'Add your town or city.';
+      showFieldErrors(form, errs);
+      if (Object.keys(errs).length) { expFocusFirstInvalid(form, errs); return false; }
+      expWiz.data = { ...expWiz.data, ...data };
+      return true;
+    }
+    if (n === 3) {
+      const errs = {};
+      const data = expWizCollectStep(3);
+      if (!data.city) errs.city = 'Add your operating town.';
+      showFieldErrors(form, errs);
+      if (Object.keys(errs).length) { expFocusFirstInvalid(form, errs); return false; }
+      expWiz.data = { ...expWiz.data, ...data };
+      return true;
+    }
+    if (n === 4) {
+      const kinds = new Set((expWiz.docs || []).map((x) => x.kind));
+      const ok = (kinds.has('nrc') || kinds.has('passport')) && kinds.has('selfie');
+      const err = document.getElementById('exp-wiz-doc-err');
+      if (!ok) {
+        if (err) { err.textContent = 'Upload your NRC or passport, and a verification selfie, to continue.'; err.hidden = false; }
+        toast('Upload your NRC or passport, and a verification selfie, to continue.', true);
+        return false;
+      }
+      return true;
+    }
+    if (n === 5) {
+      if (!expWiz.listingId) { toast('Save your first listing as a draft first.', true); return false; }
+      return true;
+    }
+    if (n === 6) {
+      const { method, reference, errs } = expCollectPayout(form);
+      showFieldErrors(form, errs);
+      if (Object.keys(errs).length) { expFocusFirstInvalid(form, errs); return false; }
+      expWiz.payout = { method, reference };
+      return true;
+    }
+    return true;
+  }
+  async function savePayoutStep() {
+    if (!expWiz.payout) return true;
+    try {
+      if (expWiz.editMode) await api('/api/experiences/host/me', { method: 'PATCH', body: JSON.stringify({ payout_method: expWiz.payout.method, payout_reference: expWiz.payout.reference }) });
+      else await api('/api/experiences/host/apply', { method: 'POST', body: JSON.stringify({ account_type: 'individual', payout_method: expWiz.payout.method, payout_reference: expWiz.payout.reference }) });
+      return true;
+    } catch (e) { toast(e.message, true); return false; }
+  }
+  backBtn.addEventListener('click', () => {
+    if (expWiz.docsOnly) { location.hash = '#/host/dashboard'; return; }
+    if (expWiz.step === 1) { location.hash = '#/experiences'; return; }
+    showStep(expWiz.step - 1);
+  });
+  saveDraftBtn.addEventListener('click', async () => {
+    if (expWiz.step === 6) {
+      if (!validStep(6)) return;
+      if (!(await savePayoutStep())) return;
+    } else if (!validStep(expWiz.step) || !(await expWizSaveStep(expWiz.step))) return;
+    toast('Draft saved.');
+  });
+  nextBtn.addEventListener('click', async () => {
+    if (expWiz.docsOnly) { location.hash = '#/host/dashboard'; return; }
+    const n = expWiz.step;
+    if (n === 1 && expWiz.accountType === 'business') {
+      const bizId = expWiz.businessId;
+      if (!bizId) { toast('Choose your business first.', true); return; }
+      nextBtn.disabled = true;
+      try {
+        const { link } = await api('/api/experiences/host/business', { method: 'POST', body: JSON.stringify({ business_id: bizId }) });
+        const biz = (expWiz.businesses || []).find((b) => b.id === bizId);
+        await expHostMe(true);
+        body.innerHTML = `<div style="text-align:center;padding:12px 0">
+          <h3 style="margin-top:0">${esc(biz ? biz.name : 'Your business')} is now an Experiences host</h3>
+          <p>Your business can now list rooms, vehicles, tours, and experiences. Staff and branches are managed from the business dashboard.</p>
+          <div class="btn-row"><a class="btn btn-primary" href="#/host/business?business=${bizId}">Go to business dashboard</a>
+          <a class="btn btn-outline" href="#/host/listings/new?business=${bizId}">Create a listing</a></div>
+          <p class="small" style="margin-top:12px"><a href="#" id="exp-wiz-biz-back">Apply as an individual instead</a></p></div>`;
+        nav.hidden = true;
+        saveDraftBtn.style.display = 'none';
+        document.getElementById('exp-wiz-biz-back').addEventListener('click', (e) => {
+          e.preventDefault();
+          expWiz.accountType = 'individual';
+          nav.hidden = false;
+          saveDraftBtn.style.display = '';
+          showStep(1);
+        });
+        toast('Business opted in to Experiences.');
+      } catch (e) { toast(e.message, true); nextBtn.disabled = false; }
+      return;
+    }
+    if (!validStep(n)) return;
+    if (n === 6) { if (!(await savePayoutStep())) return; }
+    else if (!(await expWizSaveStep(n))) return;
+    if (n === 7) {
+      const terms = document.getElementById('exp-wiz-terms');
+      const err = document.getElementById('exp-wiz-submit-err');
+      if (!terms || !terms.checked) {
+        if (err) { err.textContent = 'Confirm the information is true and you agree to the host terms.'; err.hidden = false; }
+        toast('Confirm the information is true and you agree to the host terms.', true);
+        return;
+      }
+      nextBtn.disabled = true;
+      try {
+        if (expWiz.editMode) {
+          toast('Host profile updated.');
+          location.hash = '#/host/dashboard';
+          return;
+        }
+        const path = expWiz.resubmit ? '/api/experiences/host/resubmit' : '/api/experiences/host/submit';
+        await api(path, { method: 'POST' });
+        await expHostMe(true);
+        toast('Application sent. The 2911 Jobs team will review it and let you know.');
+        location.hash = '#/host/dashboard';
+      } catch (e) {
+        nextBtn.disabled = false;
+        if (e.fields) {
+          const f = e.fields;
+          const stepFor = f.documents || f.selfie ? 4 : f.listing ? 5 : (f.payout_method || f.payout_reference) ? 6 : 2;
+          if (err) { err.textContent = e.message; err.hidden = false; }
+          toast(e.message, true);
+          showStep(stepFor);
+        } else toast(e.message, true);
+      }
+      return;
+    }
+    showStep(n + 1);
+  });
+  showStep(expWiz.step);
+}
+
+/* ---------------- host dashboards ---------------- */
+function expListingRow(l) {
+  const cat = l.category || {};
+  const viewHref = l.status === 'active' ? `#/experience/${l.id}` : `#/host/listings/${l.id}/edit`;
+  return `<div class="card" style="display:flex;gap:12px;align-items:center">
+    ${l.cover_photo ? `<img src="${esc(l.cover_photo)}" alt="" style="width:84px;height:84px;object-fit:cover;border-radius:14px;flex:none">` : `<div class="job-thumb" style="width:84px;height:84px;flex:none">${icon('compass')}</div>`}
+    <span style="flex:1;min-width:0"><b>${esc(l.title)}</b>
+      <span class="small muted" style="display:block">${esc(cat.name || l.listing_type || '')} · <span class="exp-price">${expPriceText(l)}</span></span>
+      <span style="display:block;margin-top:4px">${expStatusBadge(l.approval_status || 'draft')}</span></span>
+    <span style="display:flex;flex-direction:column;gap:6px;flex:none">
+      <a class="btn btn-sm btn-outline" href="#/host/listings/${l.id}/edit">Edit</a>
+      <a class="btn btn-sm btn-ghost" href="${viewHref}">View</a>
+    </span>
+  </div>`;
+}
+function expNoteCard(note, dateText) {
+  if (!note) return '';
+  return `<div class="exp-note-card"><b>Note from the 2911 Jobs team${dateText ? ' · ' + esc(dateText) : ''}:</b><p style="margin:6px 0 0">${esc(note)}</p></div>`;
+}
+async function viewHostDashboard() {
+  if (!requireAuth('#/host/dashboard')) return;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading your host dashboard…')}</div></div>`;
+  let d;
+  try { d = await api('/api/experiences/host/dashboard'); } catch (e) {
+    app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
+    return;
+  }
+  const h = d.individual;
+  const listings = d.listings || [];
+  const counts = d.counts || {};
+  const docs = d.documents || [];
+  const invites = d.invites || [];
+  const businesses = d.businesses || [];
+  const invitesCard = invites.length ? `<div class="card"><h3 style="margin-top:0">Staff invites for you</h3>
+      ${invites.map((iv) => `<div class="exp-doc-row"><span style="flex:1"><b>${esc(iv.business_name)}</b><span class="small muted" style="display:block">Invited as ${esc(iv.role)}${iv.invited_by_name ? ' by ' + esc(iv.invited_by_name) : ''}</span></span>
+        <span style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" data-exp-invite-accept="${iv.business_id}">Accept</button>
+        <button class="btn btn-sm btn-outline" data-exp-invite-decline="${iv.business_id}">Decline</button></span></div>`).join('')}
+    </div>` : '';
+  function wireInvites() {
+    document.querySelectorAll('[data-exp-invite-accept]').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        await api(`/api/experiences/host/staff/invites/${b.dataset.expInviteAccept}/accept`, { method: 'POST' });
+        toast('Invite accepted.');
+        viewHostDashboard();
+      } catch (e) { toast(e.message, true); b.disabled = false; }
+    }));
+    document.querySelectorAll('[data-exp-invite-decline]').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        await api(`/api/experiences/host/staff/invites/${b.dataset.expInviteDecline}/decline`, { method: 'POST' });
+        toast('Invite declined.');
+        viewHostDashboard();
+      } catch (e) { toast(e.message, true); b.disabled = false; }
+    }));
+  }
+  if (!h && !businesses.length) {
+    app.innerHTML = `<div class="view"><div class="page">
+      <h1 class="page-title">Host dashboard</h1>
+      ${invitesCard}
+      ${emptyHtml('compass', 'You are not a host yet', 'Become a host to list a room, a vehicle, a tour, or an experience.', `<a class="btn btn-sm btn-primary" href="#/host/apply">Become a Host</a>`)}
+    </div></div>`;
+    wireInvites();
+    return;
+  }
+  const status = h ? h.status : null;
+  const memberSince = currentUser && currentUser.created_at ? String(currentUser.created_at).slice(0, 4) : '';
+  const statusCard = !h ? '' : status === 'approved'
+    ? `<div class="card" style="border:1.5px solid var(--green)"><h3 style="margin-top:0">You are approved ${expStatusBadge('approved')}</h3>
+      <p style="margin:0">Your listings can go live. Create a listing or send one for approval.</p>
+      <div class="btn-row" style="margin-top:12px"><a class="btn btn-primary" href="#/host/listings/new">Create a listing</a></div></div>`
+    : status === 'draft'
+    ? `<div class="card"><h3 style="margin-top:0">Your application is a draft ${expStatusBadge('draft')}</h3>
+      <p style="margin:0">Finish the steps and submit it for review.</p>
+      <div class="btn-row" style="margin-top:12px"><a class="btn btn-primary" href="#/host/apply">Complete your application</a></div></div>`
+    : status === 'additional_info'
+    ? `<div class="card"><h3 style="margin-top:0">More information needed ${expStatusBadge('additional_info')}</h3>
+      ${expNoteCard(h.verification_note, h.updated_at ? fmtDate(h.updated_at) : '')}
+      <div class="btn-row" style="margin-top:12px"><a class="btn btn-primary" href="#/host/apply">Add information</a></div></div>`
+    : status === 'submitted' || status === 'under_review'
+    ? `<div class="card"><h3 style="margin-top:0">Application ${EXP_HOST_STATUS_LABELS[status]} ${expStatusBadge(status)}</h3>
+      <p style="margin:0">${status === 'submitted' ? 'Submitted' + (h.updated_at ? ' on ' + fmtDate(h.updated_at) : '') + '. The team will review it.' : 'Under review. We will let you know if we need anything.'}</p></div>`
+    : status === 'rejected'
+    ? `<div class="card"><h3 style="margin-top:0">Application rejected ${expStatusBadge('rejected')}</h3>
+      ${expNoteCard(h.verification_note, h.updated_at ? fmtDate(h.updated_at) : '')}
+      <div class="btn-row" style="margin-top:12px"><button class="btn btn-primary" type="button" id="exp-new-app">Start a new application</button></div>
+      <p class="small muted">Starting a new application resets your profile to a draft. The earlier rejection stays on record with the team.</p></div>`
+    : `<div class="card"><h3 style="margin-top:0">Account suspended ${expStatusBadge('suspended')}</h3>
+      ${expNoteCard(h.verification_note, h.updated_at ? fmtDate(h.updated_at) : '')}
+      <p style="margin:10px 0 0">No new bookings are taken while your account is suspended.</p>
+      <div class="btn-row" style="margin-top:12px"><a class="btn btn-outline" href="#/how">Contact support</a></div></div>`;
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <div class="profile-hero">
+      ${avatarHtml({ name: h ? h.display_name : (currentUser && currentUser.name), avatar: currentUser && currentUser.avatar }, 'lg')}
+      <h1 style="margin:10px 0 2px">${esc(h ? h.display_name : (currentUser && currentUser.name) || 'Host')}</h1>
+      <p style="margin:0;opacity:.85">${esc(h ? (h.city || '') : '')}${memberSince ? ' · Member since ' + memberSince : ''}</p>
+      <p style="margin:8px 0 0">${h ? (h.verification_status === 'verified' ? '<span class="badge badge-verified">Verified host</span>' : expStatusBadge(h.status)) : ''}</p>
+      ${h ? `<div class="btn-row" style="justify-content:center;margin-top:12px"><a class="btn btn-sm btn-outline" href="#/host/onboarding?step=2">Edit profile</a></div>` : ''}
+    </div>
+    <div class="dash-tiles exp-tiles" style="margin-top:14px">
+      <div class="dash-tile"><span>Listings</span><b>${counts.listings || 0}</b></div>
+      <div class="dash-tile"><span>Drafts</span><b>${counts.drafts || 0}</b></div>
+      <div class="dash-tile"><span>Active</span><b>${counts.active || 0}</b></div>
+      <div class="dash-tile"><span>Booking requests</span><b>${counts.requests || 0}</b></div>
+      <div class="dash-tile"><span>Earnings</span><b>${fmtZMW(counts.earnings || 0)}</b></div>
+    </div>
+    ${statusCard}
+    ${invitesCard}
+    <div class="card"><h3 style="margin-top:0">Booking requests</h3>
+      <p style="margin:0">No booking requests yet. When a guest sends a request, it appears here.</p></div>
+    <div class="card"><h3 style="margin-top:0">My listings</h3>
+      ${listings.length ? listings.map(expListingRow).join('') : '<p style="margin:0">No listings yet.</p>'}
+      <div class="btn-row" style="margin-top:12px"><a class="btn btn-primary" href="#/host/listings/new">Create a listing</a>
+      <a class="btn btn-outline" href="#/host/listings">See all listings</a></div></div>
+    <div class="card"><h3 style="margin-top:0">Availability</h3>
+      ${listings.length ? listings.map((l) => `<div class="exp-doc-row"><span style="flex:1"><b>${esc(l.title)}</b><span class="small muted" style="display:block">No dates set</span></span>
+        <button class="btn btn-sm btn-outline" data-exp-avail="${l.id}">Manage</button></div>`).join('') : '<p style="margin:0">No listings yet.</p>'}</div>
+    <div class="card"><h3 style="margin-top:0">Earnings</h3>
+      <p style="margin:0"><b>${fmtZMW(counts.earnings || 0)}</b> so far.</p>
+      <p class="small muted" style="margin:6px 0 0">Payments are disabled at launch. This is the total value of confirmed bookings, not money received.</p>
+      <p style="margin-top:10px"><a class="btn btn-sm btn-outline" href="#/host/payouts">Payout info</a></p></div>
+    <div class="card"><h3 style="margin-top:0">Reviews</h3>
+      <p style="margin:0">No reviews yet. Reviews appear here after guests complete a booking.</p></div>
+    <div class="card"><h3 style="margin-top:0">Messages</h3>
+      <p style="margin:0">Guest messages about your listings arrive in your inbox.</p>
+      <p style="margin-top:10px"><a class="btn btn-sm btn-outline" href="#/messages">See all messages</a></p></div>
+    <div class="card"><h3 style="margin-top:0">Verification status</h3>
+      <p style="margin:0"><b>${esc(h ? h.verification_status || 'unverified' : 'unverified')}</b></p>
+      ${docs.length ? `<div style="margin-top:8px">${docs.map((x) => `<div class="exp-doc-row"><span style="flex:1"><b>${esc(EXP_DOC_LABELS[x.kind] || x.kind)}</b><span class="small muted" style="display:block">Submitted ${esc(fmtDate(x.created_at))}${x.review_note ? ' · ' + esc(x.review_note) : ''}</span></span>${expStatusBadge(x.status === 'approved' ? 'approved' : x.status === 'rejected' ? 'rejected' : 'submitted')}</div>`).join('')}</div>` : '<p class="small muted" style="margin:8px 0 0">No documents on file yet.</p>'}
+      <p style="margin-top:10px"><a class="btn btn-sm btn-outline" href="#/host/onboarding?step=4">Update documents</a></p></div>
+    <div class="card"><h3 style="margin-top:0">Settings</h3>
+      <div class="dash-menu exp-menu">
+        <a href="#/host/onboarding?step=2">Edit host profile <span>›</span></a>
+        <a href="#/host/payouts">Payout info <span>›</span></a>
+      </div>
+      <label class="switch-row"><span>Booking request notifications</span><input type="checkbox" id="exp-notif-switch" ${localStorage.getItem('exp_notif') !== 'off' ? 'checked' : ''}><span class="switch"></span></label>
+      <label class="switch-row"><span>Pause all listings</span><input type="checkbox" id="exp-pause-switch" ${listings.length && !listings.some((l) => l.status === 'active') ? 'checked' : ''}><span class="switch"></span></label>
+      <p class="small muted">Pausing hides your listings from search until you switch them back on.</p></div>
+    ${businesses.length ? `<div class="card"><h3 style="margin-top:0">Your businesses</h3>
+      ${businesses.map((b) => `<div class="exp-doc-row"><span style="flex:1"><b>${esc(b.business_name)}</b><span class="small muted" style="display:block">${esc(b.business_city)} · Experiences ${esc(b.experiences_status || '')}</span></span>
+      <a class="btn btn-sm btn-outline" href="#/host/business?business=${b.business_id}">Business dashboard</a></div>`).join('')}</div>` : ''}
+  </div></div>`;
+  const newApp = document.getElementById('exp-new-app');
+  if (newApp) newApp.addEventListener('click', async () => {
+    // A rejected host starts a fresh application: the backend resets
+    // the row to draft and clears the old note, then the wizard opens
+    // prefilled with the saved profile fields.
+    newApp.disabled = true;
+    try {
+      const body = { account_type: 'individual' };
+      if (h.display_name) body.display_name = h.display_name;
+      if (h.bio) body.bio = h.bio;
+      if (Array.isArray(h.languages)) body.languages = h.languages;
+      if (h.response_time) body.response_time = h.response_time;
+      if (h.phone_public) body.phone_public = h.phone_public;
+      if (h.city) body.city = h.city;
+      if (h.area) body.area = h.area;
+      if (h.meeting_point) body.meeting_point = h.meeting_point;
+      if (Array.isArray(h.provinces)) body.provinces = h.provinces;
+      if (h.payout_method) body.payout_method = h.payout_method;
+      await api('/api/experiences/host/apply', { method: 'POST', body: JSON.stringify(body) });
+      await expHostMe(true);
+      toast('Fresh application started. Your earlier rejection stays on record with the team.');
+      // Plain #/host/apply: the wizard opens at step 1 by default and
+      // prefills the fresh draft. (The apply route regex is an exact
+      // match, so #/host/apply?step=1 would fall through to Page not
+      // found; #/host/onboarding?step=N works because its regex is a
+      // prefix match.)
+      location.hash = '#/host/apply';
+    } catch (e) { toast(e.message, true); newApp.disabled = false; }
+  });
+  wireInvites();
+  document.querySelectorAll('[data-exp-avail]').forEach((b) => b.addEventListener('click', () => {
+    toast('Availability management is coming soon. Dates are confirmed with guests for now.');
+  }));
+  const notif = document.getElementById('exp-notif-switch');
+  if (notif) notif.addEventListener('change', () => {
+    localStorage.setItem('exp_notif', notif.checked ? 'on' : 'off');
+    toast(notif.checked ? 'Booking request notifications on.' : 'Booking request notifications off.');
+  });
+  const pause = document.getElementById('exp-pause-switch');
+  if (pause) pause.addEventListener('change', async () => {
+    const pausing = pause.checked;
+    const actives = listings.filter((l) => l.status === 'active');
+    const paused = listings.filter((l) => l.status === 'paused');
+    const targets = pausing ? actives : paused;
+    if (!targets.length) { toast(pausing ? 'No active listings to pause.' : 'No paused listings to resume.'); viewHostDashboard(); return; }
+    pause.disabled = true;
+    try {
+      for (const l of targets) await api('/api/experiences/' + l.id, { method: 'PATCH', body: JSON.stringify({ status: pausing ? 'paused' : 'active' }) });
+      toast(pausing ? 'All listings paused.' : 'All listings live again.');
+      viewHostDashboard();
+    } catch (e) { toast(e.message, true); pause.disabled = false; }
+  });
+}
+
+async function viewHostBusiness() {
+  if (!requireAuth('#/host/business')) return;
+  const q = new URLSearchParams((location.hash.split('?')[1] || ''));
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading your business dashboard…')}</div></div>`;
+  let links;
+  try { const d = await api('/api/experiences/host/business'); links = d.businesses || d.links || []; } catch (e) {
+    app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
+    return;
+  }
+  if (!links.length) {
+    app.innerHTML = `<div class="view"><div class="page">
+      <h1 class="page-title">Business dashboard</h1>
+      ${emptyHtml('grid', 'Your business has not opted in yet', 'Opt a storefront in to Experiences from the host application.', `<a class="btn btn-sm btn-primary" href="#/host/apply">Become a Host</a>`)}
+    </div></div>`;
+    return;
+  }
+  const picked = Number(q.get('business') || 0);
+  const link = links.find((b) => b.business_id === picked) || links[0];
+  const bizId = link.business_id;
+  let staff = [];
+  try { const s = await api(`/api/experiences/host/business/${bizId}/staff`); staff = s.staff || []; } catch { /* owner-only list; staff members see the invite state only */ }
+  let listings = [];
+  try {
+    const dl = await api('/api/experiences/host/listings?limit=50');
+    // The host list carries no business_id; the host card does carry the
+    // side (type business + business id) versus individual.
+    listings = (dl.listings || []).filter((l) => l.host && l.host.type === 'business' && Number(l.host.id) === Number(bizId));
+  } catch { /* none */ }
+  let docs = [];
+  try { const d = await api('/api/experiences/host/documents'); docs = (d.documents || []).filter((x) => x.business_id === bizId); } catch { /* none */ }
+  const stays = listings.filter((l) => l.listing_type === 'stay');
+  const vehicles = listings.filter((l) => l.listing_type === 'vehicle');
+  const tours = listings.filter((l) => l.listing_type === 'tour' || l.listing_type === 'experience');
+  const pendingStaff = staff.filter((s) => s.status === 'invited');
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/host/dashboard">Back to Dashboard</a>
+    <div class="profile-hero">
+      <h1 style="margin:10px 0 2px">${esc(link.business_name)}</h1>
+      <p style="margin:0;opacity:.85">${esc(link.business_city || '')}</p>
+      <p style="margin:8px 0 0">${link.verification_status === 'verified' ? '<span class="badge badge-verified">Verified business</span>' : '<span class="badge badge-unverified">Unverified</span>'} ${expStatusBadge(link.experiences_status === 'active' ? 'approved' : link.experiences_status === 'paused' ? 'submitted' : 'draft')}</p>
+      <div class="btn-row" style="justify-content:center;margin-top:12px"><a class="btn btn-sm btn-outline" href="#/business/${bizId}/manage">Edit business profile</a></div>
+    </div>
+    ${links.length > 1 ? `<div class="field" style="margin-top:12px"><label for="exp-biz-pick">Business</label>
+      <select id="exp-biz-pick">${links.map((b) => `<option value="${b.business_id}" ${b.business_id === bizId ? 'selected' : ''}>${esc(b.business_name)}</option>`).join('')}</select></div>` : ''}
+    <div class="dash-tiles exp-tiles" style="margin-top:14px">
+      <div class="dash-tile"><span>Properties</span><b>${stays.length}</b></div>
+      <div class="dash-tile"><span>Vehicles</span><b>${vehicles.length}</b></div>
+      <div class="dash-tile"><span>Tours</span><b>${tours.length}</b></div>
+      <div class="dash-tile"><span>Listings</span><b>${listings.length}</b></div>
+    </div>
+    <div class="card"><h3 style="margin-top:0">Listings</h3>
+      ${listings.length ? listings.map(expListingRow).join('') : '<p style="margin:0">No listings yet for this business.</p>'}
+      <div class="btn-row" style="margin-top:12px"><a class="btn btn-primary" href="#/host/listings/new?business=${bizId}">Create a listing</a>
+      <a class="btn btn-outline" href="#/host/listings">See all listings</a></div></div>
+    <div class="card"><h3 style="margin-top:0">Staff</h3>
+      ${staff.length ? staff.map((s) => `<div class="exp-doc-row"><span style="flex:1"><b>${esc(s.name || s.phone || '')}</b><span class="small muted" style="display:block">${esc(s.role)} · ${esc(s.status)}${s.invited_by_name ? ' · invited by ' + esc(s.invited_by_name) : ''}</span></span>
+        ${s.status !== 'revoked' ? `<button class="btn btn-sm btn-danger" data-exp-revoke="${s.user_id}">Revoke</button>` : ''}</div>`).join('') : '<p style="margin:0">No staff yet.</p>'}
+      <form id="exp-staff-form" style="margin-top:12px">
+        <h4 style="margin:0 0 8px">Invite staff</h4>
+        <div class="field"><label for="exp-staff-phone">Phone *</label><input id="exp-staff-phone" name="phone" type="tel" inputmode="tel" placeholder="Their 2911 Jobs phone number, e.g. 0971234567"></div>
+        <div class="field"><label for="exp-staff-role">Role</label><select id="exp-staff-role" name="role"><option value="staff">Staff</option><option value="manager">Manager</option></select></div>
+        <p class="hint">They must already have a 2911 Jobs account on that number. The invite appears in their app; no SMS is sent.</p>
+        <button class="btn btn-primary" type="submit">Send invite</button>
+      </form>
+      ${pendingStaff.length ? `<p class="small" style="margin-top:10px">Pending invites: ${pendingStaff.map((s) => esc(s.name || s.phone)).join(', ')}</p>` : ''}</div>
+    <div class="card"><h3 style="margin-top:0">Branches</h3>
+      <div class="exp-doc-row"><span style="flex:1"><b>${esc(link.business_city || 'Main branch')}</b><span class="small muted" style="display:block">Operating location</span></span></div>
+      <p style="margin-top:10px"><a class="btn btn-sm btn-outline" href="#/business/${bizId}/manage">Manage branches from your storefront</a></p></div>
+    <div class="card"><h3 style="margin-top:0">Pricing</h3>
+      ${listings.length ? listings.map((l) => `<div class="exp-doc-row"><span style="flex:1"><b>${esc(l.title)}</b><span class="small muted" style="display:block"><span class="exp-price">${expPriceText(l)}</span></span></span>
+        <a class="btn btn-sm btn-outline" href="#/host/listings/${l.id}/edit">Edit price</a></div>`).join('') : '<p style="margin:0">No listings yet.</p>'}
+      <p class="small muted" style="margin:10px 0 0">Seasonal pricing is not available yet. You can change the base price at any time.</p></div>
+    <div class="card"><h3 style="margin-top:0">Commissions</h3>
+      <p style="margin:0">Rate: <b>${link.commission_rate_override != null ? esc(String(link.commission_rate_override)) + '%' : 'Platform default'}</b></p>
+      <p class="small muted" style="margin:6px 0 0">No commission totals yet. Totals appear here once bookings are completed.</p></div>
+    <div class="card"><h3 style="margin-top:0">Payouts</h3>
+      <p style="margin:0">Method: <b>${esc(link.payout_reference_masked || 'Not set')}</b></p>
+      <p class="small muted" style="margin:6px 0 0">${EXP_PAYOUT_NOTICE}</p>
+      <p style="margin-top:10px"><a class="btn btn-sm btn-outline" href="#/host/payouts?business=${bizId}">Payout info</a></p></div>
+    <div class="card"><h3 style="margin-top:0">Reviews</h3>
+      <p style="margin:0">No reviews yet. Reviews appear here after guests complete a booking.</p></div>
+    <div class="card"><h3 style="margin-top:0">Compliance</h3>
+      <p style="margin:0">Verification: <b>${esc(link.verification_status || 'unverified')}</b></p>
+      ${docs.length ? `<div style="margin-top:8px">${docs.map((x) => `<div class="exp-doc-row"><span style="flex:1"><b>${esc(EXP_DOC_LABELS[x.kind] || x.kind)}</b><span class="small muted" style="display:block">Submitted ${esc(fmtDate(x.created_at))}</span></span>${expStatusBadge(x.status === 'approved' ? 'approved' : x.status === 'rejected' ? 'rejected' : 'submitted')}</div>`).join('')}</div>` : '<p class="small muted" style="margin:8px 0 0">No documents on file yet. Business documents (PACRA, TPIN) live on your storefront.</p>'}
+      <form id="exp-bizdoc-form" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <select id="exp-bizdoc-kind" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
+          <option value="tourism_licence">Tourism licence</option>
+          <option value="drivers_licence">Driving licence</option>
+          <option value="other">Other document</option>
+        </select>
+        <input id="exp-bizdoc-file" type="file" accept="image/*,.pdf" required>
+        <button class="btn btn-primary" type="submit">Upload document</button>
+      </form>
+      <p class="hint">Documents are seen only by the 2911 Jobs team, not by guests. ${EXP_DOC_HINT}.</p></div>
+  </div></div>`;
+  const pick = document.getElementById('exp-biz-pick');
+  if (pick) pick.addEventListener('change', () => { location.hash = '#/host/business?business=' + pick.value; });
+  document.querySelectorAll('[data-exp-revoke]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Revoke this staff member? They lose access immediately.')) return;
+    b.disabled = true;
+    try {
+      await api(`/api/experiences/host/business/${bizId}/staff/${b.dataset.expRevoke}/revoke`, { method: 'POST' });
+      toast('Staff member revoked.');
+      viewHostBusiness();
+    } catch (e) { toast(e.message, true); b.disabled = false; }
+  }));
+  document.getElementById('exp-staff-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const phone = document.getElementById('exp-staff-phone').value.trim();
+    const role = document.getElementById('exp-staff-role').value;
+    if (!phone) { toast('Add the phone number of the person you are inviting.', true); return; }
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      const { staff: s } = await api(`/api/experiences/host/business/${bizId}/staff`, { method: 'POST', body: JSON.stringify({ phone, role }) });
+      toast(`Invite sent to ${s.name || phone}. They accept it in the app.`);
+      viewHostBusiness();
+    } catch (err) { toast(err.message, true); btn.disabled = false; }
+  });
+  document.getElementById('exp-bizdoc-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = (document.getElementById('exp-bizdoc-file').files || [])[0];
+    if (!f) return;
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      const image = await expDocToDataUri(f);
+      await api('/api/experiences/host/documents', { method: 'POST', body: JSON.stringify({ kind: document.getElementById('exp-bizdoc-kind').value, image, host_side: 'business', business_id: bizId }) });
+      toast('Document uploaded. The 2911 Jobs team will review it.');
+      viewHostBusiness();
+    } catch (err) { toast(err.message, true); btn.disabled = false; }
+  });
+}
+
+/* ---------------- host listings ---------------- */
+async function viewHostListings() {
+  if (!requireAuth('#/host/listings')) return;
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/host/dashboard">Back to Dashboard</a>
+    <h1 class="page-title">My listings</h1>
+    <p class="page-sub">Your Experiences listings and their approval state.</p>
+    <div class="btn-row" style="margin-bottom:12px"><a class="btn btn-primary" href="#/host/listings/new">${icon('plus')} Create a listing</a></div>
+    <div id="exp-host-listings">${skeletonCards(2)}</div>
+  </div></div>`;
+  try {
+    const d = await api('/api/experiences/host/listings?limit=50');
+    const el = document.getElementById('exp-host-listings');
+    el.innerHTML = d.listings.length ? d.listings.map((l) =>
+      expListingRow(l) + (['additional_info', 'rejected'].includes(l.approval_status) && l.approval_note ? expNoteCard(l.approval_note, '') : '')
+    ).join('')
+      : emptyHtml('compass', 'No listings yet', 'Create your first listing and send it for approval.', `<a class="btn btn-sm btn-primary" href="#/host/listings/new">Create a listing</a>`);
+  } catch (e) {
+    document.getElementById('exp-host-listings').innerHTML = errorHtml(e.message);
+  }
+}
+async function expCanPublish(hostSide, businessId) {
+  try {
+    const me = await expHostMe();
+    if (hostSide === 'business') {
+      const link = (me.businesses || []).find((b) => Number(b.business_id) === Number(businessId));
+      if (!link || link.experiences_status !== 'active') return false;
+      const mine = await api('/api/businesses/mine');
+      const biz = (mine.businesses || []).find((b) => Number(b.id) === Number(businessId));
+      return !!biz && biz.status === 'active';
+    }
+    return !!(me.individual && me.individual.status === 'approved');
+  } catch { return false; }
+}
+async function viewHostListingNew() {
+  if (!requireAuth('#/host/listings/new')) return;
+  const q = new URLSearchParams((location.hash.split('?')[1] || ''));
+  const bizParam = Number(q.get('business') || 0) || null;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading the listing form…')}</div></div>`;
+  const me = await expHostMe(true);
+  const hasBusinesses = (me.businesses || []).length > 0;
+  const hostSide = bizParam ? 'business' : 'individual';
+  const canPublish = await expCanPublish(hostSide, bizParam);
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/host/listings">Back to My listings</a>
+    <h1 class="page-title">Create a listing</h1>
+    <p class="page-sub">Saved as a draft at every step. Send it for approval when it is ready.</p>
+    <div id="exp-listing-slot"></div>
+  </div></div>`;
+  const slot = document.getElementById('exp-listing-slot');
+  await expRenderListingForm(slot, {
+    mode: 'page', hostSide, businessId: bizParam, showHostSide: hasBusinesses,
+    businesses: me.businesses || [], canPublish,
+  });
+  const hs = slot.querySelector('#el-hostside');
+  if (hs) hs.addEventListener('change', async () => {
+    const val = hs.value;
+    const side = val.startsWith('business:') ? 'business' : 'individual';
+    const bId = side === 'business' ? Number(val.split(':')[1]) : null;
+    expListing.hostSide = side;
+    expListing.businessId = bId;
+    const ok = await expCanPublish(side, bId);
+    const submitBtn = slot.querySelector('#el-submit');
+    const hint = slot.querySelector('#el-publish-hint');
+    if (submitBtn) submitBtn.disabled = !ok;
+    if (hint) hint.hidden = ok;
+  });
+}
+async function viewHostListingEdit(id) {
+  if (!requireAuth('#/host/listings/' + id + '/edit')) return;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading your listing…')}</div></div>`;
+  let listing = null;
+  try {
+    // The owner detail serves non-active listings in full, so prefill
+    // comes from here: title, description, category, town, area,
+    // address, price, capacity, inclusions, exclusions, safety notes,
+    // subtype rows and photos with ids and cover. Suspended listings
+    // answer with the suspended shape, which has no detail to prefill.
+    const det = await api('/api/experiences/' + id);
+    if (det.experience) listing = det.experience;
+  } catch { /* fall through to the host list */ }
+  if (!listing) {
+    try {
+      const d = await api('/api/experiences/host/listings?limit=50');
+      listing = (d.listings || []).find((l) => Number(l.id) === Number(id));
+    } catch (e) {
+      app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
+      return;
+    }
+  }
+  if (!listing) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Listing not found', 'This listing is not yours, or it does not exist.', `<a class="btn btn-sm btn-primary" href="#/host/listings">My listings</a>`)}</div></div>`;
+    return;
+  }
+  const me = await expHostMe(true);
+  const isApprovedEdit = listing.status === 'active' && listing.approval_status === 'approved';
+  const hostSide = listing.host && listing.host.type === 'business' ? 'business' : 'individual';
+  const businessId = hostSide === 'business' ? Number(listing.host.id) : null;
+  const canPublish = isApprovedEdit ? true : await expCanPublish(hostSide, businessId);
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/host/listings">Back to My listings</a>
+    <h1 class="page-title">Edit listing</h1>
+    <p class="page-sub">${esc(listing.title)} · ${expStatusBadge(listing.approval_status || 'draft')}</p>
+    ${listing.status === 'draft' ? '<p class="small muted">All your saved details are shown below. Change anything and save as a draft, or submit it for approval when ready.</p>' : ''}
+    <div id="exp-listing-slot"></div>
+  </div></div>`;
+  await expRenderListingForm(document.getElementById('exp-listing-slot'), {
+    mode: 'page', prefill: listing, hostSide, businessId,
+    showHostSide: false, canPublish, isApprovedEdit,
+  });
+}
+
+/* ---------------- payouts (#/host/payouts) ---------------- */
+async function viewHostPayouts() {
+  if (!requireAuth('#/host/payouts')) return;
+  const q = new URLSearchParams((location.hash.split('?')[1] || ''));
+  const bizParam = Number(q.get('business') || 0) || null;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading payout info…')}</div></div>`;
+  let masked = '';
+  let isBusiness = false;
+  let link = null;
+  if (bizParam) {
+    try {
+      const d = await api('/api/experiences/host/business');
+      link = (d.businesses || d.links || []).find((b) => Number(b.business_id) === Number(bizParam));
+    } catch { /* fall through */ }
+    if (!link) {
+      app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Business not found', 'This business has not opted in to Experiences.', `<a class="btn btn-sm btn-primary" href="#/host/apply">Become a Host</a>`)}</div></div>`;
+      return;
+    }
+    masked = link.payout_reference_masked || '';
+    isBusiness = true;
+  } else {
+    const me = await expHostMe(true);
+    if (!me.individual) {
+      app.innerHTML = `<div class="view"><div class="page">
+        <h1 class="page-title">Payout info</h1>
+        ${emptyHtml('wallet', 'No host profile yet', 'Apply to become a host first, then add your payout details.', `<a class="btn btn-sm btn-primary" href="#/host/apply">Become a Host</a>`)}
+      </div></div>`;
+      return;
+    }
+    masked = me.individual.payout_reference_masked || '';
+  }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/host/dashboard">Back to Dashboard</a>
+    <h1 class="page-title">Payout info</h1>
+    <p class="page-sub">${isBusiness ? esc(link.business_name) : 'Your individual host payouts'}</p>
+    <div class="card">
+      <h3 style="margin-top:0">Current payout method</h3>
+      <p style="margin:0"><b>${esc(masked || 'Not set yet')}</b></p>
+      <p class="small muted" style="margin:6px 0 0">Only the masked form is ever shown. To change it, enter the full details below.</p>
+    </div>
+    <form id="exp-payout-form" class="card">
+      <h3 style="margin-top:0">Change payout details</h3>
+      ${expPayoutFieldsHtml({})}
+      <div class="wiz-nav"><button class="btn btn-primary full" type="submit">Save payout details</button></div>
+    </form>
+  </div></div>`;
+  const form = document.getElementById('exp-payout-form');
+  expWirePayoutMethod(form);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { method, reference, errs } = expCollectPayout(form);
+    showFieldErrors(form, errs);
+    if (Object.keys(errs).length) { expFocusFirstInvalid(form, errs); return; }
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      if (isBusiness) await api(`/api/experiences/host/business/${link.id}`, { method: 'PATCH', body: JSON.stringify({ payout_method: method, payout_reference: reference }) });
+      else await api('/api/experiences/host/me', { method: 'PATCH', body: JSON.stringify({ payout_method: method, payout_reference: reference }) });
+      await expHostMe(true);
+      toast('Payout details saved.');
+      viewHostPayouts();
+    } catch (err) { toast(err.message, true); btn.disabled = false; }
+  });
+}
+
 /* ---------------- router ---------------- */
 const routes = [
   [/^#\/?$/, () => (currentUser ? viewHome() : viewLanding())],
@@ -7069,6 +9653,18 @@ const routes = [
   [/^#\/market$/, viewMarket],
   [/^#\/sell$/, viewSell],
   [/^#\/selling$/, viewSelling],
+  [/^#\/experiences$/, viewExperiences],
+  [/^#\/experiences\/search/, () => viewExperienceSearch()],
+  [/^#\/experiences\/category\/([a-z-]+)/, (m) => viewExperienceCategory(m[1])],
+  [/^#\/experience\/(\d+)$/, (m) => viewExperience(m[1])],
+  [/^#\/host\/apply$/, viewHostApply],
+  [/^#\/host\/onboarding/, viewHostApply],
+  [/^#\/host\/dashboard$/, viewHostDashboard],
+  [/^#\/host\/business/, viewHostBusiness],
+  [/^#\/host\/listings\/new$/, viewHostListingNew],
+  [/^#\/host\/listings\/(\d+)\/edit$/, (m) => viewHostListingEdit(m[1])],
+  [/^#\/host\/listings$/, viewHostListings],
+  [/^#\/host\/payouts/, viewHostPayouts],
   [/^#\/product\/(\d+)\/edit$/, (m) => viewProductEdit(m[1])],
   [/^#\/product\/(\d+)$/, (m) => viewProduct(m[1])],
   [/^#\/businesses$/, viewBusinesses],
@@ -7164,6 +9760,20 @@ document.addEventListener('click', (e) => {
     shareBusiness(businessShareBtn.dataset.shareBusiness, businessShareBtn.dataset.title || 'Storefront on 2911 Jobs');
     return;
   }
+  const expShareBtn = e.target.closest('[data-share-experience]');
+  if (expShareBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    shareExperience(expShareBtn.dataset.shareExperience, expShareBtn.dataset.title || 'Experience on 2911 Jobs');
+    return;
+  }
+  const expsaveBtn = e.target.closest('[data-expsave]');
+  if (expsaveBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSaveExperience(expsaveBtn.dataset.expsave);
+    return;
+  }
   const saveBtn = e.target.closest('[data-save]');
   if (saveBtn) {
     e.preventDefault();
@@ -7183,6 +9793,10 @@ document.addEventListener('click', (e) => {
   if (pcard && !e.target.closest('a') && !e.target.closest('button')) {
     location.hash = '#/product/' + pcard.dataset.product;
   }
+  const expcard = e.target.closest('.exp-card[data-experience]');
+  if (expcard && !e.target.closest('a') && !e.target.closest('button')) {
+    location.hash = '#/experience/' + expcard.dataset.experience;
+  }
   const card = e.target.closest('.job-card[data-job], [data-cat-link]');
   if (card && card.dataset.job && !e.target.closest('a') && !e.target.closest('button')) {
     location.hash = '#/job/' + card.dataset.job;
@@ -7192,6 +9806,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     const card = e.target.closest && e.target.closest('.job-card[data-job]');
     if (card) location.hash = '#/job/' + card.dataset.job;
+    const expcard = e.target.closest && e.target.closest('.exp-card[data-experience]');
+    if (expcard) location.hash = '#/experience/' + expcard.dataset.experience;
   }
 });
 

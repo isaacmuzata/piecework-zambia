@@ -2,10 +2,22 @@ services:
   - type: web
     name: piecework-zambia
     runtime: docker
-    plan: free
+    # Verified live Nov 8, 2026 via the Render API (service
+    # srv-das79rvavr4c739b01jg): plan "starter" (0.5c-512mb), region oregon.
+    # The file previously said plan: free, which was stale: re-applying the
+    # blueprint with plan: free would have downgraded the live service.
+    plan: starter
+    region: oregon
     envVars:
       - key: NODE_ENV
         value: production
+      # generateValue mints the secret ONCE, when the Blueprint is first
+      # applied. Render retains the current value for an existing service
+      # and does NOT regenerate it on later Blueprint syncs, so re-applying
+      # this file does not invalidate live sessions. (Verified against
+      # Render's Blueprint reference, Nov 8, 2026.) If the service were
+      # ever recreated from scratch, a NEW secret would be minted and every
+      # live session would break: that is the recreate case, not the sync case.
       - key: JWT_SECRET
         generateValue: true
       # Turso cloud database (free tier). The free plan cannot attach a
