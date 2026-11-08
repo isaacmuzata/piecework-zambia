@@ -1,0 +1,1356 @@
+'use strict';
+/**
+ * 2911 Jobs API end-to-end tests.
+ *
+ * Boots the real server against a throwaway local database (synthetic
+ * users only, never production data), then walks the full user journeys
+ * over HTTP: registration, orientation, jobs, applications, the NRC flow,
+ * admin boards, and the M0 safety pack (reports, blocking, suspension,
+ * audit log, managed categories).
+ *
+ * Run: npm test   (exit code 0 = all passed)
+ */
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const { createClient } = require('@libsql/client');
+
+const APP = path.join(__dirname, '..');
+const DB = '/tmp/pwz2-test.db';
+const PORT = 3199;
+const BASE = `http://127.0.0.1:${PORT}`;
+const ADMIN_PHONE_INPUT = '0970000001';
+const ADMIN_PHONE_NORM = '+260970000001';
+const IMG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+let server;
+let passed = 0;
+let failed = 0;
+const failures = [];
+
+function check(name, cond, extra) {
+  if (cond) { passed++; console.log('PASS  ' + name); }
+  else { failed++; failures.push(name); console.log('FAIL  ' + name + (extra ? '  -> ' + extra : '')); }
+}
+
+async function call(method, p, body, cookie) {
+  const r = await fetch(BASE + p, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await r.text();
+  let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  const all = r.headers.getSetCookie ? r.headers.getSetCookie() : [];
+  const tok = all.find(c => c.startsWith('pw_token='));
+  return { status: r.status, json, cookie: tok ? tok.split(';')[0] : null };
+}
+
+async function waitUp() {
+  for (let i = 0; i < 60; i++) {
+    try { const r = await fetch(BASE + '/'); if (r.status) return; } catch { /* not up yet */ }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error('server did not come up');
+}
+
+// Direct read/write access to the throwaway test database. The signup
+// OTP suite uses it the way the reset-code checks use sms_log: the code
+// itself only ever exists in the logged SMS body and the hashed pending
+// row, so tests read the code back out of sms_log.
+// Created lazily on first use: the suite deletes and recreates the DB
+// file while booting, so an early client would hold the unlinked inode.
+let testDb = null;
+function getTestDb() {
+  if (!testDb) testDb = createClient({ url: 'file:' + DB });
+  return testDb;
+}
+
+function normalizedTestPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.startsWith('260')) return '+' + digits;
+  if (digits.startsWith('0')) return '+260' + digits.slice(1);
+  return '+' + digits;
+}
+
+async function dbExecute(sql, args = []) {
+  let lastErr;
+  for (let i = 0; i < 12; i++) {
+    try { return await getTestDb().execute({ sql, args }); }
+    catch (e) {
+      lastErr = e;
+      if (!/locked|busy/i.test(String(e && e.message))) throw e;
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+  throw lastErr;
+}
+
+async function dbOne(sql, args = []) {
+  const rs = await dbExecute(sql, args);
+  return rs.rows[0] || null;
+}
+
+async function latestSignupCode(phone) {
+  const norm = normalizedTestPhone(phone);
+  for (let i = 0; i < 20; i++) {
+    const row = await dbOne(
+      "SELECT body FROM sms_log WHERE phone = ? AND kind = 'signup_code' ORDER BY id DESC LIMIT 1",
+      [norm]
+    );
+    const m = row && String(row.body || '').match(/signup code is (\d{6})/);
+    if (m) return m[1];
+    await new Promise(r => setTimeout(r, 100));
+  }
+  throw new Error('no signup code found in sms_log for ' + norm);
+}
+
+async function registerUser(name, phone, city) {
+  const start = await call('POST', '/api/auth/register', { name, phone, password: 'test-pass-123', city, avatar: IMG, selfie: IMG });
+  if (!(start.status === 200 && start.json.verification_required)) {
+    throw new Error('register start failed for ' + name + ': ' + JSON.stringify(start.json).slice(0, 200));
+  }
+  const code = await latestSignupCode(phone);
+  const verify = await call('POST', '/api/auth/register/verify', { phone, code });
+  if (!(verify.status === 201 && verify.cookie)) {
+    throw new Error('register verify failed for ' + name + ': ' + JSON.stringify(verify.json).slice(0, 200));
+  }
+  return { cookie: verify.cookie, id: verify.json.user.id, name };
+}
+
+(async () => {
+  try { fs.unlinkSync(DB); } catch { /* fresh db */ }
+  server = spawn('node', ['server.js'], {
+    cwd: APP,
+    env: { ...process.env, DB_PATH: DB, PORT: String(PORT), ADMIN_PHONES: ADMIN_PHONE_NORM, VAPID_PUBLIC_KEY: '', VAPID_PRIVATE_KEY: '' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  server.stderr.on('data', d => process.stderr.write('[server] ' + d));
+  await waitUp();
+
+  // ---------- Baseline: accounts, jobs, applications ----------
+  const admin = await registerUser('Admin Tester', ADMIN_PHONE_INPUT, 'Lusaka');
+  const worker = await registerUser('Worker Tester', '0970000002', 'Kitwe');
+  const third = await registerUser('Third Tester', '0970000003', 'Ndola');
+  check('register + login three synthetic users', true);
+
+  const ori = await call('PATCH', '/api/users/me', { orientation_accepted: true }, worker.cookie);
+  check('worker completes orientation', ori.status === 200);
+
+  const jobRes = await call('POST', '/api/jobs', {
+    title: 'Test gardening job', category: 'Gardening', description: 'Cut the grass and tidy the yard.',
+    city: 'Lusaka', area: 'Kabulonga', date_needed: '2026-11-20', pay_amount: 150, pay_type: 'per_day',
+    workers_needed: 1, terms_accepted: true,
+  }, admin.cookie);
+  check('poster creates a job', jobRes.status === 200 || jobRes.status === 201, JSON.stringify(jobRes.json).slice(0, 160));
+  const jobId = jobRes.json.job ? jobRes.json.job.id : jobRes.json.id;
+
+  const apply = await call('POST', `/api/jobs/${jobId}/apply`, { message: 'I can do this job.' }, worker.cookie);
+  check('worker applies', apply.status === 200 || apply.status === 201, JSON.stringify(apply.json).slice(0, 160));
+  const appId = apply.json.id;
+
+  const dup = await call('POST', `/api/jobs/${jobId}/apply`, { message: 'Again.' }, worker.cookie);
+  check('duplicate application rejected', dup.status >= 400, 'status ' + dup.status);
+
+  // ---------- Baseline: admin boards ----------
+  const forbidden = await call('GET', '/api/admin/activity', null, worker.cookie);
+  check('non-admin blocked from activity board (403)', forbidden.status === 403);
+  const act = await call('GET', '/api/admin/activity', null, admin.cookie);
+  const wRow = (act.json.users || []).find(u => u.id === worker.id);
+  check('activity board lists worker with last seen + 1 application', !!wRow && !!wRow.last_seen_at && wRow.applications === 1);
+  const byName = await call('GET', '/api/admin/activity?q=' + encodeURIComponent('worker test'), null, admin.cookie);
+  check('member search finds by name, any case', (byName.json.users || []).some(u => u.id === worker.id));
+  const byPhone = await call('GET', '/api/admin/activity?q=970000002', null, admin.cookie);
+  check('member search finds by phone digits', (byPhone.json.users || []).some(u => u.id === worker.id));
+  const byLocal = await call('GET', '/api/admin/activity?q=0970000002', null, admin.cookie);
+  check('member search finds by local phone form', (byLocal.json.users || []).some(u => u.id === worker.id));
+  const noMatch = await call('GET', '/api/admin/activity?q=zzzz-nomatch', null, admin.cookie);
+  check('member search with no match returns empty', noMatch.status === 200 && (noMatch.json.users || []).length === 0);
+  const memberSearch = await call('GET', '/api/admin/activity?q=worker', null, third.cookie);
+  check('member search stays admin-only (403)', memberSearch.status === 403);
+  const badEdit = await call('PATCH', '/api/admin/users/' + worker.id + '/profile', { name: 'W', city: 'Kitwe' }, admin.cookie);
+  check('ADMIN EDIT: too-short name rejected (422)', badEdit.status === 422, 'status ' + badEdit.status);
+  const edit = await call('PATCH', '/api/admin/users/' + worker.id + '/profile', { name: 'Worker Tester II', city: 'Ndola', phone: '+260999999999' }, admin.cookie);
+  check('ADMIN EDIT: admin can fix name and city', edit.status === 200 && edit.json.name === 'Worker Tester II' && edit.json.city === 'Ndola', JSON.stringify(edit.json).slice(0, 120));
+  const relogin = await call('POST', '/api/auth/login', { phone: '0970000002', password: 'test-pass-123' });
+  check('ADMIN EDIT: phone sign-in untouched by the edit', relogin.status === 200 && !!relogin.cookie, 'status ' + relogin.status);
+  await call('PATCH', '/api/admin/users/' + worker.id + '/profile', { name: 'Worker Tester', city: 'Kitwe' }, admin.cookie);
+  const editDenied = await call('PATCH', '/api/admin/users/' + worker.id + '/profile', { name: 'Nope Nope', city: 'Lusaka' }, third.cookie);
+  check('ADMIN EDIT: members cannot edit other profiles (403)', editDenied.status === 403, 'status ' + editDenied.status);
+  const docBad = await call('POST', '/api/admin/users/' + worker.id + '/request-doc', { kind: 'passport' }, admin.cookie);
+  check('DOC REQUEST: unknown document kind rejected (422)', docBad.status === 422, 'status ' + docBad.status);
+  const docDenied = await call('POST', '/api/admin/users/' + worker.id + '/request-doc', { kind: 'selfie' }, third.cookie);
+  check('DOC REQUEST: members cannot request documents (403)', docDenied.status === 403, 'status ' + docDenied.status);
+  const forgot = await call('POST', '/api/auth/forgot', { phone: '0970000003' });
+  check('RESET LOG: forgot-password finds the account', forgot.status === 200 && forgot.json.account_found === true, JSON.stringify(forgot.json).slice(0, 120));
+  let resetRow = {};
+  for (let i = 0; i < 16 && !resetRow.kind; i++) {
+    const slog = await call('GET', '/api/admin/sms-log', null, admin.cookie);
+    resetRow = (slog.json.sms_log || []).find(r => r.user_id === third.id && r.kind === 'password_reset') || {};
+    if (!resetRow.kind) await new Promise(r => setTimeout(r, 250));
+  }
+  check('RESET LOG: the reset send is written to the admin SMS log', resetRow.kind === 'password_reset' && (resetRow.status === 'sent' || resetRow.status === 'skipped'), JSON.stringify(resetRow).slice(0, 140));
+
+  // ---------- Baseline: hire + NRC flow ----------
+  const acc = await call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, admin.cookie);
+  check('poster accepts application', acc.status === 200);
+  const up = await call('POST', `/api/applications/${appId}/nrc`, { image: IMG, nrc_number: '123456/11/1' }, worker.cookie);
+  check('worker uploads NRC after hire', up.status === 200 || up.status === 201, JSON.stringify(up.json).slice(0, 160));
+  const viewByWorker = await call('GET', `/api/applications/${appId}/nrc`, null, worker.cookie);
+  check('worker cannot use the poster NRC view (403)', viewByWorker.status === 403);
+  const view1 = await call('GET', `/api/applications/${appId}/nrc`, null, admin.cookie);
+  check('poster views NRC, number normalized', view1.status === 200 && view1.json.nrc_number === '123456/11/1');
+  const nrcLog = await call('GET', '/api/admin/nrc-views', null, admin.cookie);
+  check('NRC view is in the admin access log', (nrcLog.json.views || []).length >= 1);
+
+  // ---------- Baseline: tester tracker ----------
+  const flag = await call('PATCH', `/api/admin/users/${worker.id}/tester`, { is_tester: true }, admin.cookie);
+  check('admin flags a tester', flag.status === 200 && flag.json.is_tester === true);
+  const trackers = await call('GET', '/api/admin/testers', null, admin.cookie);
+  const tRow = (trackers.json.testers || []).find(u => u.id === worker.id);
+  check('tester tracker shows the tester active today', !!tRow && tRow.active_days.includes(trackers.json.today));
+
+  // ---------- M0: managed categories ----------
+  const cats = await call('GET', '/api/categories');
+  const catNames = (cats.json.categories || []).map(c => c.name);
+  check('categories endpoint lists the seeded job categories', catNames.includes('Gardening') && catNames.includes('Carpentry'), catNames.join(','));
+  const tradesJob = await call('POST', '/api/jobs', {
+    title: 'Fix a leaking tap', category: 'Plumbing', description: 'Bathroom tap leaks steadily.',
+    city: 'Lusaka', area: 'Chelston', date_needed: '2026-11-21', pay_amount: 200, pay_type: 'per_job',
+    workers_needed: 1, terms_accepted: true,
+  }, admin.cookie);
+  check('job in a trades category (Plumbing) posts successfully', tradesJob.status === 200 || tradesJob.status === 201, JSON.stringify(tradesJob.json).slice(0, 160));
+  const newCat = await call('POST', '/api/admin/categories', { name: 'Solar Installation' }, admin.cookie);
+  check('admin adds a category', newCat.status === 200 || newCat.status === 201, JSON.stringify(newCat.json).slice(0, 160));
+  const cats2 = await call('GET', '/api/categories');
+  check('new category appears in the public list', (cats2.json.categories || []).some(c => c.name === 'Solar Installation'));
+  const catByWorker = await call('POST', '/api/admin/categories', { name: 'Nope' }, worker.cookie);
+  check('non-admin cannot add categories (403)', catByWorker.status === 403);
+
+  // ---------- M0: abuse reports ----------
+  const rep = await call('POST', '/api/reports', { target_type: 'job', target_id: jobId, reason: 'Looks like a scam posting.' }, third.cookie);
+  check('user reports a job', rep.status === 200 || rep.status === 201, JSON.stringify(rep.json).slice(0, 160));
+  const repQueue = await call('GET', '/api/admin/reports?status=open', null, admin.cookie);
+  const repRow = (repQueue.json.reports || []).find(r => r.id === (rep.json.id || rep.json.report_id));
+  check('report lands in the admin queue with reporter + target', !!repRow && repRow.reason.includes('scam'));
+  const repResolve = await call('PATCH', `/api/admin/reports/${rep.json.id || rep.json.report_id}`, { status: 'resolved', note: 'Checked, poster verified.' }, admin.cookie);
+  check('admin resolves the report', repResolve.status === 200);
+  const repSelf = await call('POST', '/api/reports', { target_type: 'user', target_id: third.id, reason: 'Self report.' }, third.cookie);
+  check('cannot report yourself', repSelf.status >= 400, 'status ' + repSelf.status);
+
+  // ---------- M0: blocking ----------
+  const tradesJobId = tradesJob.json.job ? tradesJob.json.job.id : tradesJob.json.id;
+  await call('PATCH', '/api/users/me', { orientation_accepted: true }, third.cookie);
+  const apply3 = await call('POST', `/api/jobs/${tradesJobId}/apply`, { message: 'I can fix taps.' }, third.cookie);
+  check('third user applies to the trades job', apply3.status === 200 || apply3.status === 201, JSON.stringify(apply3.json).slice(0, 160));
+  const block = await call('POST', `/api/blocks/${third.id}`, {}, admin.cookie);
+  check('poster blocks the third user', block.status === 200 || block.status === 201, JSON.stringify(block.json).slice(0, 160));
+  const convBlocked = await call('POST', '/api/conversations', { job_id: tradesJobId, worker_id: third.id }, admin.cookie);
+  check('a block stops conversation creation between the two users', convBlocked.status === 403, 'status ' + convBlocked.status);
+  const job3 = await call('POST', '/api/jobs', {
+    title: 'Paint a fence', category: 'Painting', description: 'Two panels, white paint provided.',
+    city: 'Lusaka', area: 'Woodlands', date_needed: '2026-11-22', pay_amount: 300, pay_type: 'per_job',
+    workers_needed: 1, terms_accepted: true,
+  }, admin.cookie);
+  const job3Id = job3.json.job ? job3.json.job.id : job3.json.id;
+  const applyBlocked = await call('POST', `/api/jobs/${job3Id}/apply`, { message: 'I paint.' }, third.cookie);
+  check('blocked user cannot apply to the blocker\u2019s jobs', applyBlocked.status === 403, 'status ' + applyBlocked.status + ' ' + JSON.stringify(applyBlocked.json).slice(0, 120));
+  const unblock = await call('DELETE', `/api/blocks/${third.id}`, null, admin.cookie);
+  check('unblock works', unblock.status === 200);
+  const convOk = await call('POST', '/api/conversations', { job_id: tradesJobId, worker_id: third.id }, admin.cookie);
+  check('conversation works again after unblock', convOk.status === 200 || convOk.status === 201, 'status ' + convOk.status);
+
+  // ---------- M0: suspension ----------
+  const suspend = await call('PATCH', `/api/admin/users/${third.id}/suspend`, { reason: 'Test suspension' }, admin.cookie);
+  check('admin suspends a user', suspend.status === 200, JSON.stringify(suspend.json).slice(0, 160));
+  const loginSuspended = await call('POST', '/api/auth/login', { phone: '0970000003', password: 'test-pass-123' });
+  check('suspended user cannot log in', loginSuspended.status === 403, 'status ' + loginSuspended.status);
+  const apiSuspended = await call('GET', '/api/auth/me', null, third.cookie);
+  check('suspended user session is rejected by the API', apiSuspended.status === 403, 'status ' + apiSuspended.status);
+  const reinstate = await call('PATCH', `/api/admin/users/${third.id}/suspend`, { suspended: false }, admin.cookie);
+  check('admin reinstates the user', reinstate.status === 200);
+  const loginAgain = await call('POST', '/api/auth/login', { phone: '0970000003', password: 'test-pass-123' });
+  check('reinstated user can log in again', !!loginAgain.cookie);
+
+  // ---------- M0: audit log ----------
+  const audit = await call('GET', '/api/admin/audit', null, admin.cookie);
+  const actions = (audit.json.entries || []).map(e => e.action);
+  check('audit log records suspension', actions.includes('user.suspend'), actions.join(','));
+  check('audit log records category creation', actions.includes('category.create'), actions.join(','));
+  check('audit log records report resolution', actions.includes('report.resolve'), actions.join(','));
+  const auditByWorker = await call('GET', '/api/admin/audit', null, worker.cookie);
+  check('non-admin blocked from audit log (403)', auditByWorker.status === 403);
+
+  // ---------- 2.0 M1: Jobs 2.0 ----------
+  const p2 = await registerUser('M1 Poster', '0970000011', 'Lusaka');
+  const w2 = await registerUser('M1 Worker', '0970000012', 'Lusaka');
+  await call('PATCH', '/api/users/me', { orientation_accepted: true }, w2.cookie);
+  await call('PATCH', '/api/users/me', { skills: ['Plumbing'] }, w2.cookie);
+  const w3 = await registerUser('M1 Distant', '0970000013', 'Livingstone');
+
+  const j1 = await call('POST', '/api/jobs', {
+    title: 'Fix a leaking kitchen sink', category: 'Plumbing',
+    description: 'Kitchen sink leaks under the cabinet, needs a proper fix.',
+    city: 'Lusaka', area: 'Kabulonga', date_needed: '2026-11-23', pay_amount: 450,
+    pay_type: 'per_job', workers_needed: 1, terms_accepted: true,
+    expected_duration: '1 day', start_time: '08:00', transport_provided: '1',
+    materials_provided: '0', is_urgent: '1', instructions: 'Call when you arrive at the gate.',
+    photos: [IMG, IMG],
+  }, p2.cookie);
+  check('M1: job with photos + extras creates', j1.status === 201, JSON.stringify(j1.json).slice(0, 160));
+  const j1id = j1.json.id;
+  const d1 = await call('GET', '/api/jobs/' + j1id, null, w2.cookie);
+  const d1j = d1.json.job || {};
+  check('M1: detail carries photos + extras', (d1j.photos || []).length === 2
+    && d1j.expected_duration === '1 day' && d1j.is_urgent === true
+    && d1j.transport_provided === true && d1j.materials_provided === false
+    && (d1j.instructions || '').includes('gate'), JSON.stringify(d1.json).slice(0, 220));
+  const lst = await call('GET', '/api/jobs?category=Plumbing', null, w2.cookie);
+  const lrow = (lst.json.jobs || []).find(x => x.id === j1id) || {};
+  check('M1: list has photo_count + cover, hides instructions', lrow.photo_count === 2
+    && typeof lrow.cover_photo === 'string' && lrow.cover_photo.includes('/photos/')
+    && lrow.instructions === undefined, JSON.stringify(lrow).slice(0, 200));
+  const photoRes = await fetch(BASE + (d1j.photos && d1j.photos[0] ? d1j.photos[0].url : '/missing'));
+  check('M1: photo endpoint serves image bytes', photoRes.status === 200
+    && (photoRes.headers.get('content-type') || '').startsWith('image/'), 'status ' + photoRes.status);
+
+  const fMin = await call('GET', '/api/jobs?category=Plumbing&pay_min=500', null, w2.cookie);
+  check('M1: pay_min filter excludes K450 job', !(fMin.json.jobs || []).some(x => x.id === j1id));
+  const fMax = await call('GET', '/api/jobs?category=Plumbing&pay_max=500', null, w2.cookie);
+  check('M1: pay_max filter includes K450 job', (fMax.json.jobs || []).some(x => x.id === j1id));
+  const fDur = await call('GET', '/api/jobs?category=Plumbing&duration=' + encodeURIComponent('About a week'), null, w2.cookie);
+  check('M1: duration filter excludes 1-day job', !(fDur.json.jobs || []).some(x => x.id === j1id));
+  const fUrg = await call('GET', '/api/jobs?urgent=1', null, w2.cookie);
+  check('M1: urgent filter returns only urgent jobs', (fUrg.json.jobs || []).length > 0
+    && (fUrg.json.jobs || []).every(x => x.is_urgent === true)
+    && (fUrg.json.jobs || []).some(x => x.id === j1id));
+
+  const dr = await call('POST', '/api/jobs', { title: 'Half-written job idea', draft: true }, p2.cookie);
+  check('M1: draft creates with title only', dr.status === 201 && dr.json.draft === true, JSON.stringify(dr.json).slice(0, 160));
+  const drId = dr.json.id;
+  const drPublic = await call('GET', '/api/jobs?q=' + encodeURIComponent('Half-written'), null, w2.cookie);
+  check('M1: draft hidden from public list', !(drPublic.json.jobs || []).some(x => x.id === drId));
+  const drMine = await call('GET', '/api/jobs?mine=1', null, p2.cookie);
+  check('M1: draft visible in poster mine list', (drMine.json.jobs || []).some(x => x.id === drId));
+  const drOther = await call('GET', '/api/jobs/' + drId, null, w2.cookie);
+  check('M1: draft detail is 404 to others', drOther.status === 404, 'status ' + drOther.status);
+  const drApply = await call('POST', `/api/jobs/${drId}/apply`, { message: 'Early?' }, w2.cookie);
+  check('M1: cannot apply to a draft', drApply.status === 422, 'status ' + drApply.status);
+  const pubEarly = await call('POST', `/api/jobs/${drId}/publish`, { terms_accepted: true }, p2.cookie);
+  check('M1: publish blocked while fields are missing', pubEarly.status === 422, 'status ' + pubEarly.status);
+  const complete = await call('PATCH', '/api/jobs/' + drId, {
+    category: 'Cleaning', description: 'Deep clean a two bedroom flat before tenants move in.',
+    city: 'Lusaka', date_needed: '2026-11-24', pay_amount: 300, pay_type: 'per_day',
+  }, p2.cookie);
+  check('M1: draft can be completed by edit', complete.status === 200, JSON.stringify(complete.json).slice(0, 160));
+  const pub = await call('POST', `/api/jobs/${drId}/publish`, { terms_accepted: true }, p2.cookie);
+  const pubDetail = await call('GET', '/api/jobs/' + drId, null, w2.cookie);
+  check('M1: completed draft publishes', pub.status === 200 && pub.json.ok === true
+    && pubDetail.status === 200 && (pubDetail.json.job || {}).is_draft === false,
+    JSON.stringify(pub.json).slice(0, 160));
+
+  const appM1 = await call('POST', `/api/jobs/${j1id}/apply`, { message: 'Plumber, ready.' }, w2.cookie);
+  const appM1Id = appM1.json.id;
+  check('M1: worker applies to photo job', (appM1.status === 200 || appM1.status === 201) && !!appM1Id, JSON.stringify(appM1.json).slice(0, 160));
+  async function appStatus() {
+    const r = await call('GET', `/api/jobs/${j1id}/applications`, null, p2.cookie);
+    const row = (r.json.applications || []).find(a => a.id === appM1Id) || {};
+    return row.status;
+  }
+  const sl = await call('PATCH', `/api/applications/${appM1Id}`, { status: 'shortlisted' }, p2.cookie);
+  check('M1: poster shortlists application', sl.status === 200 && (await appStatus()) === 'shortlisted', JSON.stringify(sl.json).slice(0, 160));
+  const unsl = await call('PATCH', `/api/applications/${appM1Id}`, { status: 'pending' }, p2.cookie);
+  check('M1: poster moves back to pending', unsl.status === 200 && (await appStatus()) === 'pending');
+  await call('PATCH', `/api/applications/${appM1Id}`, { status: 'shortlisted' }, p2.cookie);
+  const accFromSl = await call('PATCH', `/api/applications/${appM1Id}`, { status: 'accepted' }, p2.cookie);
+  check('M1: accept works from shortlisted', accFromSl.status === 200 && (await appStatus()) === 'accepted');
+  const wSl = await call('PATCH', `/api/applications/${appM1Id}`, { status: 'shortlisted' }, w2.cookie);
+  check('M1: worker cannot shortlist (not the poster)', wSl.status >= 400, 'status ' + wSl.status);
+
+  const rp = await call('POST', `/api/jobs/${j1id}/repost`, { date_needed: '2026-11-27', terms_accepted: true }, p2.cookie);
+  check('M1: repost creates a new job', rp.status === 201 && rp.json.id && rp.json.id !== j1id, JSON.stringify(rp.json).slice(0, 160));
+  const rpDetail = await call('GET', '/api/jobs/' + rp.json.id, null, p2.cookie);
+  const rpj = rpDetail.json.job || {};
+  check('M1: repost copies photos + extras', (rpj.photos || []).length === 2
+    && rpj.expected_duration === '1 day' && rpj.is_urgent === true);
+  const rpPast = await call('POST', `/api/jobs/${j1id}/repost`, { date_needed: '2020-01-01', terms_accepted: true }, p2.cookie);
+  check('M1: repost rejects a past date', rpPast.status === 422, 'status ' + rpPast.status);
+
+  await call('POST', '/api/jobs', {
+    title: 'Livingstone falls guide needed', category: 'Tourism & Hospitality',
+    description: 'Guide needed for a day trip group at the falls entrance.',
+    city: 'Livingstone', area: 'Falls', date_needed: '2026-11-25', pay_amount: 500,
+    pay_type: 'per_day', workers_needed: 1, terms_accepted: true,
+  }, p2.cookie);
+  const rec = await call('GET', '/api/jobs/recommended', null, w2.cookie);
+  const recIds = (rec.json.jobs || []).map(x => x.id);
+  // Note: j1 itself is 'filled' by now (its one worker was accepted above),
+  // so the open match to assert on is its repost, same city + category.
+  const recRow = (rec.json.jobs || []).find(x => x.id === rp.json.id) || {};
+  check('M1: recommendations include same-city skills match with reason', recIds.includes(rp.json.id)
+    && typeof recRow.recommend_reason === 'string' && recRow.recommend_reason.includes('Matches your skills'),
+    JSON.stringify(rec.json).slice(0, 200));
+  check('M1: recommendations exclude own jobs', !(rec.json.jobs || []).some(x => x.poster_id === w2.id));
+  const recDistant = await call('GET', '/api/jobs/recommended', null, w3.cookie);
+  check('M1: recommendations still answer for distant user', recDistant.status === 200 && Array.isArray(recDistant.json.jobs));
+
+  // ---------- 2.0 M2: global search people filter ----------
+  await call('PATCH', '/api/users/me', { open_to_work: true }, w2.cookie);
+  const wq = await call('GET', '/api/workers?q=' + encodeURIComponent('plumbing'), null, p2.cookie);
+  check('M2: workers search finds the plumber by skill', (wq.json.workers || []).some(x => x.id === w2.id),
+    JSON.stringify(wq.json).slice(0, 160));
+  const wq2 = await call('GET', '/api/workers?q=' + encodeURIComponent('zzzz-nomatch'), null, p2.cookie);
+  check('M2: workers search with no match returns empty', (wq2.json.workers || []).length === 0);
+
+  // List payloads must not embed profile photos as base64 (v82): the
+  // workers list alone shipped ~2.3 MB in production and crawled on
+  // mobile data. Avatars travel as the cached /api/users/:id/avatar URL.
+  const wqWorker = (wq.json.workers || []).find(x => x.id === w2.id) || {};
+  check('PAYLOAD: worker avatar is an image URL, not base64', String(wqWorker.avatar || '').startsWith('/api/users/') && !JSON.stringify(wq.json).includes('data:image'), String(wqWorker.avatar).slice(0, 60));
+  check('PAYLOAD: workers feed carries no embedded file data at all', !JSON.stringify(wq.json).includes('base64,'), 'the slim read behind the Oct 27 crash fix (v84)');
+  const jq = await call('GET', '/api/jobs?q=' + encodeURIComponent('plumbing'), null, w2.cookie);
+  // j1 itself is filled by now; its open repost (same title, no "plumbing"
+  // in title or description) is the category-match proof.
+  check('M2: job search matches by category word', (jq.json.jobs || []).some(x => x.id === rp.json.id),
+    JSON.stringify(jq.json).slice(0, 160));
+
+  // ---------- 2.0 M3: Marketplace ----------
+  const mcats = await call('GET', '/api/categories?kind=market', null, p2.cookie);
+  check('M3: 16 market categories seeded', (mcats.json.categories || []).length === 16
+    && (mcats.json.categories || []).some(c => c.name === 'Electronics'),
+    JSON.stringify(mcats.json).slice(0, 160));
+  const badProd = await call('POST', '/api/products', {
+    title: 'Ok', category: 'Nonsense', description: 'short', city: 'Lusaka', price: -5,
+  }, p2.cookie);
+  check('M3: invalid product rejected (422)', badProd.status === 422, 'status ' + badProd.status);
+  const prod = await call('POST', '/api/products', {
+    title: 'Samsung Galaxy A15 phone', category: 'Phones & Tablets',
+    description: 'Clean Samsung Galaxy A15, 128GB, small crack on the back cover.',
+    city: 'Lusaka', area: 'Kamwala', price: 2800, condition: 'Good', photos: [IMG, IMG],
+  }, p2.cookie);
+  check('M3: seller lists a product with photos', prod.status === 201 && !!prod.json.id, JSON.stringify(prod.json).slice(0, 160));
+  const prodId = prod.json.id;
+  const dupProd = await call('POST', '/api/products', {
+    title: 'samsung galaxy a15 PHONE', category: 'Phones & Tablets',
+    description: 'Same title again, different case, should be blocked.',
+    city: 'Lusaka', price: 2500,
+  }, p2.cookie);
+  check('M3: duplicate title blocked (409)', dupProd.status === 409, 'status ' + dupProd.status);
+  const mlist = await call('GET', '/api/products?category=' + encodeURIComponent('Phones & Tablets'), null, w2.cookie);
+  const mrow = (mlist.json.products || []).find(x => x.id === prodId) || {};
+  check('M3: market list filters by category, has cover', !!mrow.id && mrow.photo_count === 2
+    && typeof mrow.cover_photo === 'string' && mrow.seller_name === 'M1 Poster');
+  const msearch = await call('GET', '/api/products?q=' + encodeURIComponent('galaxy'), null, w2.cookie);
+  check('M3: market search finds by title word', (msearch.json.products || []).some(x => x.id === prodId));
+  const mprice = await call('GET', '/api/products?price_max=1000', null, w2.cookie);
+  check('M3: price filter excludes the K2,800 phone', !(mprice.json.products || []).some(x => x.id === prodId));
+  const pdetail = await call('GET', '/api/products/' + prodId, null, w2.cookie);
+  check('M3: product detail has photos + seller block', (pdetail.json.product || {}).photos
+    && pdetail.json.product.photos.length === 2 && pdetail.json.product.seller_name === 'M1 Poster'
+    && typeof pdetail.json.product.seller_verified === 'boolean',
+    JSON.stringify(pdetail.json).slice(0, 200));
+  const pphoto = await fetch(BASE + '/api/products/' + prodId + '/photos/' + pdetail.json.product.photos[0].id);
+  check('M3: product photo endpoint serves image', pphoto.status === 200
+    && (pphoto.headers.get('content-type') || '').startsWith('image/'));
+  const ownOffer = await call('POST', `/api/products/${prodId}/offers`, { amount: 2500 }, p2.cookie);
+  check('M3: cannot offer on own item (422)', ownOffer.status === 422, 'status ' + ownOffer.status);
+  const offer = await call('POST', `/api/products/${prodId}/offers`, { amount: 2400, message: 'Cash today.' }, w2.cookie);
+  check('M3: buyer makes an offer', offer.status === 201 && !!offer.json.id, JSON.stringify(offer.json).slice(0, 120));
+  const offerId = offer.json.id;
+  const offer2 = await call('POST', `/api/products/${prodId}/offers`, { amount: 2500 }, w2.cookie);
+  check('M3: second offer updates the pending one', offer2.status === 200 && offer2.json.updated === true && offer2.json.id === offerId);
+  const sellerOffers = await call('GET', `/api/products/${prodId}/offers`, null, p2.cookie);
+  const so = (sellerOffers.json.offers || [])[0] || {};
+  check('M3: seller sees the offer at the updated amount', so.amount === 2500 && so.buyer_name === 'M1 Worker');
+  const wAccept = await call('PATCH', `/api/offers/${offerId}`, { status: 'accepted' }, w2.cookie);
+  check('M3: buyer cannot accept own offer (403)', wAccept.status === 403, 'status ' + wAccept.status);
+  const accOffer = await call('PATCH', `/api/offers/${offerId}`, { status: 'accepted' }, p2.cookie);
+  check('M3: seller accepts the offer', accOffer.status === 200 && accOffer.json.status === 'accepted');
+  const pconv = await call('POST', '/api/conversations/product', { product_id: prodId }, w2.cookie);
+  check('M3: buyer opens a product chat', pconv.status === 201 && !!pconv.json.conversation_id, JSON.stringify(pconv.json).slice(0, 120));
+  const pconvId = pconv.json.conversation_id;
+  const pmsg = await call('POST', `/api/conversations/${pconvId}/messages`, { body: 'Hi, is the phone still available?' }, w2.cookie);
+  check('M3: product chat messaging works', pmsg.status === 201, 'status ' + pmsg.status);
+  const pchat = await call('GET', `/api/conversations/${pconvId}`, null, p2.cookie);
+  const pc = pchat.json.conversation || {};
+  check('M3: chat is a product thread, phone revealed after accepted offer',
+    pc.kind === 'product' && pc.job_title === 'Samsung Galaxy A15 phone' && !!pc.other_phone,
+    JSON.stringify(pc).slice(0, 200));
+  const convList = await call('GET', '/api/conversations', null, w2.cookie);
+  const lc = (convList.json.conversations || []).find(x => x.id === pconvId) || {};
+  check('M3: conversation list carries product kind + presence', lc.kind === 'product'
+    && lc.other_name === 'M1 Poster' && typeof lc.other_online === 'boolean');
+  const sum = await call('GET', '/api/selling/summary', null, p2.cookie);
+  check('M3: selling summary counts', sum.json.active === 1 && sum.json.offers_pending === 0,
+    JSON.stringify(sum.json));
+  const hide = await call('PATCH', `/api/products/${prodId}`, { status: 'hidden' }, p2.cookie);
+  const hiddenList = await call('GET', '/api/products', null, w2.cookie);
+  check('M3: hidden item leaves the public list', hide.status === 200
+    && !(hiddenList.json.products || []).some(x => x.id === prodId));
+  const hiddenDetail = await call('GET', '/api/products/' + prodId, null, w2.cookie);
+  check('M3: hidden item is 404 to other users', hiddenDetail.status === 404, 'status ' + hiddenDetail.status);
+  const soldPatch = await call('PATCH', `/api/products/${prodId}`, { status: 'sold' }, p2.cookie);
+  check('M3: owner marks sold', soldPatch.status === 200);
+  const sum2 = await call('GET', '/api/selling/summary', null, p2.cookie);
+  check('M3: summary reflects the sale', sum2.json.sold === 1 && sum2.json.active === 0, JSON.stringify(sum2.json));
+
+  // ---------- 2.0 M3b: seller messages the buyer from a received offer ----------
+  // The buyer-side product chat only lets the buyer write first; a seller
+  // holding an offer needs the first move too (the accept toast already
+  // tells sellers to "Message the buyer").
+  const scSeller = await registerUser('Seller Chat Seller', '0970000021', 'Lusaka');
+  const scBuyer = await registerUser('Seller Chat Buyer', '0970000022', 'Kitwe');
+  const scOther = await registerUser('Seller Chat Other', '0970000023', 'Ndola');
+  const scProd = await call('POST', '/api/products', {
+    title: 'Seller chat test phone', category: 'Phones & Tablets',
+    description: 'Listed only to exercise seller-first messaging on offers.',
+    city: 'Lusaka', price: 1500, condition: 'Good', photos: [IMG],
+  }, scSeller.cookie);
+  check('M3b: seller lists an item for the offer-chat test', scProd.status === 201 && !!scProd.json.id, JSON.stringify(scProd.json).slice(0, 120));
+  const scProdId = scProd.json.id;
+  const scOffer = await call('POST', `/api/products/${scProdId}/offers`, { amount: 1400, message: 'Can we meet in town?' }, scBuyer.cookie);
+  check('M3b: buyer makes an offer', scOffer.status === 201 && !!scOffer.json.id, JSON.stringify(scOffer.json).slice(0, 120));
+  const scOfferId = scOffer.json.id;
+  const scBuyerTry = await call('POST', `/api/offers/${scOfferId}/conversation`, null, scBuyer.cookie);
+  check('M3b: the buyer cannot open the thread from the offer (403)', scBuyerTry.status === 403, 'status ' + scBuyerTry.status);
+  const scOtherTry = await call('POST', `/api/offers/${scOfferId}/conversation`, null, scOther.cookie);
+  check('M3b: a user with no offer relationship gets 403', scOtherTry.status === 403, 'status ' + scOtherTry.status);
+  const scMissing = await call('POST', '/api/offers/999999/conversation', null, scSeller.cookie);
+  check('M3b: a missing offer is 404', scMissing.status === 404, 'status ' + scMissing.status);
+  const scConv = await call('POST', `/api/offers/${scOfferId}/conversation`, null, scSeller.cookie);
+  check('M3b: seller opens a conversation from the pending offer', scConv.status === 201 && !!scConv.json.conversation_id, JSON.stringify(scConv.json).slice(0, 120));
+  const scConvId = scConv.json.conversation_id;
+  const scMsg = await call('POST', `/api/conversations/${scConvId}/messages`, { body: 'Hello, thanks for your offer. The item is still available.' }, scSeller.cookie);
+  check('M3b: seller sends the first message', scMsg.status === 201, 'status ' + scMsg.status);
+  const scBuyerList = await call('GET', '/api/conversations', null, scBuyer.cookie);
+  const scSeen = (scBuyerList.json.conversations || []).find(x => x.id === scConvId) || {};
+  check('M3b: buyer sees the seller-started thread in their list', scSeen.kind === 'product'
+    && scSeen.other_name === 'Seller Chat Seller'
+    && scSeen.last_body === 'Hello, thanks for your offer. The item is still available.',
+    JSON.stringify(scSeen).slice(0, 200));
+  const scThread = await call('GET', `/api/conversations/${scConvId}`, null, scBuyer.cookie);
+  check('M3b: buyer opens the thread and reads the seller message', scThread.status === 200
+    && (scThread.json.messages || []).some(m => m.sender_id === scSeller.id),
+    'status ' + scThread.status);
+  const scReply = await call('POST', `/api/conversations/${scConvId}/messages`, { body: 'Great, I can come by tomorrow morning.' }, scBuyer.cookie);
+  check('M3b: buyer replies in the seller-started thread', scReply.status === 201, 'status ' + scReply.status);
+  const scConv2 = await call('POST', `/api/offers/${scOfferId}/conversation`, null, scSeller.cookie);
+  const scSellerList = await call('GET', '/api/conversations', null, scSeller.cookie);
+  check('M3b: opening again returns the same conversation, no duplicate', scConv2.status === 201
+    && scConv2.json.conversation_id === scConvId
+    && (scSellerList.json.conversations || []).filter(x => x.product_id === scProdId).length === 1,
+    JSON.stringify(scConv2.json).slice(0, 120));
+  const scAccept = await call('PATCH', `/api/offers/${scOfferId}`, { status: 'accepted' }, scSeller.cookie);
+  const scConv3 = await call('POST', `/api/offers/${scOfferId}/conversation`, null, scSeller.cookie);
+  check('M3b: accepted offer still opens the same thread', scAccept.status === 200
+    && scConv3.status === 201 && scConv3.json.conversation_id === scConvId,
+    'accept ' + scAccept.status + ', conv ' + scConv3.status);
+
+  // ---------- 2.0 M4: Business storefronts ----------
+  const bizApply = await call('POST', '/api/businesses', {
+    pacra_number: '120200012345', tpin: '1000000001', owner_legal_name: 'Test Owner', address: 'Plot 1, Test Road', certificate: IMG,
+    name: 'Kamwala Phone Repairs', category: 'Phones & Tablets', city: 'Lusaka',
+    area: 'Kamwala', description: 'Phone repairs, screens, batteries and accessories, same day service.',
+    tagline: 'Fixed today, working tonight', hours_text: 'Mon to Sat, 8:00 to 17:30',
+  }, p2.cookie);
+  check('M4: business application accepted as pending', bizApply.status === 201 && bizApply.json.status === 'pending'
+    && String(bizApply.json.slug || '').startsWith('kamwala-phone-repairs-'), JSON.stringify(bizApply.json).slice(0, 160));
+  const bizId = bizApply.json.id;
+  const bizSlug = bizApply.json.slug;
+  const bizPublic0 = await call('GET', '/api/businesses', null, w2.cookie);
+  check('M4: pending business is not public yet', !(bizPublic0.json.businesses || []).some(x => x.id === bizId));
+  const bizDetail0 = await call('GET', '/api/businesses/' + bizSlug, null, w2.cookie);
+  check('M4: pending storefront is 404 to the public', bizDetail0.status === 404, 'status ' + bizDetail0.status);
+  const docUp = await call('POST', `/api/businesses/${bizId}/documents`, { kind: 'pacra', image: IMG }, p2.cookie);
+  check('M4: owner uploads a PACRA document', docUp.status === 201, 'status ' + docUp.status);
+  const mine1 = await call('GET', '/api/businesses/mine', null, p2.cookie);
+  const myBiz = (mine1.json.businesses || [])[0] || {};
+  check('M4: verification becomes pending after upload', myBiz.verification_status === 'pending'
+    && myBiz.verified === false && myBiz.slug === bizSlug);
+  const adminList = await call('GET', '/api/admin/businesses?status=pending', null, admin.cookie);
+  const ab = (adminList.json.businesses || []).find(x => x.id === bizId) || {};
+  // v76: the PACRA certificate filed at apply is document 1; the upload above is document 2.
+  check('M4: admin queue shows the application with doc count', ab.doc_count === 2 && ab.name === 'Kamwala Phone Repairs');
+  const adminDocs = await call('GET', `/api/admin/businesses/${bizId}/documents`, null, admin.cookie);
+  check('M4: admin can view the uploaded document', (adminDocs.json.documents || []).length === 2
+    && typeof adminDocs.json.documents[0].image === 'string');
+  const approve = await call('PATCH', `/api/admin/businesses/${bizId}`, { status: 'active' }, admin.cookie);
+  check('M4: admin approves the storefront', approve.status === 200 && approve.json.status === 'active');
+  const verify = await call('PATCH', `/api/admin/businesses/${bizId}/verification`, { decision: 'verified', note: 'PACRA checked' }, admin.cookie);
+  check('M4: admin verifies the business', verify.status === 200 && verify.json.verification_status === 'verified');
+  const shopProduct = await call('POST', '/api/products', {
+    title: 'Phone screen replacement service stock', category: 'Phones & Tablets',
+    description: 'Replacement screens for Samsung and Tecno, fitted in store.',
+    city: 'Lusaka', price: 650, business_id: bizId,
+  }, p2.cookie);
+  check('M4: owner links a product to the business', shopProduct.status === 201, JSON.stringify(shopProduct.json).slice(0, 120));
+  const shopDetail = await call('GET', '/api/products/' + shopProduct.json.id, null, w2.cookie);
+  const sb = (shopDetail.json.product || {}).business || {};
+  check('M4: product shows the verified shop', sb.name === 'Kamwala Phone Repairs' && sb.slug === bizSlug && sb.verified === true);
+  const notMyBiz = await call('POST', '/api/products', {
+    title: 'Sneaky linked item', category: 'Electronics',
+    description: 'Trying to link to a business that is not mine at all.',
+    city: 'Lusaka', price: 100, business_id: bizId,
+  }, w2.cookie);
+  check("M4: cannot link a product to someone else's business (422)", notMyBiz.status === 422, 'status ' + notMyBiz.status);
+  const store = await call('GET', '/api/businesses/' + bizSlug, null, w2.cookie);
+  const stB = store.json.business || {};
+  check('M4: public storefront is verified with catalogue', stB.verified === true
+    && (store.json.products || []).some(x => x.id === shopProduct.json.id)
+    && Array.isArray(store.json.jobs), JSON.stringify(stB).slice(0, 200));
+  const bizPublic1 = await call('GET', '/api/businesses?q=' + encodeURIComponent('kamwala'), null, w2.cookie);
+  check('M4: directory search finds the shop', (bizPublic1.json.businesses || []).some(x => x.id === bizId));
+  const hackEdit = await call('PATCH', `/api/businesses/${bizId}`, { tagline: 'hacked' }, w2.cookie);
+  check('M4: non-owner cannot edit the business (403)', hackEdit.status === 403, 'status ' + hackEdit.status);
+
+  // ---------- Design alignment D: admin dashboard stats ----------
+  const ddStats = await call('GET', '/api/admin/stats', null, admin.cookie);
+  check('DD: stats carry dashboard counts', ddStats.status === 200 && typeof ddStats.json.products_total === 'number' && typeof ddStats.json.businesses_pending === 'number' && typeof ddStats.json.reports_open === 'number', JSON.stringify(ddStats.json).slice(0, 120));
+  const ddDenied = await call('GET', '/api/admin/stats', null, worker.cookie);
+  check('DD: stats stay admin-only (403)', ddDenied.status === 403, 'status ' + ddDenied.status);
+
+  // ---------- Design alignment C: follows, storefront reviews, profile stats ----------
+  const dcOwner = await registerUser('DC Owner', '0970000961', 'Lusaka');
+  const dcFan = await registerUser('DC Fan', '0970000962', 'Kitwe');
+  const dcBiz = await call('POST', '/api/businesses', {
+    pacra_number: '120200012345', tpin: '1000000001', owner_legal_name: 'Test Owner', address: 'Plot 1, Test Road', certificate: IMG, name: 'DC Follow Shop', category: 'Electronics', city: 'Lusaka', description: 'A shop for follow tests and reviews.' }, dcOwner.cookie);
+  const dcBizId = dcBiz.json.id;
+  await call('PATCH', '/api/admin/businesses/' + dcBizId, { status: 'active' }, admin.cookie);
+  const dcFollow = await call('POST', '/api/businesses/' + dcBizId + '/follow', {}, dcFan.cookie);
+  check('DC: follow works with a count', dcFollow.status === 200 && dcFollow.json.following === true && dcFollow.json.follower_count === 1, JSON.stringify(dcFollow.json));
+  const dcStore = await call('GET', '/api/businesses/dc-follow-shop-' + dcBizId, null, dcFan.cookie);
+  check('DC: storefront shows following state and reviews list', dcStore.json.business && dcStore.json.business.following === true && dcStore.json.business.follower_count === 1 && Array.isArray(dcStore.json.reviews));
+    const folList = await call('GET', '/api/businesses?following=1', null, dcFan.cookie);
+    check('FOLLOWING LIST: a follower sees the followed business', (folList.json.businesses || []).some(b => b.id === dcBizId), JSON.stringify(folList.json).slice(0, 120));
+    const folOwner = await call('GET', '/api/businesses?following=1', null, dcOwner.cookie);
+    check('FOLLOWING LIST: a non-follower does not', !(folOwner.json.businesses || []).some(b => b.id === dcBizId));
+    const folAnon = await call('GET', '/api/businesses?following=1');
+    check('FOLLOWING LIST: signed out gets an empty list', folAnon.status === 200 && (folAnon.json.businesses || []).length === 0);
+  const dcOwn = await call('POST', '/api/businesses/' + dcBizId + '/follow', {}, dcOwner.cookie);
+  check('DC: cannot follow your own business (422)', dcOwn.status === 422, 'status ' + dcOwn.status);
+  const dcUn = await call('DELETE', '/api/businesses/' + dcBizId + '/follow', null, dcFan.cookie);
+  check('DC: unfollow works', dcUn.status === 200 && dcUn.json.following === false && dcUn.json.follower_count === 0);
+  const dcStats = await call('GET', '/api/users/me/stats', null, dcFan.cookie);
+  check('DC: profile stats shape', dcStats.status === 200 && typeof dcStats.json.jobs_completed === 'number' && typeof dcStats.json.items_sold === 'number' && typeof dcStats.json.rating_count === 'number', JSON.stringify(dcStats.json));
+
+  // ---------- Design alignment B: negotiable + used filter ----------
+  const dbSeller = await registerUser('DB Seller', '0970000951', 'Lusaka');
+  const dbNew = await call('POST', '/api/products', { title: 'DB brand new phone', category: 'Phones & Tablets', description: 'Sealed in the box with warranty.', price: 4500, condition: 'New', city: 'Lusaka', negotiable: true }, dbSeller.cookie);
+  const dbUsed = await call('POST', '/api/products', { title: 'DB used sofa', category: 'Home & Furniture', description: 'Used sofa in good shape.', price: 3000, condition: 'Good', city: 'Lusaka' }, dbSeller.cookie);
+  check('DB: products created', dbNew.status === 201 && dbUsed.status === 201, dbNew.status + '/' + dbUsed.status);
+  const dbDetail = await call('GET', '/api/products/' + dbNew.json.id, null, dbSeller.cookie);
+  check('DB: negotiable flag round-trips', dbDetail.json.product && dbDetail.json.product.negotiable === true && typeof dbDetail.json.product.seller_rating === 'number');
+  const dbUsedList = await call('GET', '/api/products?used=1&category=Phones%20%26%20Tablets', null, dbSeller.cookie);
+  check('DB: used=1 excludes New items', !(dbUsedList.json.products || []).some(x => x.id === dbNew.json.id));
+  const dbPatch = await call('PATCH', '/api/products/' + dbNew.json.id, { negotiable: false }, dbSeller.cookie);
+  const dbDetail2 = await call('GET', '/api/products/' + dbNew.json.id, null, dbSeller.cookie);
+  check('DB: negotiable can be switched off', dbPatch.status === 200 && dbDetail2.json.product.negotiable === false);
+
+  // ---------- Design alignment A: pay sort + poster verified ----------
+  const daRich = await registerUser('DA Rich', '0970000901', 'Lusaka');
+  const daCheap = await registerUser('DA Cheap', '0970000902', 'Lusaka');
+  const daR = await call('POST', '/api/jobs', { title: 'DA high pay job', category: 'Painting', description: 'High pay test job for the sort.', city: 'Lusaka', date_needed: '2026-11-05', pay_amount: 900, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, daRich.cookie);
+  const daC = await call('POST', '/api/jobs', { title: 'DA low pay job', category: 'Painting', description: 'Low pay test job for the sort.', city: 'Lusaka', date_needed: '2026-11-05', pay_amount: 90, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, daCheap.cookie);
+  check('DA: sort fixture jobs created', (daR.status === 200 || daR.status === 201) && (daC.status === 200 || daC.status === 201), daR.status + '/' + daC.status);
+  const daSorted = await call('GET', '/api/jobs?sort=pay_high&category=Painting', null, daRich.cookie);
+  const daIds = (daSorted.json.jobs || []).map(j => j.id);
+  const daRId = daR.json.job ? daR.json.job.id : daR.json.id;
+  const daCId = daC.json.job ? daC.json.job.id : daC.json.id;
+  check('DA: pay_high orders K900 before K90', daIds.indexOf(daRId) > -1 && daIds.indexOf(daCId) > -1 && daIds.indexOf(daRId) < daIds.indexOf(daCId), daIds.join(','));
+  const daDetail = await call('GET', '/api/jobs/' + daRId, null, daCheap.cookie);
+  check('DA: detail poster has a boolean verified flag', !!(daDetail.json.job && daDetail.json.job.poster && typeof daDetail.json.job.poster.verified === 'boolean'));
+
+  await bigPhotoTests();
+  await trustTests();
+  await selfieAndLogoTests(admin.cookie, w3);
+  await kycTests(admin.cookie, w3, w2);
+// v76: storefront KYC. Applying requires a PACRA number, a 10-digit
+// TPIN, a street address, the owner/director legal name, and a PACRA
+// certificate photo, which is filed as the first verification document.
+// The numbers are visible to the owner and admins only. Runs on the
+// M1 Distant account (w3): the suite sits at the register-per-hour cap.
+async function kycTests(adminCookie, u, other) {
+  const base = {
+    name: 'KYC Check Trading', category: 'Electronics', city: 'Lusaka',
+    description: 'A storefront created by the KYC test flow.',
+    pacra_number: '120200099988', tpin: '1001234567',
+    owner_legal_name: 'KYC Test Owner', address: 'Plot 9, Cairo Road', certificate: IMG,
+  };
+  const post = (body, cookie) => call('POST', '/api/businesses', body, cookie || u.cookie);
+  check('KYC: apply without a PACRA number is refused (422)', (await post({ ...base, pacra_number: '' })).status === 422);
+  check('KYC: apply without a TPIN is refused (422)', (await post({ ...base, tpin: '' })).status === 422);
+  check('KYC: a short TPIN is refused (422)', (await post({ ...base, tpin: '12345' })).status === 422);
+  check('KYC: a TPIN with letters is refused (422)', (await post({ ...base, tpin: '100123456A' })).status === 422);
+  check('KYC: apply without an owner legal name is refused (422)', (await post({ ...base, owner_legal_name: '' })).status === 422);
+  check('KYC: apply without a street address is refused (422)', (await post({ ...base, address: '' })).status === 422);
+  check('KYC: apply without the certificate photo is refused (422)', (await post({ ...base, certificate: undefined })).status === 422);
+
+  const ok = await post(base);
+  check('KYC: a complete application is created (201)', ok.status === 201, JSON.stringify(ok.json));
+  const id = ok.json && ok.json.id;
+  const mine = await call('GET', '/api/businesses/mine', null, u.cookie);
+  const mineBiz = (mine.json.businesses || []).find((x) => x.id === id) || {};
+  check('KYC: the owner sees the stored PACRA number, TPIN and legal name',
+    mineBiz.pacra_number === '120200099988' && mineBiz.tpin === '1001234567' && mineBiz.owner_legal_name === 'KYC Test Owner',
+    JSON.stringify(mineBiz).slice(0, 200));
+  check('KYC: the certificate queued the shop for verification', mineBiz.verification_status === 'pending', String(mineBiz.verification_status));
+  const docs = await call('GET', '/api/businesses/' + id + '/documents', null, u.cookie);
+  check('KYC: the certificate is filed as a pacra document',
+    docs.status === 200 && (docs.json.documents || []).some((d) => d.kind === 'pacra'), JSON.stringify(docs.json).slice(0, 160));
+
+  const patch = await call('PATCH', '/api/businesses/' + id, { tagline: 'KYC patched tagline' }, u.cookie);
+  check('KYC: the owner can edit without re-sending the numbers (200)', patch.status === 200, JSON.stringify(patch.json).slice(0, 160));
+
+  await call('PATCH', '/api/admin/businesses/' + id, { status: 'active' }, adminCookie);
+  const pub = await call('GET', '/api/businesses/' + mineBiz.slug, null, other.cookie);
+  const pubBiz = (pub.json && pub.json.business) || {};
+  check('KYC: other members never see the TPIN or PACRA number',
+    pub.status === 200 && pubBiz.tpin === undefined && pubBiz.pacra_number === undefined, JSON.stringify(pubBiz).slice(0, 200));
+  const adm = await call('GET', '/api/admin/businesses?status=active', null, adminCookie);
+  const admBiz = ((adm.json && adm.json.businesses) || []).find((x) => x.id === id) || {};
+  check('KYC: admins see the numbers for review', admBiz.tpin === '1001234567' && admBiz.pacra_number === '120200099988');
+}
+
+
+async function accountLifecycleTests(adminCookie) {
+  const a = await registerUser('Lifecycle Worker A', '0970000971', 'Lusaka');
+  const b = await registerUser('Lifecycle Poster B', '0970000972', 'Lusaka');
+  await call('PATCH', '/api/users/me', { open_to_work: true }, a.cookie);
+  await call('PATCH', '/api/users/me', { orientation_accepted: true }, a.cookie);
+  const jobRes = await call('POST', '/api/jobs', {
+    title: 'Lifecycle test job', category: 'Gardening', description: 'A job used by the account lifecycle tests.',
+    city: 'Lusaka', area: 'Kabulonga', date_needed: '2027-06-15', pay_amount: 150, pay_type: 'per_day',
+    workers_needed: 1, terms_accepted: true,
+  }, b.cookie);
+  const jobId = jobRes.json.job ? jobRes.json.job.id : jobRes.json.id;
+  check('ACCOUNT: poster B creates a job', !!jobId, JSON.stringify(jobRes.json).slice(0, 140));
+  const apply = await call('POST', `/api/jobs/${jobId}/apply`, { message: 'I can do this job.' }, a.cookie);
+  check('ACCOUNT: worker A applies', apply.status === 200 || apply.status === 201, 'status ' + apply.status);
+  const prod = await call('POST', '/api/products', {
+    title: 'Lifecycle test phone', category: 'Phones & Tablets',
+    description: 'A product listed by worker A for the lifecycle tests.',
+    city: 'Lusaka', area: 'Kamwala', price: 900, condition: 'Good', photos: [IMG],
+  }, a.cookie);
+  check('ACCOUNT: worker A lists a product', prod.status === 201 && !!prod.json.id, JSON.stringify(prod.json).slice(0, 140));
+
+  const workersBefore = await call('GET', '/api/workers', null, b.cookie);
+  check('ACCOUNT: A appears in the workers list while active', (workersBefore.json.workers || []).some(w => w.id === a.id));
+
+  const noPw = await call('POST', '/api/users/me/deactivate', {}, a.cookie);
+  check('ACCOUNT: deactivate without a password is refused (422)', noPw.status === 422, 'status ' + noPw.status);
+  const wrongPw = await call('POST', '/api/users/me/deactivate', { password: 'not-the-password' }, a.cookie);
+  check('ACCOUNT: deactivate with a wrong password is refused (403)', wrongPw.status === 403, 'status ' + wrongPw.status);
+  const deact = await call('POST', '/api/users/me/deactivate', { password: 'test-pass-123' }, a.cookie);
+  check('ACCOUNT: deactivate with the right password works (200)', deact.status === 200, 'status ' + deact.status);
+
+  const loginDeact = await call('POST', '/api/auth/login', { phone: '0970000971', password: 'test-pass-123' });
+  check('ACCOUNT: login is blocked while deactivated, with the reactivate code', loginDeact.status === 403 && loginDeact.json.code === 'ACCOUNT_DEACTIVATED', JSON.stringify(loginDeact.json).slice(0, 140));
+  const staleCookie = await call('GET', '/api/users/me/stats', null, a.cookie);
+  check('ACCOUNT: an existing session is blocked while deactivated (403)', staleCookie.status === 403, 'status ' + staleCookie.status);
+  const workersHidden = await call('GET', '/api/workers', null, b.cookie);
+  check('ACCOUNT: A disappears from the workers list while deactivated', !(workersHidden.json.workers || []).some(w => w.id === a.id));
+  const prodsHidden = await call('GET', '/api/products', null, b.cookie);
+  check('ACCOUNT: A product disappears from the marketplace while deactivated', !(prodsHidden.json.products || []).some(p => p.id === (prod.json && prod.json.id)));
+  const regDup = await call('POST', '/api/auth/register', { name: 'Copy Cat', phone: '0970000971', password: 'test-pass-123', city: 'Lusaka', avatar: IMG, selfie: IMG });
+  check('ACCOUNT: the deactivated number cannot register a second account (409)', regDup.status === 409, 'status ' + regDup.status);
+
+  const reactWrong = await call('POST', '/api/auth/reactivate', { phone: '0970000971', password: 'not-the-password' });
+  check('ACCOUNT: reactivate with a wrong password is refused (401)', reactWrong.status === 401, 'status ' + reactWrong.status);
+  const react = await call('POST', '/api/auth/reactivate', { phone: '0970000971', password: 'test-pass-123' });
+  check('ACCOUNT: reactivate with the right password signs back in (200)', react.status === 200 && !!react.cookie, 'status ' + react.status);
+  const loginAfter = await call('POST', '/api/auth/login', { phone: '0970000971', password: 'test-pass-123' });
+  check('ACCOUNT: normal login works again after reactivation (200)', loginAfter.status === 200 && !!loginAfter.cookie, 'status ' + loginAfter.status);
+  const aCookie2 = loginAfter.cookie;
+  const workersBack = await call('GET', '/api/workers', null, b.cookie);
+  check('ACCOUNT: A is back in the workers list after reactivation', (workersBack.json.workers || []).some(w => w.id === a.id));
+
+  const delNoPw = await call('DELETE', '/api/users/me', {}, aCookie2);
+  check('ACCOUNT: delete without a password is refused (422)', delNoPw.status === 422, 'status ' + delNoPw.status);
+  const delWrong = await call('DELETE', '/api/users/me', { password: 'not-the-password' }, aCookie2);
+  check('ACCOUNT: delete with a wrong password is refused (403)', delWrong.status === 403, 'status ' + delWrong.status);
+  const del = await call('DELETE', '/api/users/me', { password: 'test-pass-123' }, aCookie2);
+  check('ACCOUNT: delete with the right password works (200)', del.status === 200, 'status ' + del.status + ' ' + JSON.stringify(del.json).slice(0, 120));
+
+  const loginGone = await call('POST', '/api/auth/login', { phone: '0970000971', password: 'test-pass-123' });
+  check('ACCOUNT: login after deletion is a plain wrong-number 401', loginGone.status === 401, 'status ' + loginGone.status);
+  const profileGone = await call('GET', '/api/users/' + a.id, null, b.cookie);
+  check('ACCOUNT: the deleted profile is gone (404)', profileGone.status === 404, 'status ' + profileGone.status);
+  const jobAlive = await call('GET', '/api/jobs/' + jobId, null, b.cookie);
+  check('ACCOUNT: poster B job survives worker A deletion', jobAlive.status === 200, 'status ' + jobAlive.status);
+  const appsView = await call('GET', `/api/jobs/${jobId}/applications`, null, b.cookie);
+  check('ACCOUNT: B can still open the applicant list, and A application is gone', appsView.status === 200 && !(appsView.json.applications || []).some(x => x.worker_id === a.id), 'status ' + appsView.status);
+  const admSearch = await call('GET', '/api/admin/activity?q=0970000971', null, adminCookie);
+  check('ACCOUNT: admin member search no longer finds the deleted member', admSearch.status === 200 && !JSON.stringify(admSearch.json).includes('Lifecycle Worker A'), 'status ' + admSearch.status);
+  const reReg = await call('POST', '/api/auth/register', { name: 'Lifecycle Worker A2', phone: '0970000971', password: 'test-pass-123', city: 'Lusaka', avatar: IMG, selfie: IMG });
+  check('ACCOUNT: the freed number can register a fresh account (201)', reReg.status === 201 || reReg.status === 200, 'status ' + reReg.status);
+  const bLogin = await call('POST', '/api/auth/login', { phone: '0970000972', password: 'test-pass-123' });
+  check('ACCOUNT: an untouched member still signs in normally (200)', bLogin.status === 200 && !!bLogin.cookie, 'status ' + bLogin.status);
+}
+
+async function signupOtpTests() {
+  const start = (name, phone) => call('POST', '/api/auth/register', {
+    name, phone, password: 'test-pass-123', city: 'Lusaka', avatar: IMG, selfie: IMG,
+  });
+  const verify = (phone, code) => call('POST', '/api/auth/register/verify', { phone, code });
+  const userCount = async (phone) => Number((await dbOne(
+    'SELECT COUNT(*) AS n FROM users WHERE phone = ?', [normalizedTestPhone(phone)]))?.n || 0);
+  const pendingCount = async (phone) => Number((await dbOne(
+    'SELECT COUNT(*) AS n FROM pending_registrations WHERE phone = ?', [normalizedTestPhone(phone)]))?.n || 0);
+  const signupSmsCount = async (phone) => Number((await dbOne(
+    "SELECT COUNT(*) AS n FROM sms_log WHERE phone = ? AND kind = 'signup_code'", [normalizedTestPhone(phone)]))?.n || 0);
+
+  // Happy path: start sends a code but creates NO account; a wrong code
+  // fails; the right code creates the account and signs the member in;
+  // the same code can never be used twice.
+  const p1 = '0970000601';
+  const s1 = await start('OTP Success', p1);
+  check('OTP: start returns the verification step', s1.status === 200 && s1.json.verification_required === true && s1.json.phone === normalizedTestPhone(p1), 'status ' + s1.status + ' ' + JSON.stringify(s1.json).slice(0, 140));
+  check('OTP: start sends a signup code by SMS (logged)', (await signupSmsCount(p1)) >= 1);
+  check('OTP: start creates no user, only a pending signup', (await userCount(p1)) === 0 && (await pendingCount(p1)) === 1);
+  const code1 = await latestSignupCode(p1);
+  const wrong1 = await verify(p1, '000000');
+  check('OTP: a wrong code is rejected and creates no user', wrong1.status === 401 && (await userCount(p1)) === 0, 'status ' + wrong1.status);
+  const good1 = await verify(p1, code1);
+  check('OTP: the correct code creates the account and signs in', good1.status === 201 && !!good1.cookie && good1.json.user.phone === normalizedTestPhone(p1), 'status ' + good1.status + ' ' + JSON.stringify(good1.json).slice(0, 140));
+  const again1 = await verify(p1, code1);
+  check('OTP: the code is single use', again1.status === 401 && (await userCount(p1)) === 1 && (await pendingCount(p1)) === 0, 'status ' + again1.status);
+
+  // No bypass: a started-but-unverified signup cannot sign in and never
+  // becomes a users row.
+  const p2 = '0970000602';
+  const s2 = await start('OTP Bypass', p2);
+  const bypassLogin = await call('POST', '/api/auth/login', { phone: p2, password: 'test-pass-123' });
+  check('OTP: no-verification bypass attempt cannot sign in', s2.status === 200 && bypassLogin.status === 401 && (await userCount(p2)) === 0, 'login status ' + bypassLogin.status);
+
+  // Expired code: rejected even when the digits are right.
+  const p3 = '0970000603';
+  await start('OTP Expired', p3);
+  const code3 = await latestSignupCode(p3);
+  await dbExecute("UPDATE pending_registrations SET expires_at = datetime('now', '-1 day') WHERE phone = ?", [normalizedTestPhone(p3)]);
+  const expired = await verify(p3, code3);
+  check('OTP: an expired code is rejected', expired.status === 401 && String(expired.json.error || '').includes('expired') && (await userCount(p3)) === 0, 'status ' + expired.status + ' ' + JSON.stringify(expired.json).slice(0, 140));
+
+  // Attempt limit: five wrong tries burn the code, so even the correct
+  // code is refused afterwards.
+  const p4 = '0970000604';
+  await start('OTP Attempts', p4);
+  const code4 = await latestSignupCode(p4);
+  let lastWrong = null;
+  for (let i = 0; i < 5; i++) lastWrong = await verify(p4, '000000');
+  check('OTP: the fifth wrong try burns the code', !!lastWrong && lastWrong.status === 401 && String(lastWrong.json.error || '').includes('Too many'), 'status ' + (lastWrong && lastWrong.status));
+  const burned = await verify(p4, code4);
+  check('OTP: the correct code is refused after the attempt limit', burned.status === 401 && (await userCount(p4)) === 0, 'status ' + burned.status);
+
+  // Duplicate phone: refused at start, before any code is sent.
+  const dupSmsBefore = await signupSmsCount(p1);
+  const dup = await start('OTP Duplicate', p1);
+  check('OTP: a registered number is refused at start with no code sent', dup.status === 409 && (await signupSmsCount(p1)) === dupSmsBefore, 'status ' + dup.status);
+
+  // Resend: cooldown first, then a fresh code that invalidates the old.
+  const p5 = '0970000605';
+  await start('OTP Resend', p5);
+  const oldCode = await latestSignupCode(p5);
+  const earlyResend = await call('POST', '/api/auth/register/resend', { phone: p5 });
+  check('OTP: resend inside the cooldown is refused (429)', earlyResend.status === 429, 'status ' + earlyResend.status);
+  let newCode = oldCode;
+  let resend = null;
+  for (let i = 0; i < 4 && newCode === oldCode; i++) {
+    await dbExecute("UPDATE pending_registrations SET last_sent_at = datetime('now', '-2 minutes') WHERE phone = ?", [normalizedTestPhone(p5)]);
+    resend = await call('POST', '/api/auth/register/resend', { phone: p5 });
+    if (resend.status !== 200) break;
+    newCode = await latestSignupCode(p5);
+  }
+  check('OTP: resend issues a fresh code', !!resend && resend.status === 200 && newCode !== oldCode, 'status ' + (resend && resend.status));
+  const oldAttempt = await verify(p5, oldCode);
+  check('OTP: the old code no longer works after resend', oldAttempt.status === 401 && (await userCount(p5)) === 0, 'status ' + oldAttempt.status);
+  const newGood = await verify(p5, newCode);
+  check('OTP: the resent code creates the account', newGood.status === 201 && !!newGood.cookie && (await userCount(p5)) === 1, 'status ' + newGood.status);
+}
+
+  await accountLifecycleTests(admin.cookie);
+  await signupOtpTests();
+  await supportTests(admin.cookie, worker.cookie, third.cookie);
+  await sharePreviewTests();
+  await smsTests();
+  await pushTests(admin.cookie);
+  await adsTests({ admin, third, p2, bizId, bizSlug });
+
+  console.log(`\n${passed} passed, ${failed} failed`);
+  if (failures.length) console.log('Failures: ' + failures.join(' | '));
+  server.kill();
+  process.exit(failed ? 1 : 0);
+})().catch(e => { console.error(e); if (server) server.kill(); process.exit(1); });
+
+
+// Oct 29, 2026: support hub. Tickets (guest + member), the live chat
+// queue with wait positions, presence heartbeat, and the bot-miss log.
+async function supportTests(adminCookie, memberCookie, otherCookie) {
+  const g = await call('POST', '/api/support/tickets', { name: 'Guest Sup', phone: '0970000951', category: 'Account help', subject: 'Cannot sign in', message: 'The code never arrives on my phone.' });
+  check('SUPPORT: guest can create a ticket (201)', g.status === 201 && /^PWZ-/.test(g.json.ref || ''), 'status ' + g.status + ' ' + JSON.stringify(g.json).slice(0, 120));
+  const bad = await call('POST', '/api/support/tickets', { name: 'Guest Sup', phone: '0970000951', category: 'Jobs', subject: 'no', message: 'short' });
+  check('SUPPORT: a too-short ticket is refused (422)', bad.status === 422, 'status ' + bad.status);
+  const wrongPhone = await call('POST', '/api/support/tickets/lookup', { ref: g.json.ref, phone: '0970000999' });
+  check('SUPPORT: lookup with the wrong phone is refused (404)', wrongPhone.status === 404, 'status ' + wrongPhone.status);
+  const look = await call('POST', '/api/support/tickets/lookup', { ref: g.json.ref, phone: '0970000951' });
+  check('SUPPORT: guest lookup returns the thread', look.status === 200 && look.json.messages.length === 1 && look.json.ticket.ref === g.json.ref, 'status ' + look.status);
+
+  const m = await call('POST', '/api/support/tickets', { category: 'Verification', subject: 'Selfie rejected twice', message: 'Please check my selfie, I used good light.' }, memberCookie);
+  check('SUPPORT: member can create a ticket (201)', m.status === 201, 'status ' + m.status);
+  const mine = await call('GET', '/api/support/tickets/mine', null, memberCookie);
+  check('SUPPORT: member ticket list includes the new ticket', mine.status === 200 && mine.json.tickets.some(t => t.id === m.json.id), 'status ' + mine.status);
+  const notMine = await call('GET', '/api/support/tickets/' + m.json.id, null, otherCookie);
+  check('SUPPORT: another member cannot read the ticket (403)', notMine.status === 403, 'status ' + notMine.status);
+
+  const admList = await call('GET', '/api/admin/support/tickets?status=open', null, adminCookie);
+  check('SUPPORT: admin open-ticket list includes both tickets', admList.status === 200 && admList.json.tickets.some(t => t.id === m.json.id) && admList.json.tickets.some(t => t.id === g.json.id), 'status ' + admList.status);
+  const admReply = await call('POST', '/api/admin/support/tickets/' + m.json.id + '/messages', { body: 'We reviewed it, please upload once more in daylight.' }, adminCookie);
+  check('SUPPORT: admin reply works (200)', admReply.status === 200, 'status ' + admReply.status);
+  const memberView = await call('GET', '/api/support/tickets/' + m.json.id, null, memberCookie);
+  check('SUPPORT: ticket shows answered with both messages', memberView.status === 200 && memberView.json.ticket.status === 'answered' && memberView.json.messages.length === 2, 'status ' + memberView.status);
+  const memReply = await call('POST', '/api/support/tickets/' + m.json.id + '/messages', { body: 'Done, uploaded again now.' }, memberCookie);
+  check('SUPPORT: member reply reopens the ticket', memReply.status === 200, 'status ' + memReply.status);
+  const memberView2 = await call('GET', '/api/support/tickets/' + m.json.id, null, memberCookie);
+  check('SUPPORT: status flips back to open after member reply', memberView2.json.ticket.status === 'open', 'status ' + memberView2.json.ticket.status);
+  const close = await call('POST', '/api/admin/support/tickets/' + m.json.id + '/status', { status: 'closed' }, adminCookie);
+  check('SUPPORT: admin can close a ticket', close.status === 200, 'status ' + close.status);
+  const replyClosed = await call('POST', '/api/support/tickets/' + m.json.id + '/messages', { body: 'hello?' }, memberCookie);
+  check('SUPPORT: replying to a closed ticket is refused (422)', replyClosed.status === 422, 'status ' + replyClosed.status);
+
+  const miss = await call('POST', '/api/support/bot-miss', { question: 'Do you deliver firewood to Chongwe?' }, memberCookie);
+  check('SUPPORT: bot-miss is recorded (200)', miss.status === 200, 'status ' + miss.status);
+  const ov = await call('GET', '/api/admin/support/overview', null, adminCookie);
+  check('SUPPORT: admin overview carries counts and bot misses', ov.status === 200 && typeof ov.json.openTickets === 'number' && (ov.json.botMisses || []).some(x => x.question.includes('firewood')), 'status ' + ov.status);
+  const ovDenied = await call('GET', '/api/admin/support/overview', null, memberCookie);
+  check('SUPPORT: non-admin cannot open the support console APIs (403)', ovDenied.status === 403, 'status ' + ovDenied.status);
+
+  const st0 = await call('GET', '/api/support/status');
+  check('SUPPORT: live chat starts offline', st0.status === 200 && st0.json.online === false, 'status ' + st0.status);
+  const joinClosed = await call('POST', '/api/support/chats', { name: 'Guest One', phone: '0970000952' });
+  check('SUPPORT: joining while closed is refused (409)', joinClosed.status === 409, 'status ' + joinClosed.status);
+  const hb = await call('POST', '/api/admin/support/heartbeat', { online: true }, adminCookie);
+  check('SUPPORT: admin heartbeat works (200)', hb.status === 200 && hb.json.online === true, 'status ' + hb.status);
+  const st1 = await call('GET', '/api/support/status');
+  check('SUPPORT: live chat shows online after heartbeat', st1.json.online === true, 'online ' + st1.json.online);
+
+  const j1 = await call('POST', '/api/support/chats', { name: 'Guest One', phone: '0970000952' });
+  check('SUPPORT: first guest joins the queue at position 1', j1.status === 201 && j1.json.position === 1, 'status ' + j1.status + ' ' + JSON.stringify(j1.json).slice(0, 120));
+  const j2 = await call('POST', '/api/support/chats', { name: 'Guest Two', phone: '0970000953' });
+  check('SUPPORT: second guest queues at position 2', j2.status === 201 && j2.json.position === 2, 'status ' + j2.status);
+  const j1again = await call('POST', '/api/support/chats', { name: 'Guest One', phone: '0970000952' });
+  check('SUPPORT: rejoining returns the same chat', j1again.status === 200 && j1again.json.id === j1.json.id, 'status ' + j1again.status);
+  const queue = await call('GET', '/api/admin/support/queue', null, adminCookie);
+  check('SUPPORT: admin queue shows both waiting chats', queue.status === 200 && queue.json.chats.length === 2, 'status ' + queue.status);
+  const acc = await call('POST', '/api/admin/support/chats/' + j1.json.id + '/accept', {}, adminCookie);
+  check('SUPPORT: admin can accept the first chat', acc.status === 200, 'status ' + acc.status);
+  const poll1 = await call('GET', '/api/support/chats/' + j1.json.id + '?phone=0970000952');
+  check('SUPPORT: accepted chat polls as active', poll1.status === 200 && poll1.json.chat.status === 'active', 'status ' + poll1.status);
+  const poll2 = await call('GET', '/api/support/chats/' + j2.json.id + '?phone=0970000953');
+  check('SUPPORT: second guest moves up to position 1', poll2.json.position === 1, 'position ' + poll2.json.position);
+  const gm = await call('POST', '/api/support/chats/' + j1.json.id + '/messages', { body: 'Hi, my payment is stuck', phone: '0970000952' });
+  check('SUPPORT: guest can message in an active chat', gm.status === 200, 'status ' + gm.status);
+  const admChat = await call('GET', '/api/admin/support/chats/' + j1.json.id, null, adminCookie);
+  check('SUPPORT: admin sees the guest message', admChat.status === 200 && admChat.json.messages.some(x => x.body.includes('payment is stuck')), 'status ' + admChat.status);
+  const am = await call('POST', '/api/admin/support/chats/' + j1.json.id + '/messages', { body: 'Let me check that for you now.' }, adminCookie);
+  check('SUPPORT: admin can reply in the chat', am.status === 200, 'status ' + am.status);
+  const poll3 = await call('GET', '/api/support/chats/' + j1.json.id + '?phone=0970000952');
+  check('SUPPORT: guest sees the admin reply', poll3.json.messages.some(x => x.body.includes('check that for you')), 'messages ' + poll3.json.messages.length);
+  const end = await call('POST', '/api/admin/support/chats/' + j1.json.id + '/end', {}, adminCookie);
+  check('SUPPORT: admin can end the chat', end.status === 200, 'status ' + end.status);
+  const poll4 = await call('GET', '/api/support/chats/' + j1.json.id + '?phone=0970000952');
+  check('SUPPORT: ended chat polls as ended', poll4.json.chat.status === 'ended', 'status ' + poll4.json.chat.status);
+  const off = await call('POST', '/api/admin/support/heartbeat', { online: false }, adminCookie);
+  const st2 = await call('GET', '/api/support/status');
+  check('SUPPORT: going offline closes live chat again', off.status === 200 && st2.json.online === false, 'status ' + st2.status);
+}
+
+// Oct 23, 2026 regression: real phone photos (hundreds of KB as base64) were
+// rejected by the 400 KB body cap before validation ever saw them. A ~900 KB
+// photo payload must now be accepted on the photo-carrying routes.
+
+// Oct 23, 2026: shared links must preview with the item's own picture.
+// Social crawlers cannot read hash routes, so /s/ pages carry per-item
+// Open Graph tags and send real visitors to the in-app page.
+async function sharePreviewTests() {
+  const raw = async (p) => { const r = await fetch(BASE + p); return { status: r.status, type: r.headers.get('content-type') || '', text: await r.text() }; };
+  const seller = await registerUser('Share Preview Seller', '0975550031', 'Lusaka');
+  const adminLogin = await call('POST', '/api/auth/login', { phone: ADMIN_PHONE_INPUT, password: 'test-pass-123' });
+  const adminC = adminLogin.cookie;
+  check('SHARE: admin login for fixtures', !!adminC);
+
+  const prof = await raw('/s/user/' + seller.id);
+  check('SHARE: profile preview names the member', prof.status === 200 && prof.text.includes('Share Preview Seller'), 'status ' + prof.status);
+  check('SHARE: profile preview uses the member avatar route', prof.text.includes('/api/users/' + seller.id + '/avatar'));
+  check('SHARE: profile preview redirects to the in-app profile', prof.text.includes('/#/user/' + seller.id));
+  const av = await fetch(BASE + '/api/users/' + seller.id + '/avatar');
+  check('SHARE: avatar route serves the profile picture bytes', av.status === 200 && (av.headers.get('content-type') || '').startsWith('image/'), 'status ' + av.status);
+
+  const prod = await call('POST', '/api/products', { title: 'Share Preview Sofa', category: 'Home & Furniture', description: 'A sofa for share preview tests.', price: 800, condition: 'Good', city: 'Lusaka', photos: [IMG] }, seller.cookie);
+  const sp = await raw('/s/product/' + prod.json.id);
+  check('SHARE: product preview names the item and price', sp.status === 200 && sp.text.includes('Share Preview Sofa') && sp.text.includes('K800'), 'status ' + sp.status);
+  check('SHARE: product preview uses the product photo', sp.text.includes('/api/products/' + prod.json.id + '/photos/'));
+  // Facebook strips the #fragment from og:url, so og:url must be the
+  // /s/ address itself; pointing it at the in-app # link made Facebook
+  // show the generic brand preview instead of the product (Oct 26).
+  check('SHARE: product og:url is the /s/ address itself', sp.text.includes('og:url" content="https://pieceworkzambia.com/s/product/' + prod.json.id + '"'), sp.text.slice(0, 300));
+
+  // List cache (Oct 27 speed fix): a repeat anonymous list view inside
+  // the TTL is served from memory, marked X-Cache: HIT, same body.
+  const lcR1 = await fetch(BASE + '/api/products'); const lcT1 = await lcR1.text();
+  const lcR2 = await fetch(BASE + '/api/products'); const lcT2 = await lcR2.text();
+  check('CACHE: second identical list view is a cache hit', (lcR2.headers.get('x-cache') || '') === 'HIT' && lcT1 === lcT2, 'x-cache=' + lcR2.headers.get('x-cache'));
+
+  // A write to the same family busts its cached lists at once, then the
+  // next read re-caches (v81: unrelated writes no longer wipe everything).
+  const bustProd = await call('POST', '/api/products', { title: 'Cache Bust Chair', category: 'Home & Furniture', description: 'A chair for cache bust tests.', price: 150, condition: 'Good', city: 'Lusaka', photos: [IMG] }, seller.cookie);
+  check('CACHE: fixture product for the bust check created', !!bustProd.json.id, JSON.stringify(bustProd.json).slice(0, 120));
+  const lcR3 = await fetch(BASE + '/api/products'); await lcR3.text();
+  check('CACHE: a products write busts the products cache', (lcR3.headers.get('x-cache') || '') === 'MISS', 'x-cache=' + lcR3.headers.get('x-cache'));
+  const lcR4 = await fetch(BASE + '/api/products'); await lcR4.text();
+  check('CACHE: list re-caches after a bust', (lcR4.headers.get('x-cache') || '') === 'HIT', 'x-cache=' + lcR4.headers.get('x-cache'));
+  check('PAYLOAD: products list carries no embedded base64 photos', !lcT2.includes('data:image;base64'), 'seller avatars ship as image URLs since v82');
+
+  // ---- v85: auth limits are per connection AND account, so one
+  // person's retries (or a whole carrier NAT neighbourhood) cannot
+  // lock another member out; the block message is friendly JSON.
+  const rlPhone = '+260977100001';
+  const rlReg = await call('POST', '/api/auth/register', { name: 'Rate Limit Tester', phone: rlPhone, password: 'test-pass-123', city: 'Lusaka', avatar: IMG, selfie: IMG });
+  check('LIMIT: fixture member registered', rlReg.status === 200 || rlReg.status === 201, 'status ' + rlReg.status);
+  let lastLogin = null;
+  for (let i = 0; i < 40; i++) lastLogin = await call('POST', '/api/auth/login', { phone: rlPhone, password: 'wrong-pass' });
+  check('LIMIT: 40 wrong passwords are plain 401s', !!lastLogin && lastLogin.status === 401, 'status ' + (lastLogin && lastLogin.status));
+  const blockedLogin = await call('POST', '/api/auth/login', { phone: rlPhone, password: 'wrong-pass' });
+  check('LIMIT: the 41st try is a friendly JSON 429', blockedLogin.status === 429 && String(blockedLogin.json.error || '').includes('Too many tries'), 'status ' + blockedLogin.status + ' body ' + JSON.stringify(blockedLogin.json).slice(0, 90));
+  await call('POST', '/api/auth/register', { name: 'Rate Limit Neighbour', phone: '+260977100002', password: 'test-pass-123', city: 'Lusaka', avatar: IMG, selfie: IMG });
+  const otherLogin = await call('POST', '/api/auth/login', { phone: '+260977100002', password: 'wrong-pass' });
+  check('LIMIT: a different member on the same connection is NOT locked out', otherLogin.status === 401, 'status ' + otherLogin.status);
+
+  const biz = await call('POST', '/api/businesses', {
+    pacra_number: '120200012345', tpin: '1000000001', owner_legal_name: 'Test Owner', address: 'Plot 1, Test Road', certificate: IMG, name: 'Share Preview Shop', category: 'Electronics', city: 'Lusaka', tagline: 'Preview tagline for the shop.', description: 'A shop for share preview tests.', logo: IMG, cover: IMG }, seller.cookie);
+  const bizId = biz.json.id || (biz.json.business || {}).id;
+  await call('PATCH', '/api/admin/businesses/' + bizId, { status: 'active' }, adminC);
+  const bizSlug = 'share-preview-shop-' + bizId;
+  const sb = await raw('/s/business/' + bizSlug);
+  check('SHARE: storefront preview names the shop', sb.status === 200 && sb.text.includes('Share Preview Shop'), 'status ' + sb.status);
+  check('SHARE: storefront preview uses the shop own image', sb.text.includes('/api/businesses/' + bizId + '/image/'), sb.text.slice(0, 200));
+  const logoRes = await fetch(BASE + '/api/businesses/' + bizId + '/image/logo');
+  check('SHARE: business image route serves image bytes', logoRes.status === 200 && (logoRes.headers.get('content-type') || '').startsWith('image/'), 'status ' + logoRes.status);
+
+  const job = await call('POST', '/api/jobs', { title: 'Share Preview Job', category: 'Cleaning', description: 'A job for share preview tests.', city: 'Lusaka', date_needed: '2026-11-10', pay_amount: 100, pay_type: 'per_job', workers_needed: 1, terms_accepted: true, photos: [IMG] }, seller.cookie);
+  const jobId = job.json.job ? job.json.job.id : job.json.id;
+  const sj = await raw('/s/job/' + jobId);
+  check('SHARE: job preview names the job and uses its photo', sj.status === 200 && sj.text.includes('Share Preview Job') && sj.text.includes('/api/jobs/' + jobId + '/photos/'), 'status ' + sj.status);
+
+  const missing = await raw('/s/product/999999');
+  check('SHARE: unknown item falls back to the brand preview', missing.status === 200 && missing.text.includes('/img/og-brand.jpg'));
+}
+
+
+// Oct 23, 2026: SMS event notifications. No Africa's Talking creds in the
+// test env, so every attempt must land in sms_log as 'skipped' while the
+// triggering requests themselves succeed exactly as before. Actors are
+// existing suite accounts re-logged-in (the admin sells + posts, the M1
+// worker buys + applies): the suite already sits at the register/login
+// rate limits, so this block may only spend two logins.
+async function smsTests() {
+  const adminLogin = await call('POST', '/api/auth/login', { phone: ADMIN_PHONE_INPUT, password: 'test-pass-123' });
+  const adminC = adminLogin.cookie;
+  const adminId = adminLogin.json.user && adminLogin.json.user.id;
+  const workerLogin = await call('POST', '/api/auth/login', { phone: '0970000012', password: 'test-pass-123' });
+  const workerC = workerLogin.cookie;
+  const workerId = workerLogin.json.user && workerLogin.json.user.id;
+  check('SMS: actor logins for the flows', !!adminC && !!workerC && !!adminId && !!workerId);
+
+  // Offer -> SMS to the seller (the admin).
+  const prod = await call('POST', '/api/products', { title: 'SMS Test Item', category: 'Electronics', description: 'An item for SMS notification tests.', price: 2000, condition: 'Good', city: 'Lusaka' }, adminC);
+  check('SMS: product created for offer flow', prod.status === 201, 'status ' + prod.status);
+  const offer = await call('POST', `/api/products/${prod.json.id}/offers`, { amount: 1500 }, workerC);
+  check('SMS: offer request still succeeds', offer.status === 201 && !!offer.json.id, 'status ' + offer.status);
+
+  // Application -> SMS to the poster (the admin); accept -> SMS to the worker.
+  const job = await call('POST', '/api/jobs', { title: 'SMS Test Job', category: 'Cleaning', description: 'A job for SMS notification tests.', city: 'Lusaka', date_needed: '2026-11-12', pay_amount: 200, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, adminC);
+  check('SMS: job created for application flow', job.status === 200 || job.status === 201, 'status ' + job.status);
+  const jobId = job.json.job ? job.json.job.id : job.json.id;
+  const appRes = await call('POST', `/api/jobs/${jobId}/apply`, { message: 'I can start today.' }, workerC);
+  check('SMS: application request still succeeds', appRes.status === 200 || appRes.status === 201, 'status ' + appRes.status);
+  const acc = await call('PATCH', `/api/applications/${appRes.json.id}`, { status: 'accepted' }, adminC);
+  check('SMS: accept request still succeeds', acc.status === 200, 'status ' + acc.status);
+
+  // notifySms is fire-and-forget: poll the admin log until this block's
+  // three rows (scoped by kind + recipient) have landed.
+  let rows = [];
+  for (let i = 0; i < 24; i++) {
+    const log = await call('GET', '/api/admin/sms-log', null, adminC);
+    rows = log.json.sms_log || [];
+    const has = (kind, uid, frag) => rows.some(r => r.kind === kind && r.user_id === uid && r.body.includes(frag));
+    if (has('offer', adminId, 'SMS Test Item') && has('application', adminId, 'SMS Test Job') && has('accepted', workerId, 'SMS Test Job')) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  const offerRow = rows.find(r => r.kind === 'offer' && r.user_id === adminId && r.body.includes('SMS Test Item'));
+  check('SMS: offer notification logged for the seller as skipped', !!offerRow && offerRow.status === 'skipped' && offerRow.phone === '+260970000001', JSON.stringify(offerRow || {}));
+  check('SMS: offer text names buyer, formatted amount and item', !!offerRow && offerRow.body.includes('M1 Worker') && offerRow.body.includes('K1,500') && offerRow.body.includes('SMS Test Item'), offerRow ? offerRow.body : '');
+  const appRow = rows.find(r => r.kind === 'application' && r.user_id === adminId && r.body.includes('SMS Test Job'));
+  check('SMS: application notification logged for the poster as skipped', !!appRow && appRow.status === 'skipped', JSON.stringify(appRow || {}));
+  check('SMS: application text names worker and job', !!appRow && appRow.body.includes('M1 Worker') && appRow.body.includes('SMS Test Job'), appRow ? appRow.body : '');
+  const accRow = rows.find(r => r.kind === 'accepted' && r.user_id === workerId && r.body.includes('SMS Test Job'));
+  check('SMS: accepted notification logged for the worker as skipped', !!accRow && accRow.status === 'skipped', JSON.stringify(accRow || {}));
+  check('SMS: accepted text names the job', !!accRow && accRow.body.includes('SMS Test Job'), accRow ? accRow.body : '');
+  check('SMS: every logged body fits one SMS segment (160 chars)', rows.length > 0 && rows.every(r => r.body.length <= 160));
+  const denied = await call('GET', '/api/admin/sms-log', null, workerC);
+  check('SMS: log endpoint is admin-only (403)', denied.status === 403, 'status ' + denied.status);
+  // Registration confirmation: signups earlier in the suite (e.g. the M1
+  // worker) must each have a welcome text logged. (No fresh registration
+  // here: the suite already sits at the register rate limit.) Read it
+  // from the test DB directly: the admin endpoint only returns the
+  // latest 50 rows, and signup-code sends now share that log.
+  const wRow = await dbOne(
+    "SELECT * FROM sms_log WHERE kind = 'welcome' AND user_id = ? ORDER BY id DESC LIMIT 1",
+    [workerId]
+  ) || rows.find(r => r.kind === 'welcome' && r.user_id === workerId);
+  check('SMS: registration confirmation logged for a new user as skipped', !!wRow && wRow.status === 'skipped' && wRow.phone === '+260970000012', JSON.stringify(wRow || {}));
+  check('SMS: welcome text opens as Zac and names the user', !!wRow && wRow.body.startsWith('Hi, this is Zac, your assistant.') && wRow.body.includes('Welcome to 2911 Jobs, M1 Worker'), wRow ? wRow.body : '');
+}
+
+// Oct 23, 2026: Web Push subscriptions. The test env sets no VAPID keys,
+// so push is disabled: the public key must read null, /test must report
+// skipped, and subscribe/unsubscribe still validate and store rows
+// (storage is proven via the endpoint upsert: a plain INSERT would fail
+// the UNIQUE constraint on the second subscribe). No fresh login here,
+// like the SMS block: the suite sits at the login rate limit, so the
+// main flow's admin session is passed in.
+async function pushTests(adminC) {
+  check('PUSH: actor session for the flows', !!adminC);
+
+  const pk = await call('GET', '/api/push/public-key', null, adminC);
+  check('PUSH: public key is null while push is not configured', pk.status === 200 && pk.json.publicKey === null, JSON.stringify(pk.json));
+
+  const sub = {
+    endpoint: 'https://push.example.com/sub/push-test-1',
+    keys: { p256dh: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM', auth: 'tBHItJI5svbpez7KI4CCXg' },
+  };
+  const noAuth = await call('POST', '/api/push/subscribe', { subscription: sub, userAgent: 'push-test' });
+  check('PUSH: subscribe without sign-in is 401', noAuth.status === 401, 'status ' + noAuth.status);
+  const malformed = await call('POST', '/api/push/subscribe', { subscription: { endpoint: 'not-a-url' } }, adminC);
+  check('PUSH: malformed subscription is 422', malformed.status === 422, 'status ' + malformed.status);
+  const noKeys = await call('POST', '/api/push/subscribe', { subscription: { endpoint: sub.endpoint, keys: {} } }, adminC);
+  check('PUSH: subscription without keys is 422', noKeys.status === 422, 'status ' + noKeys.status);
+
+  const ok1 = await call('POST', '/api/push/subscribe', { subscription: sub, userAgent: 'push-test' }, adminC);
+  check('PUSH: subscribe stores the subscription', ok1.status === 200 && ok1.json.ok === true, 'status ' + ok1.status);
+  const ok2 = await call('POST', '/api/push/subscribe', { subscription: { ...sub, keys: { p256dh: sub.keys.p256dh, auth: 'uBHItJI5svbpez7KI4CCXh' } }, userAgent: 'push-test' }, adminC);
+  check('PUSH: re-subscribing the same endpoint upserts (no UNIQUE failure)', ok2.status === 200 && ok2.json.ok === true, 'status ' + ok2.status);
+
+  const tst = await call('POST', '/api/push/test', {}, adminC);
+  check('PUSH: test send reports skipped while push is disabled', tst.status === 200 && tst.json.skipped === true && tst.json.sent === 0 && tst.json.failed === 0, JSON.stringify(tst.json));
+
+  const un = await call('POST', '/api/push/unsubscribe', { endpoint: sub.endpoint }, adminC);
+  check('PUSH: unsubscribe removes the subscription', un.status === 200 && un.json.ok === true, 'status ' + un.status);
+  const ok3 = await call('POST', '/api/push/subscribe', { subscription: sub, userAgent: 'push-test' }, adminC);
+  check('PUSH: subscribing again after unsubscribe works', ok3.status === 200 && ok3.json.ok === true, 'status ' + ok3.status);
+  const unBad = await call('POST', '/api/push/unsubscribe', {}, adminC);
+  check('PUSH: unsubscribe without an endpoint is 422', unBad.status === 422, 'status ' + unBad.status);
+}
+
+// Oct 23, 2026: Ads banner. Owners promote a product, job or storefront
+// into the rotating Home/Marketplace banner, free during the growth
+// phase, recorded pay-ready (is_paid/amount). Real accounts only: the
+// block reuses existing suite accounts (the register rate limit is
+// spent) and proves the tester exclusion twice over: a flagged owner
+// cannot create ads, and an ad created before flagging vanishes from
+// the public feed the moment the owner is flagged.
+async function adsTests(fx) {
+  const { admin, third, p2, bizId, bizSlug } = fx;
+
+  const prod = await call('POST', '/api/products', { title: 'ADS Test Item', category: 'Electronics', description: 'An item for ads banner tests.', price: 1500, condition: 'Good', city: 'Lusaka', photos: [IMG] }, admin.cookie);
+  check('ADS: fixture product created', prod.status === 201, 'status ' + prod.status);
+  const prodId = prod.json.id;
+  const job = await call('POST', '/api/jobs', { title: 'ADS Test Job', category: 'Cleaning', description: 'A job for ads banner tests.', city: 'Lusaka', date_needed: '2026-11-15', pay_amount: 300, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, admin.cookie);
+  const jobId = job.json.job ? job.json.job.id : job.json.id;
+  check('ADS: fixture job created', (job.status === 200 || job.status === 201) && !!jobId, 'status ' + job.status);
+  const cover = await call('PATCH', '/api/businesses/' + bizId, { cover: IMG }, p2.cookie);
+  check('ADS: fixture business cover set', cover.status === 200, 'status ' + cover.status);
+
+  const noAuth = await call('POST', '/api/ads', { kind: 'product', ref_id: prodId });
+  check('ADS: creating an ad requires sign-in (401)', noAuth.status === 401, 'status ' + noAuth.status);
+  const badKind = await call('POST', '/api/ads', { kind: 'user', ref_id: prodId }, admin.cookie);
+  check('ADS: unknown kind is 422', badKind.status === 422, 'status ' + badKind.status);
+  const missing = await call('POST', '/api/ads', { kind: 'product', ref_id: 999999 }, admin.cookie);
+  check('ADS: missing item is 404', missing.status === 404, 'status ' + missing.status);
+  const notMine = await call('POST', '/api/ads', { kind: 'product', ref_id: prodId }, third.cookie);
+  check('ADS: non-owner cannot promote (403)', notMine.status === 403, 'status ' + notMine.status);
+
+  const ad1 = await call('POST', '/api/ads', { kind: 'product', ref_id: prodId }, admin.cookie);
+  check('ADS: owner promotes own product (201, recorded free)', ad1.status === 201 && !!ad1.json.ad && ad1.json.ad.is_paid === false && ad1.json.ad.amount === 0, JSON.stringify(ad1.json).slice(0, 160));
+  const span = ad1.json.ad ? (Date.parse(String(ad1.json.ad.ends_at).replace(' ', 'T') + 'Z') - Date.parse(String(ad1.json.ad.starts_at).replace(' ', 'T') + 'Z')) : 0;
+  check('ADS: ad runs for 14 days', span > 13.9 * 24 * 3600 * 1000 && span <= 14.1 * 24 * 3600 * 1000, 'span ' + span);
+  const dup = await call('POST', '/api/ads', { kind: 'product', ref_id: prodId }, admin.cookie);
+  check('ADS: duplicate active ad is 409', dup.status === 409, 'status ' + dup.status);
+
+  const adJob = await call('POST', '/api/ads', { kind: 'job', ref_id: jobId }, admin.cookie);
+  check('ADS: owner promotes own job (201)', adJob.status === 201 && !!adJob.json.ad, 'status ' + adJob.status);
+  const adBiz = await call('POST', '/api/ads', { kind: 'business', ref_id: bizId }, p2.cookie);
+  check('ADS: owner promotes own storefront (201)', adBiz.status === 201 && !!adBiz.json.ad, 'status ' + adBiz.status);
+
+  const feed = await call('GET', '/api/ads');
+  const fAds = feed.json.ads || [];
+  const fProd = fAds.find(a => a.kind === 'product' && a.ref_id === prodId);
+  check('ADS: feed shows the product ad with title, price and route', !!fProd && fProd.title === 'ADS Test Item' && fProd.subtitle === 'K1,500 · Lusaka' && fProd.url === '#/product/' + prodId, JSON.stringify(fProd || {}));
+  check('ADS: product ad slide uses the product photo', !!fProd && typeof fProd.image_url === 'string' && fProd.image_url.startsWith('/api/products/' + prodId + '/photos/'), String(fProd && fProd.image_url));
+  const fJob = fAds.find(a => a.kind === 'job' && a.ref_id === jobId);
+  check('ADS: feed shows the job ad with pay label and route', !!fJob && fJob.title === 'ADS Test Job' && fJob.subtitle === 'K300 per job · Lusaka' && fJob.url === '#/job/' + jobId && fJob.image_url === null, JSON.stringify(fJob || {}));
+  const fBiz = fAds.find(a => a.kind === 'business' && a.ref_id === bizId);
+  check('ADS: feed shows the business ad with tagline, cover and route', !!fBiz && fBiz.title === 'Kamwala Phone Repairs' && fBiz.subtitle === 'Fixed today, working tonight' && fBiz.image_url === '/api/businesses/' + bizId + '/image/cover' && fBiz.url === '#/business/' + bizSlug, JSON.stringify(fBiz || {}));
+
+  const dOwner = await call('GET', '/api/products/' + prodId, null, admin.cookie);
+  check('ADS: product detail gives the owner the active ad', !!(dOwner.json.product && dOwner.json.product.active_ad && dOwner.json.product.active_ad.id === ad1.json.ad.id && dOwner.json.product.active_ad.ends_at === ad1.json.ad.ends_at), JSON.stringify((dOwner.json.product || {}).active_ad));
+  const dOther = await call('GET', '/api/products/' + prodId, null, third.cookie);
+  check('ADS: product detail hides active_ad from non-owners', !!dOther.json.product && dOther.json.product.active_ad === null);
+  const jOwner = await call('GET', '/api/jobs/' + jobId, null, admin.cookie);
+  check('ADS: job detail gives the poster the active ad', !!(jOwner.json.job && jOwner.json.job.active_ad && jOwner.json.job.active_ad.id === adJob.json.ad.id));
+  const bOwner = await call('GET', '/api/businesses/' + bizSlug, null, p2.cookie);
+  check('ADS: business detail gives the owner the active ad', !!(bOwner.json.business && bOwner.json.business.active_ad && bOwner.json.business.active_ad.id === adBiz.json.ad.id));
+
+  const mine = await call('GET', '/api/ads/mine', null, admin.cookie);
+  const mAds = mine.json.ads || [];
+  check('ADS: /mine lists my ads with entity titles', mAds.some(a => a.kind === 'product' && a.ref_id === prodId && a.title === 'ADS Test Item' && a.status === 'active') && mAds.some(a => a.kind === 'job' && a.ref_id === jobId), JSON.stringify(mAds).slice(0, 200));
+
+  const delOther = await call('DELETE', '/api/ads/' + adJob.json.ad.id, null, third.cookie);
+  check('ADS: non-owner cannot end an ad (403)', delOther.status === 403, 'status ' + delOther.status);
+  const del = await call('DELETE', '/api/ads/' + adJob.json.ad.id, null, admin.cookie);
+  check('ADS: owner ends the ad', del.status === 200 && del.json.ok === true, 'status ' + del.status);
+  const feed2 = await call('GET', '/api/ads');
+  check('ADS: ended ad leaves the feed', !(feed2.json.ads || []).some(a => a.kind === 'job' && a.ref_id === jobId));
+  const mine2 = await call('GET', '/api/ads/mine', null, admin.cookie);
+  const ended = (mine2.json.ads || []).find(a => a.id === adJob.json.ad.id);
+  check('ADS: ended ad still listed in /mine as ended', !!ended && ended.status === 'ended');
+
+  const sold = await call('PATCH', '/api/products/' + prodId, { status: 'sold' }, admin.cookie);
+  check('ADS: owner marks the product sold', sold.status === 200, 'status ' + sold.status);
+  const feed3 = await call('GET', '/api/ads');
+  check('ADS: sold product leaves the feed', !(feed3.json.ads || []).some(a => a.kind === 'product' && a.ref_id === prodId));
+
+  const tProd = await call('POST', '/api/products', { title: 'ADS Tester Item', category: 'Electronics', description: 'Owned by an account about to be flagged.', price: 100, condition: 'Good', city: 'Lusaka' }, third.cookie);
+  check('ADS: tester-fixture product created', tProd.status === 201, 'status ' + tProd.status);
+  const tAd = await call('POST', '/api/ads', { kind: 'product', ref_id: tProd.json.id }, third.cookie);
+  check('ADS: real account can promote before any tester flag', tAd.status === 201, 'status ' + tAd.status);
+  const feedT0 = await call('GET', '/api/ads');
+  check('ADS: unflagged owner ad shows in the feed', (feedT0.json.ads || []).some(a => a.kind === 'product' && a.ref_id === tProd.json.id));
+  const flag = await call('PATCH', `/api/admin/users/${third.id}/tester`, { is_tester: true }, admin.cookie);
+  check('ADS: admin flags the owner as a tester', flag.status === 200 && flag.json.is_tester === true, 'status ' + flag.status);
+  const feedT1 = await call('GET', '/api/ads');
+  check('ADS: tester owner ad never appears in the feed', !(feedT1.json.ads || []).some(a => a.kind === 'product' && a.ref_id === tProd.json.id));
+  const tProd2 = await call('POST', '/api/products', { title: 'ADS Tester Item Two', category: 'Electronics', description: 'Second item from the flagged account.', price: 120, condition: 'Good', city: 'Lusaka' }, third.cookie);
+  const tAd2 = await call('POST', '/api/ads', { kind: 'product', ref_id: tProd2.json.id }, third.cookie);
+  check('ADS: tester cannot create ads (403)', tAd2.status === 403 && String(tAd2.json.error || '').includes('real accounts'), 'status ' + tAd2.status + ' ' + JSON.stringify(tAd2.json).slice(0, 120));
+  const unflag = await call('PATCH', `/api/admin/users/${third.id}/tester`, { is_tester: false }, admin.cookie);
+  check('ADS: tester flag removed after the checks', unflag.status === 200 && unflag.json.is_tester === false, 'status ' + unflag.status);
+}
+
+async function bigPhotoTests() {
+  const big = 'data:image/jpeg;base64,' + 'A'.repeat(900000);
+  const u = await registerUser('Big Photo Seller', '0975550011', 'Lusaka');
+  const p = await call('POST', '/api/products', { title: 'Big photo item', category: 'Electronics', description: 'Listed with a full-size phone photo.', price: 100, condition: 'Good', city: 'Lusaka', photos: [big] }, u.cookie);
+  check('BIG: product with a ~900 KB photo is created', p.status === 201, 'status ' + p.status);
+  const got = await call('GET', '/api/products/' + p.json.id, null, u.cookie);
+  check('BIG: the large photo is stored and served back', got.status === 200 && (got.json.product.photos || []).length === 1);
+  const j = await call('POST', '/api/jobs', { title: 'Big photo job', category: 'Cleaning', description: 'A job posted with a full-size phone photo.', city: 'Lusaka', date_needed: '2026-11-05', pay_amount: 100, pay_type: 'per_job', workers_needed: 1, terms_accepted: true, photos: [big] }, u.cookie);
+  check('BIG: job with a ~900 KB photo is created', j.status === 201, 'status ' + j.status);
+}
+
+// Oct 23, 2026: trust strip (Donald's suggestion). Track-record counts ride
+// on the product detail (seller card) and the public profile.
+async function trustTests() {
+  const seller = await registerUser('Trust Seller', '0975550021', 'Lusaka');
+  const a = await call('POST', '/api/products', { title: 'Trust item A', category: 'Electronics', description: 'First trust item.', price: 100, condition: 'Good', city: 'Lusaka' }, seller.cookie);
+  const b = await call('POST', '/api/products', { title: 'Trust item B', category: 'Electronics', description: 'Second trust item.', price: 200, condition: 'Good', city: 'Lusaka' }, seller.cookie);
+  check('TRUST: seed products created', a.status === 201 && b.status === 201, a.status + '/' + b.status);
+  const sold = await call('PATCH', '/api/products/' + a.json.id, { status: 'sold' }, seller.cookie);
+  check('TRUST: owner can mark an item sold', sold.status === 200, 'status ' + sold.status);
+  const detail = await call('GET', '/api/products/' + b.json.id, null, seller.cookie);
+  const ss = detail.json.product && detail.json.product.seller_stats;
+  check('TRUST: product detail carries seller_stats', !!ss, JSON.stringify(detail.json).slice(0, 120));
+  check('TRUST: seller_stats counts 1 sold, 1 listed', !!ss && ss.items_sold === 1 && ss.items_listed === 1, JSON.stringify(ss));
+  const buyer = await registerUser('Trust Buyer', '0975550022', 'Kitwe');
+  const prof = await call('GET', '/api/users/' + seller.id, null, buyer.cookie);
+  check('TRUST: public profile carries stats with items_sold 1', !!(prof.json.stats && prof.json.stats.items_sold === 1), JSON.stringify(prof.json.stats || {}));
+  const mine = await call('GET', '/api/users/me/stats', null, seller.cookie);
+  check('TRUST: /me/stats agrees (same definition)', mine.json.items_sold === 1 && mine.json.items_listed === 1, JSON.stringify(mine.json));
+}
+
+// Oct 24, 2026: selfie rejection notice + re-upload + admin counts, and
+// business logos round-tripping as uploaded (v75). notifySms is
+// fire-and-forget, so the SMS assertions poll the admin log.
+async function selfieAndLogoTests(adminCookie, u) {
+  // Subject: the M1 Distant user from the main flow, reused on purpose.
+  // The suite already sits exactly at the 15/hour register cap, so a
+  // fresh registration here starved the share-preview section (Oct 24).
+  const smsRows = async () => {
+    const log = await call('GET', '/api/admin/sms-log', null, adminCookie);
+    return (log.json.sms_log || []).filter(r => r.user_id === u.id && r.kind === 'selfie_rejected');
+  };
+  const waitSms = async (n) => {
+    let rows = [];
+    for (let i = 0; i < 24; i++) {
+      rows = await smsRows();
+      if (rows.length >= n) break;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    return rows;
+  };
+  let v = await call('GET', '/api/admin/verifications', null, adminCookie);
+  // The queue ships selfie image URLs, not embedded photos (v83): the
+  // page used to carry ~4.4 MB of base64 and re-downloaded after every
+  // decision. The image route is moderator-only.
+  const queueRow = (v.json.pending || []).find((x) => x.id === u.id) || {};
+  check('SELFIE QUEUE: pending rows carry an image URL, not base64', String(queueRow.selfie || '').startsWith('/api/admin/verifications/') && !JSON.stringify(v.json.pending || []).includes('data:image;base64'), String(queueRow.selfie).slice(0, 60));
+  const selfieImg = await fetch(BASE + '/api/admin/verifications/' + u.id + '/selfie', { headers: { Cookie: adminCookie } });
+  check('SELFIE QUEUE: moderator can load the selfie image', selfieImg.status === 200 && (selfieImg.headers.get('content-type') || '').startsWith('image/'), 'status ' + selfieImg.status);
+  const selfieDenied = await fetch(BASE + '/api/admin/verifications/' + u.id + '/selfie', { headers: { Cookie: u.cookie } });
+  check('SELFIE QUEUE: members cannot load the selfie image route', selfieDenied.status === 403, 'status ' + selfieDenied.status);
+  const docReq = await call('POST', '/api/admin/users/' + u.id + '/request-doc', { kind: 'food_license' }, adminCookie);
+  check('DOC REQUEST: admin can request a document', docReq.status === 200 && docReq.json.ok === true, 'status ' + docReq.status);
+  let docSmsRow = {};
+  for (let i = 0; i < 16 && !docSmsRow.kind; i++) {
+    const docLog = await call('GET', '/api/admin/sms-log', null, adminCookie);
+    docSmsRow = (docLog.json.sms_log || []).find(r => r.user_id === u.id && r.kind === 'doc_request_food_license') || {};
+    if (!docSmsRow.kind) await new Promise(r => setTimeout(r, 250));
+  }
+  check('DOC REQUEST: the ask goes out as an SMS in Zac voice', docSmsRow.kind === 'doc_request_food_license' && String(docSmsRow.body || '').includes('food handlers licence'), JSON.stringify(docSmsRow).slice(0, 160));
+  check('SELFIE: new signup waits in the pending queue', v.status === 200 && (v.json.pending || []).some(x => x.id === u.id), 'status ' + v.status);
+  check('SELFIE: dashboard counts ride along', typeof v.json.rejected_count === 'number' && typeof v.json.redone_count === 'number' && typeof v.json.approved_count === 'number', JSON.stringify(v.json).slice(0, 120));
+  const denied = await call('GET', '/api/admin/verifications', null, u.cookie);
+  check('SELFIE: non-admin cannot read the queue (403)', denied.status === 403, 'status ' + denied.status);
+  const rej = await call('POST', '/api/admin/verifications/' + u.id, { status: 'rejected' }, adminCookie);
+  check('SELFIE: admin can reject', rej.status === 200, 'status ' + rej.status);
+  const rows1 = await waitSms(1);
+  check('SELFIE: rejection sends the standard SMS (logged, skipped without AT)', rows1.length === 1 && rows1[0].status === 'skipped' && rows1[0].body.includes('blocking recruiters') && rows1[0].body.length <= 160, JSON.stringify(rows1).slice(0, 160));
+  v = await call('GET', '/api/admin/verifications', null, adminCookie);
+  check('SELFIE: rejected list and count include the user', (v.json.rejected || []).some(x => x.id === u.id) && v.json.rejected_count >= 1, 'count ' + v.json.rejected_count);
+  const notify = await call('POST', '/api/admin/verifications/' + u.id + '/notify', {}, adminCookie);
+  check('SELFIE: admin can resend the notice', notify.status === 200, 'status ' + notify.status);
+  const rows2 = await waitSms(2);
+  check('SELFIE: resend logs a second SMS', rows2.length === 2, 'rows ' + rows2.length);
+  const notifyDenied = await call('POST', '/api/admin/verifications/' + u.id + '/notify', {}, u.cookie);
+  check('SELFIE: non-admin cannot resend (403)', notifyDenied.status === 403, 'status ' + notifyDenied.status);
+  const bad = await call('PATCH', '/api/users/me', { selfie: 'not-an-image' }, u.cookie);
+  check('SELFIE: invalid selfie is refused (422)', bad.status === 422, 'status ' + bad.status);
+  const fix = await call('PATCH', '/api/users/me', { selfie: IMG }, u.cookie);
+  check('SELFIE: re-upload returns the user to pending', fix.status === 200 && fix.json.user.selfie_status === 'pending', 'status ' + fix.status + ' ' + JSON.stringify(fix.json).slice(0, 140));
+  v = await call('GET', '/api/admin/verifications', null, adminCookie);
+  check('SELFIE: re-done user is back in the queue and counted as re-did', (v.json.pending || []).some(x => x.id === u.id) && v.json.redone_count >= 1 && !(v.json.rejected || []).some(x => x.id === u.id), 'redone ' + v.json.redone_count);
+  const av = await call('PATCH', '/api/users/me', { avatar: IMG }, u.cookie);
+  check('PROFILE: avatar change saves on its own and leaves the selfie status untouched (still pending here)',
+    av.status === 200 && av.json.user.avatar === IMG && av.json.user.selfie_status === 'pending', (av.json.user || {}).selfie_status || '');
+  const okRes = await call('POST', '/api/admin/verifications/' + u.id, { status: 'approved' }, adminCookie);
+  await new Promise(r => setTimeout(r, 700));
+  const rows3 = await smsRows();
+  check('SELFIE: approval sends no rejection SMS', okRes.status === 200 && rows3.length === 2, 'rows ' + rows3.length);
+  const biz = await call('POST', '/api/businesses', {
+    pacra_number: '120200012345', tpin: '1000000001', owner_legal_name: 'Test Owner', address: 'Plot 1, Test Road', certificate: IMG, name: 'Logo Check Crafts', category: 'Other', city: 'Lusaka', description: 'Checking that a PNG logo is stored as uploaded.', logo: IMG }, u.cookie);
+  check('LOGO: business created with a PNG logo', biz.status === 201 || biz.status === 200, 'status ' + biz.status);
+  const mine = await call('GET', '/api/businesses/mine', null, u.cookie);
+  const mineBiz = (mine.json.businesses || [])[0];
+  check('LOGO: logo comes back as the PNG data URL', !!mineBiz && typeof mineBiz.logo === 'string' && mineBiz.logo.startsWith('data:image/png'), mineBiz ? String(mineBiz.logo).slice(0, 30) : 'none');
+  const badLogo = await call('POST', '/api/businesses', {
+    pacra_number: '120200012345', tpin: '1000000001', owner_legal_name: 'Test Owner', address: 'Plot 1, Test Road', certificate: IMG, name: 'Bad Logo Crafts', category: 'Other', city: 'Lusaka', description: 'This one carries a broken logo value.', logo: 'not-a-data-url' }, u.cookie);
+  check('LOGO: a non-image logo is refused (422)', badLogo.status === 422, 'status ' + badLogo.status);
+}
