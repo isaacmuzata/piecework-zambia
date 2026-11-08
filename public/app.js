@@ -8048,11 +8048,14 @@ function expFileToDataUri(file) {
   });
 }
 /** Document data URI: images are resized like other uploads, PDFs are
- * read as-is. Rejects anything over the 2,500,000-char server cap. */
+ * read as-is. Rejects images over the 2,500,000-char server cap and PDFs
+ * over the 8,000,000-char cap (a scanned PDF is routinely larger than
+ * a resized photo). */
 async function expDocToDataUri(file) {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
   const uri = isPdf ? await expFileToDataUri(file) : await fileToDoc(file);
-  if (uri.length > 2500000) throw new Error('That file is too large. Keep documents under about 2 MB.');
+  const cap = isPdf ? 8000000 : 2500000;
+  if (uri.length > cap) throw new Error(isPdf ? 'This PDF is over 6 MB. Take a photo of the document instead, or use a smaller PDF.' : 'That file is too large. Keep documents under about 2 MB.');
   return uri;
 }
 /** Focus the first field named in a server 422 fields map. */

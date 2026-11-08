@@ -1849,6 +1849,14 @@ async function experiencesPhase3Tests(adminCookie, memberCookie, memberId, other
   check('EXP3: document upload rejects a bad MIME (GIF) with 422', docBadMime.status === 422, 'status ' + docBadMime.status);
   const docBig = await call('POST', '/api/experiences/host/documents', { kind: 'nrc', image: BIG_IMG, host_side: 'individual' }, expHost2.cookie);
   check('EXP3: document upload rejects an oversize file with 422', docBig.status === 422, 'status ' + docBig.status);
+  const BIG_PDF = 'data:application/pdf;base64,' + 'A'.repeat(3000000);
+  const docBigPdf = await call('POST', '/api/experiences/host/documents', { kind: 'nrc', image: BIG_PDF, host_side: 'individual' }, expHost2.cookie);
+  check('EXP3: document upload accepts a PDF between the photo cap and the PDF cap', docBigPdf.status === 200, 'status ' + docBigPdf.status);
+  const docBigPdfDel = await call('DELETE', '/api/experiences/host/documents/' + docBigPdf.json.document.id, null, expHost2.cookie);
+  check('EXP3: the large PDF document can be removed by its owner', docBigPdfDel.status === 200, 'status ' + docBigPdfDel.status);
+  const HUGE_PDF = 'data:application/pdf;base64,' + 'A'.repeat(8100000);
+  const docHugePdf = await call('POST', '/api/experiences/host/documents', { kind: 'nrc', image: HUGE_PDF, host_side: 'individual' }, expHost2.cookie);
+  check('EXP3: document upload rejects a PDF over the PDF cap with 422', docHugePdf.status === 422, 'status ' + docHugePdf.status);
   const docPdf = await call('POST', '/api/experiences/host/documents', { kind: 'nrc', image: PDF, host_side: 'individual' }, expHost2.cookie);
   const nrcDocId = (docPdf.json.document || {}).id;
   check('EXP3: a PDF identity document is accepted (UI Spec image-or-PDF rule)',
