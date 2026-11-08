@@ -111,6 +111,7 @@ const EXP_HOST_STATUSES = ['draft', 'submitted', 'under_review', 'additional_inf
 const EXP_DOC_KINDS = ['nrc', 'passport', 'drivers_licence', 'tourism_licence', 'selfie', 'other'];
 const EXP_DOC_MAX = 10; // documents per host side (build decision, Phase 3).
 const EXP_DOC_MAX_LEN = 2500000; // data URI chars, same as the business PACRA cert cap.
+const EXP_PDF_MAX_LEN = 8000000; // data URI chars (~6 MB binary). PDFs are read as-is, photos are resized down first, so a scanned PDF is routinely larger than a photo.
 const EXP_PAYOUT_METHODS = ['', 'mobile_money', 'bank'];
 const EXP_PROPERTY_TYPES = ['hotel', 'lodge', 'guesthouse', 'homestay', 'campsite', 'apartment'];
 const EXP_VEHICLE_TYPES = ['sedan', 'suv', 'minibus', 'bus', 'truck', 'motorbike', 'other'];
@@ -1192,8 +1193,14 @@ function createExperiencesRouter(deps) {
       return err(res, 422, 'Document must be a JPEG, PNG, WebP image or a PDF.',
         { image: 'Attach a JPG, PNG, WebP image or a PDF.' });
     }
-    if (image.length > EXP_DOC_MAX_LEN) {
-      return err(res, 422, 'Document is too large. Keep it under about 2 MB.',
+    // PDFs are read as-is (photos are resized down first), so a scanned PDF
+    // is routinely larger than a photo. Allow PDFs up to about 6 MB.
+    const docCap = parsed.mime === 'application/pdf' ? EXP_PDF_MAX_LEN : EXP_DOC_MAX_LEN;
+    if (image.length > docCap) {
+      const tooBig = parsed.mime === 'application/pdf'
+        ? 'This PDF is too large. Keep PDFs under about 6 MB, or take a photo of the document instead.'
+        : 'Document is too large. Keep it under about 2 MB.';
+      return err(res, 422, tooBig,
         { image: 'Document is too large.' });
     }
     const hostSide = String(b.host_side || '');
