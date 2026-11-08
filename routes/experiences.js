@@ -1076,7 +1076,8 @@ function createExperiencesRouter(deps) {
 
   // POST /api/experiences/host/apply — create or update the caller's
   // individual host draft. Partial body allowed: the wizard saves after
-  // each step. Status stays 'draft'. One host row per user.
+  // each step. Status stays 'draft'. One host row per user. A rejected
+  // host may start over: the row goes back to a fresh draft (see below).
   router.post('/api/experiences/host/apply', ah(auth), expHostLimiter, ah(async (req, res) => {
     const b = req.body || {};
     if (b.account_type !== undefined && b.account_type !== 'individual') {
@@ -1086,7 +1087,7 @@ function createExperiencesRouter(deps) {
     const parsed = hostProfileFields(b);
     if (parsed.error) return err(res, 422, parsed.error);
     const existing = await myHost(req.user.id);
-    if (existing && !['draft', 'additional_info'].includes(existing.status)) {
+    if (existing && !['draft', 'additional_info', 'rejected'].includes(existing.status)) {
       return err(res, 422, 'Your host application has already been submitted. Update your profile from your dashboard instead.');
     }
     const fields = { ...parsed.fields };
@@ -1107,7 +1108,14 @@ function createExperiencesRouter(deps) {
       const row = await getOne('SELECT * FROM experience_hosts WHERE id = ?', [insertId(r)]);
       return res.json({ ok: true, host: serializeHost(row) });
     }
-    await updateHostRow(existing.id, fields);
+    if (existing.status === 'rejected') {
+      // Start over from a rejection: reset to a fresh draft and clear
+      // the old note in the same update. The rejection itself stays in
+      // the admin audit log (logAdmin recorded it at decision time).
+      await updateHostRow(existing.id, { ...fields, status: 'draft', verification_note: '' });
+    } else {
+      await updateHostRow(existing.id, fields);
+    }
     const row = await getOne('SELECT * FROM experience_hosts WHERE id = ?', [existing.id]);
     res.json({ ok: true, host: serializeHost(row) });
   }));
@@ -2041,31 +2049,39 @@ function createExperiencesRouter(deps) {
   //
   // Phase 3 owner/suspended behaviour: a SUSPENDED listing returns 200
   // with { ok: true, suspended: true, listing: { id, title, status } }
-  // so the frontend renders "This listing is not available" with a link
-  // back; draft/submitted/under_review/additional_info/rejected listings
-  // still return 404. A signed-in owner of an active listing gets
-  // is_owner: true plus approval_status (never shown to guests).
+  // for EVERYONE, owner included (the dashboard shows the admin note).
+  // Any other non-active listing returns 404 to guests and strangers,
+  // but the OWNER gets the full detail (same shape as the active
+  // detail, plus address) so the edit form can prefill it. A signed-in
+  // owner of an active listing gets is_owner: true plus approval_status
+  // (never shown to guests).
   router.get('/api/experiences/:id', ah(maybeAuth), ah(async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return err(res, 404, 'Experience not found.');
     const row = await getOne(`${EXP_SELECT} WHERE l.id = ?`, [id]);
     if (!row) return err(res, 404, 'Experience not found.');
-    if (row.status === 'suspended') {
-      return res.json({ ok: true, suspended: true, listing: { id: Number(row.id), title: row.title, status: 'suspended' } });
-    }
-    if (row.status !== 'active') return err(res, 404, 'Experience not found.');
-
-    const locMap = await loadLocationMap();
-    const item = serializeListing(row, locMap);
-
+    // Owner check BEFORE the status gate: the owner may read their own
+    // non-active listing in full (draft edit prefill); everyone else
+    // still gets 404 below.
     const isOwner = !!req.user && (
       (row.host_user_id != null && Number(req.user.id) === Number(row.host_user_id)) ||
       (row.business_id != null && Number(req.user.id) === Number(row.business_owner_id || -1))
     );
+    if (row.status === 'suspended') {
+      return res.json({ ok: true, suspended: true, listing: { id: Number(row.id), title: row.title, status: 'suspended' } });
+    }
+    if (row.status !== 'active' && !isOwner) return err(res, 404, 'Experience not found.');
+
+    const locMap = await loadLocationMap();
+    const item = serializeListing(row, locMap);
+
     item.is_owner = isOwner;
     if (isOwner) {
       item.approval_status = row.approval_status;
       item.approval_note = row.approval_note || '';
+      // The exact address is never shown to guests before booking; the
+      // owner needs it to edit.
+      item.address = row.address || '';
     }
     if (!isOwner) {
       runWrite('UPDATE experience_listings SET view_count = view_count + 1 WHERE id = ?', [id]).catch(() => {});

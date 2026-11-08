@@ -1948,6 +1948,60 @@ async function experiencesPhase3Tests(adminCookie, memberCookie, memberId, other
   const rejPub = await call('GET', '/api/experiences/' + l3Id);
   check('EXP3: a rejected listing stays non-public (404)', rejPub.status === 404, 'status ' + rejPub.status);
 
+  // Fix 1 (Phase 3 fix pass): the owner can read their own non-active
+  // listing in full, so the edit form can prefill it.
+  const pre = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Draft Prefill Tour', description: 'A draft tour with every prefill field set.', city: 'Lusaka',
+    area: 'TEST Area', address: 'Plot 12, Independence Avenue',
+    price_from: 300, price_unit: 'per_person', capacity_max: 6,
+    inclusions: ['Return transport', 'Bottled water'], exclusions: ['Lunch'],
+    safety_requirements: 'Wear closed shoes.',
+    duration_hours: 3, group_size_max: 8, meeting_point: 'Lusaka Museum',
+  }, expHost2.cookie);
+  const preId = (pre.json.listing || {}).id;
+  check('EXP3-FIX1: draft creation stores the full field set (inclusions, safety, subtype row)',
+    pre.status === 200 && !!preId && pre.json.listing.approval_status === 'draft',
+    'status ' + pre.status + ' ' + JSON.stringify(pre.json).slice(0, 200));
+  await call('POST', '/api/experiences/' + preId + '/photos', { photos: [IMG] }, expHost2.cookie);
+  const ownerDraft = await call('GET', '/api/experiences/' + preId, null, expHost2.cookie);
+  const od = (ownerDraft.json || {}).experience || {};
+  check('EXP3-FIX1: owner GET of own draft returns 200 with inclusions, safety, subtype details, photos, approval_status and address',
+    ownerDraft.status === 200 && od.is_owner === true && od.approval_status === 'draft'
+    && Array.isArray(od.inclusions) && od.inclusions.includes('Return transport')
+    && Array.isArray(od.exclusions) && od.exclusions.includes('Lunch')
+    && od.safety_requirements === 'Wear closed shoes.'
+    && od.details && Number(od.details.duration_hours) === 3 && od.details.meeting_point === 'Lusaka Museum'
+    && Array.isArray(od.photos) && od.photos.length === 1 && !!od.photos[0].id
+    && od.address === 'Plot 12, Independence Avenue',
+    'status ' + ownerDraft.status + ' ' + JSON.stringify(od).slice(0, 300));
+  const strangerDraft = await call('GET', '/api/experiences/' + preId, null, expStranger.cookie);
+  check('EXP3-FIX1: a signed-in stranger GET of the draft returns 404', strangerDraft.status === 404, 'status ' + strangerDraft.status);
+  const anonDraft = await call('GET', '/api/experiences/' + preId);
+  check('EXP3-FIX1: signed-out GET of the draft returns 404', anonDraft.status === 404, 'status ' + anonDraft.status);
+  const preSub = await call('POST', '/api/experiences/' + preId + '/submit', {}, expHost2.cookie);
+  check('EXP3-FIX1: owner submits the prefill draft (approval submitted)',
+    preSub.status === 200 && preSub.json.listing && preSub.json.listing.approval_status === 'submitted',
+    'status ' + preSub.status + ' ' + JSON.stringify(preSub.json).slice(0, 160));
+  const ownerSub = await call('GET', '/api/experiences/' + preId, null, expHost2.cookie);
+  const os = (ownerSub.json || {}).experience || {};
+  check('EXP3-FIX1: owner GET of own submitted listing returns 200 with the full detail',
+    ownerSub.status === 200 && os.approval_status === 'submitted'
+    && os.address === 'Plot 12, Independence Avenue' && Array.isArray(os.inclusions) && os.inclusions.includes('Bottled water'),
+    'status ' + ownerSub.status + ' ' + JSON.stringify(os).slice(0, 200));
+  const guestActive = await call('GET', '/api/experiences/' + l2Id);
+  const ga = (guestActive.json || {}).experience || {};
+  check('EXP3-FIX1: guest GET of an active listing is unchanged (no approval_status, no address, is_owner false)',
+    guestActive.status === 200 && ga.is_owner === false && !('approval_status' in ga) && !('address' in ga),
+    'status ' + guestActive.status + ' ' + JSON.stringify(ga).slice(0, 200));
+  await call('PATCH', '/api/admin/experiences/' + mkId, { decision: 'suspend' }, adminCookie);
+  const ownerSusp = await call('GET', '/api/experiences/' + mkId, null, memberCookie);
+  check('EXP3-FIX1: owner GET of own suspended listing still returns the suspended shape',
+    ownerSusp.status === 200 && ownerSusp.json.suspended === true
+    && ownerSusp.json.listing && ownerSusp.json.listing.id === mkId,
+    'status ' + ownerSusp.status + ' ' + JSON.stringify(ownerSusp.json).slice(0, 160));
+  await call('PATCH', '/api/admin/experiences/' + mkId, { decision: 'unsuspend' }, adminCookie);
+
   // Host reject path (stranger's application stays visible as Rejected).
   await call('POST', '/api/experiences/host/apply', { display_name: 'EXP Stranger', city: 'Ndola', bio: 'A stranger host profile for the reject check.' }, expStranger.cookie);
   const strangerHost = await dbOne('SELECT id FROM experience_hosts WHERE user_id = ?', [expStranger.id]);
@@ -1966,6 +2020,44 @@ async function experiencesPhase3Tests(adminCookie, memberCookie, memberId, other
     'status ' + adminHosts.status + ' ' + JSON.stringify(adminHosts.json).slice(0, 160));
   const adminHostsNo = await call('GET', '/api/admin/experiences/hosts', null, memberCookie);
   check('EXP3: admin hosts list is admin-only (member gets 403)', adminHostsNo.status === 403, 'status ' + adminHostsNo.status);
+
+  // Fix 2 (Phase 3 fix pass): a rejected host can start a new application.
+  const reapply = await call('POST', '/api/experiences/host/apply', { display_name: 'EXP Stranger', city: 'Ndola' }, expStranger.cookie);
+  check('EXP3-FIX2: a rejected host can re-apply (200, status draft, verification_note cleared)',
+    reapply.status === 200 && reapply.json.host && reapply.json.host.status === 'draft'
+    && reapply.json.host.verification_note === '',
+    'status ' + reapply.status + ' ' + JSON.stringify(reapply.json).slice(0, 200));
+  // Complete the fresh application and submit it again.
+  await call('POST', '/api/experiences/host/documents', { kind: 'nrc', image: PDF, host_side: 'individual' }, expStranger.cookie);
+  await call('POST', '/api/experiences/host/documents', { kind: 'selfie', image: IMG, host_side: 'individual' }, expStranger.cookie);
+  const retryListing = await call('POST', '/api/experiences', {
+    host_side: 'individual', listing_type: 'tour', category_id: toursCat,
+    title: 'EXP3 Stranger Retry Tour', description: 'A retry tour from the re-applied host.', city: 'Ndola',
+    price_from: 120, price_unit: 'per_person', capacity_max: 4,
+  }, expStranger.cookie);
+  check('EXP3-FIX2: the re-applied host can create a listing draft',
+    retryListing.status === 200 && (retryListing.json.listing || {}).approval_status === 'draft',
+    'status ' + retryListing.status + ' ' + JSON.stringify(retryListing.json).slice(0, 160));
+  const retryPatch = await call('PATCH', '/api/experiences/host/me', {
+    bio: 'A test host bio that is long enough for the retry.',
+    payout_method: 'mobile_money', payout_reference: '0977123456',
+  }, expStranger.cookie);
+  check('EXP3-FIX2: the re-applied host profile completes (bio + payout, still draft)',
+    retryPatch.status === 200 && retryPatch.json.host && retryPatch.json.host.status === 'draft',
+    'status ' + retryPatch.status + ' ' + JSON.stringify(retryPatch.json).slice(0, 160));
+  const retrySubmit = await call('POST', '/api/experiences/host/submit', {}, expStranger.cookie);
+  check('EXP3-FIX2: the re-applied host submits again (status submitted)',
+    retrySubmit.status === 200 && retrySubmit.json.host && retrySubmit.json.host.status === 'submitted',
+    'status ' + retrySubmit.status + ' ' + JSON.stringify(retrySubmit.json).slice(0, 200));
+  // Suspended and approved hosts still cannot re-apply.
+  const suspHost = await call('PATCH', '/api/admin/experiences/hosts/' + strangerHost.id, { decision: 'suspend', note: 'TEST suspension for the re-apply check.' }, adminCookie);
+  check('EXP3-FIX2: admin suspends the re-submitted host (setup for the 422 check)',
+    suspHost.status === 200 && suspHost.json.host && suspHost.json.host.status === 'suspended',
+    'status ' + suspHost.status + ' ' + JSON.stringify(suspHost.json).slice(0, 160));
+  const suspApply = await call('POST', '/api/experiences/host/apply', { display_name: 'EXP Stranger', city: 'Ndola' }, expStranger.cookie);
+  check('EXP3-FIX2: a suspended host still gets 422 on apply', suspApply.status === 422, 'status ' + suspApply.status);
+  const apprApply = await call('POST', '/api/experiences/host/apply', { display_name: 'Worker Tester', city: 'Kitwe' }, memberCookie);
+  check('EXP3-FIX2: an approved host still gets 422 on apply', apprApply.status === 422, 'status ' + apprApply.status);
 
   // Business opt-in + commission override.
   const bizOptMember = await call('POST', '/api/experiences/host/business', { business_id: bizId }, memberCookie);

@@ -8125,6 +8125,8 @@ function expListingFormHtml(prefill, opts) {
         <div class="field"><label for="el-area">Area</label>
           <input id="el-area" name="area" maxlength="80" value="${esc(p.area || '')}" placeholder="e.g. Victoria Falls town"></div>
       </div>
+      <div class="field"><label for="el-address">Address</label>
+        <input id="el-address" name="address" maxlength="200" value="${esc(p.address || '')}" placeholder="Street address (only you see this before booking)"></div>
       <div class="form-2col">
         <div class="field"><label for="el-price">Price (ZMW) *</label>
           <input id="el-price" name="price_from" type="number" min="0" max="10000000" step="1" inputmode="numeric" required value="${p.price_from != null && p.price_from !== '' ? esc(String(p.price_from)) : ''}" placeholder="e.g. 450">
@@ -8258,7 +8260,6 @@ function expListingFormHtml(prefill, opts) {
 function expCollectListing(form) {
   const v = (id) => { const el = form.querySelector('#' + id); return el ? el.value.trim() : ''; };
   const n = (id) => { const s = v(id); return s === '' ? undefined : Number(s); };
-  const dirty = new Set([...form.querySelectorAll('[data-exp-dirty="1"]')].map((el) => el.name).filter(Boolean));
   const catSel = form.querySelector('#el-category');
   const cat = (form._categories || []).find((c) => Number(c.id) === Number(catSel.value));
   const type = expListingTypeForCategory(cat);
@@ -8266,6 +8267,7 @@ function expCollectListing(form) {
     listing_type: type,
     category_id: catSel.value ? Number(catSel.value) : '',
     title: v('el-title'), description: v('el-desc'), city: v('el-city'), area: v('el-area'),
+    address: v('el-address'),
     price_from: v('el-price') === '' ? '' : Number(v('el-price')),
     price_unit: v('el-unit'), capacity_max: n('el-capacity') || 1,
     cancellation_policy: v('el-cancel'),
@@ -8308,7 +8310,6 @@ function expCollectListing(form) {
     body.host_side = expListing.hostSide;
     if (expListing.businessId) body.business_id = expListing.businessId;
   }
-  body._dirty = dirty;
   return body;
 }
 function expValidListingStep1(form) {
@@ -8405,26 +8406,15 @@ async function expSaveListingDraft(form, { quiet } = {}) {
     let listing;
     if (expListing.id) {
       // PATCH refuses host-side changes, so the host side is sent only
-      // on create. Draft edits cannot prefill inclusions, safety notes or
-      // subtype rows (the Phase 3 API does not return them for drafts),
-      // so those are only sent when the host actually changed them here.
-      const dirty = body._dirty || new Set();
+      // on create. The form prefills every field from the owner detail
+      // response, so a full update is sent on save.
       const patchBody = { ...body };
       delete patchBody.host_side;
       delete patchBody.business_id;
-      delete patchBody._dirty;
-      if (!dirty.has('inclusions')) delete patchBody.inclusions;
-      if (!dirty.has('exclusions')) delete patchBody.exclusions;
-      if (!dirty.has('safety_requirements')) delete patchBody.safety_requirements;
-      const det = {};
-      for (const [k, val] of Object.entries(body.details || {})) if (dirty.has(k)) det[k] = val;
-      if (Object.keys(det).length) patchBody.details = det;
-      else delete patchBody.details;
       const { listing: l } = await api('/api/experiences/' + expListing.id, { method: 'PATCH', body: JSON.stringify(patchBody) });
       listing = l;
     } else {
       const createBody = { ...body };
-      delete createBody._dirty;
       const { listing: l } = await api('/api/experiences', { method: 'POST', body: JSON.stringify(createBody) });
       listing = l;
       expListing.id = listing.id;
@@ -8481,9 +8471,6 @@ async function expRenderListingForm(container, opts) {
   container.innerHTML = expListingFormHtml(prefill, { ...opts, categories });
   const form = container.querySelector('#exp-listing-form');
   form._categories = categories;
-  const markDirty = (e) => { if (e.target && e.target.name) e.target.dataset.expDirty = '1'; };
-  form.addEventListener('input', markDirty);
-  form.addEventListener('change', markDirty);
   const catSel = form.querySelector('#el-category');
   const syncType = () => {
     const cat = categories.find((c) => Number(c.id) === Number(catSel.value));
@@ -8870,10 +8857,14 @@ async function viewHostApply() {
     const dl = await api('/api/experiences/host/listings?limit=20');
     // The host list is newest first; the first listing is the wizard's.
     firstListing = (dl.listings || [])[0] || null;
-    if (firstListing && firstListing.status === 'active') {
+    if (firstListing) {
+      // The owner detail serves non-active listings in full, so a draft
+      // first listing prefills completely (same as the edit page); the
+      // form sends full updates on save, so partial prefill would wipe
+      // fields the host did not touch.
       try {
         const det = await api('/api/experiences/' + firstListing.id);
-        firstListing = { ...firstListing, ...(det.experience || {}) };
+        if (det.experience) firstListing = { ...firstListing, ...(det.experience || {}) };
       } catch { /* keep the host-list shape */ }
     }
   } catch { /* no listings yet */ }
@@ -9227,7 +9218,7 @@ async function viewHostDashboard() {
     ? `<div class="card"><h3 style="margin-top:0">Application rejected ${expStatusBadge('rejected')}</h3>
       ${expNoteCard(h.verification_note, h.updated_at ? fmtDate(h.updated_at) : '')}
       <div class="btn-row" style="margin-top:12px"><button class="btn btn-primary" type="button" id="exp-new-app">Start a new application</button></div>
-      <p class="small muted">Your rejected application stays on record. The team can open a fresh application for you.</p></div>`
+      <p class="small muted">Starting a new application resets your profile to a draft. The earlier rejection stays on record with the team.</p></div>`
     : `<div class="card"><h3 style="margin-top:0">Account suspended ${expStatusBadge('suspended')}</h3>
       ${expNoteCard(h.verification_note, h.updated_at ? fmtDate(h.updated_at) : '')}
       <p style="margin:10px 0 0">No new bookings are taken while your account is suspended.</p>
@@ -9285,9 +9276,33 @@ async function viewHostDashboard() {
       <a class="btn btn-sm btn-outline" href="#/host/business?business=${b.business_id}">Business dashboard</a></div>`).join('')}</div>` : ''}
   </div></div>`;
   const newApp = document.getElementById('exp-new-app');
-  if (newApp) newApp.addEventListener('click', () => {
-    toast('Your rejected application stays on record. Contact the 2911 Jobs team to start a new application.');
-    location.hash = '#/how';
+  if (newApp) newApp.addEventListener('click', async () => {
+    // A rejected host starts a fresh application: the backend resets
+    // the row to draft and clears the old note, then the wizard opens
+    // prefilled with the saved profile fields.
+    newApp.disabled = true;
+    try {
+      const body = { account_type: 'individual' };
+      if (h.display_name) body.display_name = h.display_name;
+      if (h.bio) body.bio = h.bio;
+      if (Array.isArray(h.languages)) body.languages = h.languages;
+      if (h.response_time) body.response_time = h.response_time;
+      if (h.phone_public) body.phone_public = h.phone_public;
+      if (h.city) body.city = h.city;
+      if (h.area) body.area = h.area;
+      if (h.meeting_point) body.meeting_point = h.meeting_point;
+      if (Array.isArray(h.provinces)) body.provinces = h.provinces;
+      if (h.payout_method) body.payout_method = h.payout_method;
+      await api('/api/experiences/host/apply', { method: 'POST', body: JSON.stringify(body) });
+      await expHostMe(true);
+      toast('Fresh application started. Your earlier rejection stays on record with the team.');
+      // Plain #/host/apply: the wizard opens at step 1 by default and
+      // prefills the fresh draft. (The apply route regex is an exact
+      // match, so #/host/apply?step=1 would fall through to Page not
+      // found; #/host/onboarding?step=N works because its regex is a
+      // prefix match.)
+      location.hash = '#/host/apply';
+    } catch (e) { toast(e.message, true); newApp.disabled = false; }
   });
   wireInvites();
   document.querySelectorAll('[data-exp-avail]').forEach((b) => b.addEventListener('click', () => {
@@ -9374,7 +9389,6 @@ async function viewHostBusiness() {
         ${s.status !== 'revoked' ? `<button class="btn btn-sm btn-danger" data-exp-revoke="${s.user_id}">Revoke</button>` : ''}</div>`).join('') : '<p style="margin:0">No staff yet.</p>'}
       <form id="exp-staff-form" style="margin-top:12px">
         <h4 style="margin:0 0 8px">Invite staff</h4>
-        <div class="field"><label for="exp-staff-name">Name</label><input id="exp-staff-name" name="name" placeholder="Name of the person you are inviting"></div>
         <div class="field"><label for="exp-staff-phone">Phone *</label><input id="exp-staff-phone" name="phone" type="tel" inputmode="tel" placeholder="Their 2911 Jobs phone number, e.g. 0971234567"></div>
         <div class="field"><label for="exp-staff-role">Role</label><select id="exp-staff-role" name="role"><option value="staff">Staff</option><option value="manager">Manager</option></select></div>
         <p class="hint">They must already have a 2911 Jobs account on that number. The invite appears in their app; no SMS is sent.</p>
@@ -9525,25 +9539,26 @@ async function viewHostListingEdit(id) {
   app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading your listing…')}</div></div>`;
   let listing = null;
   try {
-    const d = await api('/api/experiences/host/listings?limit=50');
-    listing = (d.listings || []).find((l) => Number(l.id) === Number(id));
-  } catch (e) {
-    app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
-    return;
+    // The owner detail serves non-active listings in full, so prefill
+    // comes from here: title, description, category, town, area,
+    // address, price, capacity, inclusions, exclusions, safety notes,
+    // subtype rows and photos with ids and cover. Suspended listings
+    // answer with the suspended shape, which has no detail to prefill.
+    const det = await api('/api/experiences/' + id);
+    if (det.experience) listing = det.experience;
+  } catch { /* fall through to the host list */ }
+  if (!listing) {
+    try {
+      const d = await api('/api/experiences/host/listings?limit=50');
+      listing = (d.listings || []).find((l) => Number(l.id) === Number(id));
+    } catch (e) {
+      app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
+      return;
+    }
   }
   if (!listing) {
     app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Listing not found', 'This listing is not yours, or it does not exist.', `<a class="btn btn-sm btn-primary" href="#/host/listings">My listings</a>`)}</div></div>`;
     return;
-  }
-  // Full details (inclusions, subtype rows, photo ids) come from the
-  // public detail page, which only serves active listings. Drafts keep
-  // their saved details on the server; the form only sends fields the
-  // host actually changes, so nothing is lost by editing a draft.
-  if (listing.status === 'active') {
-    try {
-      const det = await api('/api/experiences/' + id);
-      if (det.experience) listing = { ...listing, ...(det.experience || {}) };
-    } catch { /* keep the host-list shape */ }
   }
   const me = await expHostMe(true);
   const isApprovedEdit = listing.status === 'active' && listing.approval_status === 'approved';
@@ -9555,7 +9570,7 @@ async function viewHostListingEdit(id) {
     <a class="small" href="#/host/listings">Back to My listings</a>
     <h1 class="page-title">Edit listing</h1>
     <p class="page-sub">${esc(listing.title)} · ${expStatusBadge(listing.approval_status || 'draft')}</p>
-    ${listing.status === 'draft' ? '<p class="small muted">This listing is still a draft. Details you saved earlier are kept on the server; only change a field here if you want to update it.</p>' : ''}
+    ${listing.status === 'draft' ? '<p class="small muted">All your saved details are shown below. Change anything and save as a draft, or submit it for approval when ready.</p>' : ''}
     <div id="exp-listing-slot"></div>
   </div></div>`;
   await expRenderListingForm(document.getElementById('exp-listing-slot'), {
