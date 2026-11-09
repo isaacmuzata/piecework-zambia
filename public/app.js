@@ -776,6 +776,30 @@ function momoNoteHtml() {
     Agree the amount up front and never pay before work starts.</div>`;
 }
 
+/* ---------------- Safety: police numbers + live-location sharing ----------------
+   Zambia emergency numbers, verified against the Zambia Police Service site
+   (zambiapolice.gov.zm): Police 991, Ambulance 992, Fire Brigade 993.
+   All three are free to call on Zamtel, MTN and Airtel. Shown on job detail,
+   the live delivery track page, and experience detail. */
+function safetyEmergencyHtml(context) {
+  const place = context === 'experience' ? 'while you travel' : 'while you work';
+  const shareText = 'Hi, I am using 2911 Jobs. I am sharing my live location with you ' + place + ' so you know where I am. Please check on me.';
+  return `<p style="margin:10px 0 0"><b>Feeling unsafe?</b> Call the police right away. The call is free on Zamtel, MTN and Airtel.</p>
+    <div class="btn-row" style="margin-top:10px">
+      <a class="btn btn-danger" href="tel:991">${icon('phone')} Call Police — 991</a>
+      <a class="btn btn-outline" href="https://wa.me/?text=${encodeURIComponent(shareText)}" target="_blank" rel="noopener">${icon('pin')} Share live location on WhatsApp</a>
+    </div>
+    <p class="small muted" style="margin:10px 0 0">Share your live location with a friend or family member ${place}. In WhatsApp, tap attach, choose Location, then Share live location, and pick someone you trust.</p>
+    <p class="small muted" style="margin:6px 0 0">Other Zambian emergency numbers: Ambulance 992 · Fire Brigade 993.</p>`;
+}
+function safetyHtml(context) {
+  return `<div class="card">
+    <h3 style="margin-top:0">${icon('shield')} Stay safe</h3>
+    <p style="margin:0">If you feel unsafe at any time, do not wait. Call for help and let someone you trust know where you are.</p>
+    ${safetyEmergencyHtml(context)}
+  </div>`;
+}
+
 /* ---------------- views ---------------- */
 
 /** Signed-in home: greeting, search, categories, promo, fresh jobs. */
@@ -2314,6 +2338,7 @@ async function viewExperience(id) {
         <div class="card"><div class="safety-card"><span class="safety-ico">${icon('shield')}</span><div><b>Safety requirements</b>
           ${e.safety_requirements ? `<p style="white-space:pre-wrap;margin:6px 0 0;font-size:14px">${esc(e.safety_requirements)}</p>` : ''}
           <p class="small muted" style="margin:6px 0 0">2911 Jobs is a marketplace. The host is responsible for safety on the day. Read the requirements before you book.</p>
+          ${safetyEmergencyHtml('experience')}
         </div></div></div>
         <div class="card">
           <h3 style="margin-top:0">Reviews</h3>
@@ -3484,6 +3509,7 @@ async function viewJobDetail(id) {
       ${actionHtml}
       ${momoNoteHtml()}
       ${reviewHtml}
+      ${safetyHtml('job')}
       ${currentUser && !isPoster ? `<div style="text-align:center;margin-top:6px"><button class="btn btn-sm btn-outline" id="report-job-btn">🚩 Report this job</button></div>` : ''}
     </div>
     ${!isPoster && currentUser && job.status === 'open' && !(job.my_application && job.my_application.status !== 'withdrawn') ? `<div class="sticky-cta"><button class="btn btn-primary" id="sticky-apply">Apply for This Job</button></div>` : ''}
@@ -3824,6 +3850,7 @@ async function viewTrackDelivery(id) {
       <div id="track-map" style="height:420px;border-radius:12px;z-index:0"></div>
     </div>
     <p class="small muted" id="track-note"></p>
+    ${safetyHtml('job')}
   </div></div>`;
   const statusEl = document.getElementById('track-status');
   const noteEl = document.getElementById('track-note');
