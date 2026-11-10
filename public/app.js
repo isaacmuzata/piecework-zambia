@@ -721,6 +721,39 @@ function dedupeJobs(jobs) {
   });
 }
 
+/* Job code lookup: type a job's number and jump straight to it. The code
+   is the job's id; the detail endpoint is public and 404s for unknown ids
+   and for drafts the viewer does not own, so no draft leaks through it. */
+const JOB_CODE_NOT_FOUND = 'No job with that code. Check the number and try again.';
+async function lookupJobCode(rawCode, msgEl) {
+  const code = String(rawCode || '').trim();
+  if (msgEl) msgEl.hidden = true;
+  if (!/^\d+$/.test(code)) {
+    if (msgEl) { msgEl.textContent = JOB_CODE_NOT_FOUND; msgEl.hidden = false; }
+    return false;
+  }
+  try {
+    await api('/api/jobs/' + code);
+  } catch (e) {
+    if (msgEl) {
+      msgEl.textContent = e && e.status === 404 ? JOB_CODE_NOT_FOUND : 'Could not check that code right now. Try again.';
+      msgEl.hidden = false;
+    }
+    return false;
+  }
+  location.hash = '#/job/' + code;
+  return true;
+}
+function wireJobCodeLookup(inputId, btnId, msgId) {
+  const input = document.getElementById(inputId);
+  const btn = document.getElementById(btnId);
+  const msg = document.getElementById(msgId);
+  if (!input || !btn) return;
+  const go = () => { lookupJobCode(input.value, msg); };
+  btn.addEventListener('click', go);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+}
+
 function jobCard(job) {
   const saved = isSaved(job.id);  const area = job.area && job.area.toLowerCase() !== String(job.city || '').toLowerCase() ? job.area : '';
   const statusBadge = job.status === 'open' ? '' : `<span class="badge badge-status-${esc(job.status)}">${esc(job.status)}</span>`;
@@ -936,6 +969,12 @@ async function viewHome() {
       <h1><span id="hero-rot">Find work</span> near you.</h1>
       <p>Piece work and a local marketplace for Zambia. Free for workers, always.</p>
       <div class="searchbar">${icon('search')}<input id="home-q" type="search" placeholder="Try cleaning, painting or phones" aria-label="Search jobs, products and people"></div>
+      <div class="code-lookup">
+        <span class="code-lookup-label">Have a job code?</span>
+        <input id="home-code" type="text" inputmode="numeric" autocomplete="off" placeholder="e.g. 135" aria-label="Job code">
+        <button class="btn btn-sm btn-primary" id="home-code-btn" type="button">Find</button>
+      </div>
+      <p class="ferr" id="home-code-msg" hidden></p>
       <div class="hero95-photos">
         <div class="hero95-photo"><img src="/img/landing/cleaner-pro.jpg" alt="Cleaning work" fetchpriority="high"><span>Cleaning</span></div>
         <div class="hero95-photo"><img src="/img/landing/construction.jpg" alt="Construction work" loading="lazy"><span>Construction &amp; labour</span></div>
@@ -1020,6 +1059,7 @@ async function viewHome() {
       if (v) location.hash = '#/search?q=' + encodeURIComponent(v);
     }
   });
+  wireJobCodeLookup('home-code', 'home-code-btn', 'home-code-msg');
   document.querySelectorAll('[data-cat-link]').forEach(el => {
     const go = () => {
       browseState.category = el.dataset.catLink;
@@ -1175,6 +1215,12 @@ async function viewBrowse() {
     <div class="searchbar">${icon('search')}
       <input id="q" type="search" placeholder="Search for jobs, e.g. cleaner, cashier" value="${esc(browseState.q)}" aria-label="Search jobs">
     </div>
+    <div class="code-lookup">
+      <span class="code-lookup-label">Have a job code?</span>
+      <input id="browse-code" type="text" inputmode="numeric" autocomplete="off" placeholder="e.g. 135" aria-label="Job code">
+      <button class="btn btn-sm btn-primary" id="browse-code-btn" type="button">Find</button>
+    </div>
+    <p class="ferr" id="browse-code-msg" hidden></p>
     <div class="chips" id="quick-chips" style="margin-top:10px">
       <button class="chip ${browseState.sort !== 'pay_high' && browseState.maxKm !== 25 && !browseState.urgent ? 'active' : ''}" id="q-all">All</button>
       <button class="chip ${browseState.maxKm === 25 ? 'active' : ''}" id="q-near">Near Me</button>
@@ -1215,6 +1261,7 @@ async function viewBrowse() {
     clearTimeout(debounce);
     debounce = setTimeout(() => { browseState.q = q.value.trim(); browseState.page = 1; loadJobs(true); }, 350);
   });
+  wireJobCodeLookup('browse-code', 'browse-code-btn', 'browse-code-msg');
   document.getElementById('f-city').addEventListener('change', (e) => {
     browseState.city = e.target.value; browseState.page = 1; loadJobs(true);
   });
@@ -3465,6 +3512,7 @@ async function viewJobDetail(id) {
         <span>${icon('pin')}${esc(job.city)}${job.area && job.area.toLowerCase() !== String(job.city || '').toLowerCase() ? ' · ' + esc(job.area) : ''}${job.distance_km != null ? ` · ${esc(fmtKm(job.distance_km))} away` : ''}</span>
         <span>${icon('calendar')}${esc(fmtDate(job.date_needed))}</span>
         <span>${icon('clock')}Posted ${esc(relTime(job.created_at))}</span>
+        <span id="job-code">Job code: ${job.id}</span>
       </div>
     </div>
     <div class="page">
