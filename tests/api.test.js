@@ -1018,6 +1018,7 @@ async function emailTests() {
   await emailTests();
   await supportTests(admin.cookie, worker.cookie, third.cookie);
   await sharePreviewTests();
+  await appLinksTests();
   await smsTests();
   await pushTests(admin.cookie);
   await adsTests({ admin, third, p2, bizId, bizSlug });
@@ -1191,6 +1192,30 @@ async function sharePreviewTests() {
 
   const missing = await raw('/s/product/999999');
   check('SHARE: unknown item falls back to the brand preview', missing.status === 200 && missing.text.includes('/img/og-brand.jpg'));
+}
+
+// v113: iPhone universal links. The apple-app-site-association file must
+// be served at the exact path, as application/json, naming the App Store
+// app ID (Team ID + bundle ID). Apple refuses it if the content type or
+// the path is wrong, and the Android assetlinks file must keep working.
+async function appLinksTests() {
+  const raw = async (p) => { const r = await fetch(BASE + p); return { status: r.status, type: r.headers.get('content-type') || '', text: await r.text() }; };
+  const aasa = await raw('/.well-known/apple-app-site-association');
+  let aasaJson = null; try { aasaJson = JSON.parse(aasa.text); } catch { /* stays null */ }
+  const appIds = (aasaJson && aasaJson.applinks && aasaJson.applinks.details || []).flatMap(d => d.appIDs || []);
+  check('APPLINKS: apple-app-site-association serves 200 as application/json',
+    aasa.status === 200 && aasa.type.includes('application/json'),
+    'status ' + aasa.status + ' type ' + aasa.type);
+  check('APPLINKS: association names the App Store app ID',
+    appIds.includes('5GFV4UX32H.com.pieceworkzambia.app'),
+    'appIDs ' + JSON.stringify(appIds));
+  check('APPLINKS: association covers job and experience share paths',
+    !!aasaJson && JSON.stringify(aasaJson).includes('/s/job/*') && JSON.stringify(aasaJson).includes('/s/experience/*'),
+    aasa.text.slice(0, 200));
+  const dal = await raw('/.well-known/assetlinks.json');
+  check('APPLINKS: Android assetlinks still serves 200 as application/json',
+    dal.status === 200 && dal.type.includes('application/json') && dal.text.includes('com.pieceworkzambia.app'),
+    'status ' + dal.status + ' type ' + dal.type);
 }
 
 

@@ -13,6 +13,7 @@ const compression = require('compression');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const webpush = require('web-push');
 
@@ -4853,6 +4854,19 @@ for (const shellFile of ['/app.js', '/styles.css']) {
 app.get(['/', '/index.html'], (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+// Apple App Site Association for iPhone universal links. Must be served
+// at exactly /.well-known/apple-app-site-association, as application/json,
+// no cache, no redirect (Apple fetches this exact path over HTTPS).
+// This route MUST sit above express.static: static only ignores dot-FILES,
+// files inside a dot-directory (like .well-known/) are still served, and
+// sendFile guesses the type from the file extension, so the extensionless
+// association file came back as application/octet-stream. Sent with
+// res.send so the content type is exactly application/json.
+app.get('/.well-known/apple-app-site-association', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.type('application/json');
+  res.send(fs.readFileSync(path.join(__dirname, 'public', '.well-known', 'apple-app-site-association'), 'utf8'));
 });
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: IS_PROD ? '1h' : 0 }));
 // Digital Asset Links for the Android app (TWA verification). Must be served
