@@ -7905,7 +7905,7 @@ async function viewGiveawayDraw(id) {
   <div id="draw-overlay" style="position:fixed;inset:0;z-index:200;background:radial-gradient(ellipse at center,#0e6b3a 0%,#062b1c 70%);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:hidden">
     <div id="draw-confetti" style="position:absolute;inset:0;pointer-events:none;overflow:hidden"></div>
     <div style="position:relative;z-index:2;max-width:640px;width:100%">
-      <div class="small" style="letter-spacing:3px;color:#bfe6cf;font-weight:700">PIECEWORK ZAMBIA • LIVE GIVEAWAY DRAW</div>
+      <div class="small" style="letter-spacing:3px;color:#bfe6cf;font-weight:700">2911 JOBS • LIVE GIVEAWAY DRAW</div>
       <h1 id="draw-title" style="font-size:34px;margin:10px 0 4px">Loading…</h1>
       <div id="draw-prize" style="font-size:84px;font-weight:800;color:#ffd34d;text-shadow:0 4px 24px rgba(0,0,0,.4)"></div>
       <div id="draw-meta" class="small" style="color:#e6f4ec;margin-top:6px"></div>
