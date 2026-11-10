@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 2911 Jobs email tests (v110, Nov 9, 2026).
+ * 2911 Jobs email tests (v111, Nov 9, 2026).
  *
  * Two parts, run in order:
  *  1. Mailer unit tests: the Brevo mailer in stream-transport mode
@@ -64,6 +64,9 @@ async function mailerTests() {
     confRaw.includes('Confirm your email for 2911 Jobs')
     && confRaw.includes('/api/auth/verify-email?token=tok-confirm-123')
     && confRaw.includes('mutinta@example.com'), 'raw head: ' + String(conf.raw).slice(0, 200));
+  check('MAILER: confirmation HTML includes the 2911 Jobs logo (hosted icon, alt text)',
+    confRaw.includes('https://pieceworkzambia.com/icon-512.png')
+    && confRaw.includes('alt="2911 Jobs"'), 'logo missing from confirmation raw');
 
   const reset = await mailer.sendResetEmail({ name: 'Mutinta Phiri', email: 'mutinta@example.com' }, 'tok-reset-456');
   check('MAILER: reset email returns ok with the raw message',
@@ -73,6 +76,9 @@ async function mailerTests() {
     resetRaw.includes('Reset your 2911 Jobs password')
     && resetRaw.includes('/api/auth/reset-password?token=tok-reset-456'),
     'raw head: ' + String(reset.raw).slice(0, 200));
+  check('MAILER: reset HTML includes the 2911 Jobs logo (hosted icon, alt text)',
+    resetRaw.includes('https://pieceworkzambia.com/icon-512.png')
+    && resetRaw.includes('alt="2911 Jobs"'), 'logo missing from reset raw');
 
   // Fallback: a failing first transport falls through to the stream one.
   const nodemailer = require('nodemailer');

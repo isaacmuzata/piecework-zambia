@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 2911 Jobs — email (v110, Nov 9, 2026).
+ * 2911 Jobs — email (v111, Nov 9, 2026).
  *
  * Optional email confirmation for account creation, plus email-first
  * password reset, so SMS is reserved for job alerts. Email is OPTIONAL
@@ -27,6 +27,11 @@ const nodemailer = require('nodemailer');
 
 const APP_URL = (process.env.APP_BASE_URL || 'https://pieceworkzambia.com').replace(/\/$/, '');
 const FROM = process.env.MAIL_FROM || '2911 Jobs <noreply@pieceworkzambia.com>';
+// Public hosted app icon (public/icon-512.png, served by the app). Used
+// as the logo at the top of both emails; a plain <img> link, no CID
+// embedding, so nothing new is attached and the emails stay readable
+// when images are blocked (the "2911 Jobs" wordmark below stays).
+const LOGO_URL = 'https://pieceworkzambia.com/icon-512.png';
 
 let transporter = null;
 function getTransporter() {
@@ -69,6 +74,7 @@ function wrap({ preheader, heading, bodyHtml, buttonText, buttonUrl, plainBody }
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#EEF2F7;padding:24px 12px;"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background-color:#FFFFFF;border-radius:20px;overflow:hidden;">
 <tr><td style="background-color:#0B1F3B;padding:28px 24px 20px;text-align:center;">
+<p style="margin:0 0 14px;text-align:center;"><img src="${LOGO_URL}" alt="2911 Jobs" width="120" style="display:block;margin:0 auto;width:120px;height:auto;border:0;"></p>
 <p style="margin:0;color:#FFFFFF;font-size:26px;font-weight:bold;letter-spacing:0.4px;">2911 Jobs</p>
 <p style="margin:8px 0 0;color:#93C5FD;font-size:14px;">Find work. Hire help. Earn locally.</p>
 </td></tr>
@@ -144,4 +150,4 @@ async function sendResetEmail(user, token) {
   return sendMail(user.email, 'Reset your 2911 Jobs password', content);
 }
 
-module.exports = { isMailConfigured, sendConfirmationEmail, sendResetEmail, sendMailWithTransports, getTransports, APP_URL };
+module.exports = { isMailConfigured, sendConfirmationEmail, sendResetEmail, sendMailWithTransports, getTransports, APP_URL, LOGO_URL };
