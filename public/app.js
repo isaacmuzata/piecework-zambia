@@ -5354,7 +5354,7 @@ function viewForgot() {
   app.innerHTML = `
   <div class="view"><div class="page" style="max-width:420px;margin:0 auto">
     <h1 class="page-title">Reset password</h1>
-    <p class="page-sub">Enter your phone number. We will send a 6-digit reset code to you on WhatsApp.</p>
+    <p class="page-sub">Enter your phone number. We will send a reset link to your confirmed email, or a 6-digit code by SMS.</p>
     <div class="card">
       <form id="forgot-form" novalidate>
         <div class="field">
@@ -5373,7 +5373,7 @@ function viewForgot() {
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true;
     try {
-      const { sms_sent, whatsapp, account_found } = await api('/api/auth/forgot', {
+      const { sms_sent, email_sent, whatsapp, account_found } = await api('/api/auth/forgot', {
         method: 'POST',
         body: JSON.stringify({ phone: form.phone.value.trim() }),
       });
@@ -5385,6 +5385,13 @@ function viewForgot() {
         done.innerHTML = `
         <p><b>No account found.</b></p>
         <p class="small muted">We could not find a 2911 Jobs account with <b>${esc(phone)}</b>. Check the number and try again, or <a href="#/register" style="font-weight:700">sign up for a new account</a>.</p>`;
+        return;
+      }
+      if (email_sent) {
+        done.innerHTML = `
+        <p><b>Reset link sent by email.</b></p>
+        <p class="small muted">Check your inbox for the password reset link. It works for 1 hour. No text was sent.</p>
+        <p style="text-align:center;margin:12px 0 0"><a href="#/login" class="btn btn-primary full">Back to sign in</a></p>`;
         return;
       }
       done.innerHTML = sms_sent ? `
@@ -5472,6 +5479,11 @@ function viewRegister() {
           <label for="rg-phone">Phone number</label>
           <input name="phone" id="rg-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0977 123 456">
           <div class="hint">Your mobile number — this is how posters reach you on call or WhatsApp.</div>
+        </div>
+        <div class="field">
+          <label for="rg-email">Email address <span class="hint-inline">(optional)</span></label>
+          <input name="email" id="rg-email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com">
+          <div class="hint">Optional. We use it to confirm your account and to reset your password, so texts stay for job alerts.</div>
         </div>
         <div class="field">
           <label for="rg-city">City</label>
@@ -5624,13 +5636,15 @@ function viewRegister() {
     const btn = verifyForm.querySelector('button[type=submit]');
     btn.disabled = true;
     try {
-      const { user } = await api('/api/auth/register/verify', {
+      const { user, emailSent } = await api('/api/auth/register/verify', {
         method: 'POST',
         body: JSON.stringify({ phone: pendingPhone, code: verifyForm.code.value.trim() }),
       });
       if (resendTimer) clearInterval(resendTimer);
       currentUser = user; renderChrome();
-      toast(`Welcome to 2911 Jobs, ${user.name.split(' ')[0]}!`);
+      toast(emailSent
+        ? `Welcome to 2911 Jobs, ${user.name.split(' ')[0]}! Check your inbox to confirm your email.`
+        : `Welcome to 2911 Jobs, ${user.name.split(' ')[0]}!`);
       afterAuthRedirect();
     } catch (err2) {
       showFieldErrors(verifyForm, err2.fields || { code: err2.message });

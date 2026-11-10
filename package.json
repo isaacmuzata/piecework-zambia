@@ -10,6 +10,7 @@
     "express-rate-limit": "^7.2.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.9.14",
     "web-push": "^3.6.7"
   },
   "description": "2911 Jobs — quick-labor jobs marketplace (gigs, day work) for Zambia",
@@ -23,7 +24,7 @@
     "seed": "node scripts/seed.js",
     "start": "node server.js",
     "wipe": "node scripts/wipe.js",
-    "test": "node tests/api.test.js"
+    "test": "node tests/api.test.js && node tests/email.test.js"
   },
   "type": "commonjs",
   "version": "1.0.0"

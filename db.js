@@ -35,6 +35,12 @@ const SCHEMA = [
     skills        TEXT DEFAULT '',
     rating_avg    REAL DEFAULT 0,
     rating_count  INTEGER DEFAULT 0,
+    email         TEXT,
+    email_verified INTEGER NOT NULL DEFAULT 0,
+    email_verify_token_hash TEXT,
+    email_verify_expires TEXT,
+    reset_token_hash TEXT,
+    reset_token_expires TEXT,
     created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS jobs (
@@ -335,6 +341,7 @@ const SCHEMA = [
     name           TEXT NOT NULL,
     password_hash  TEXT NOT NULL,
     city           TEXT NOT NULL,
+    email          TEXT DEFAULT '',
     open_to_work   INTEGER NOT NULL DEFAULT 0,
     ref_code       TEXT DEFAULT '',
     device_id      TEXT DEFAULT '',
@@ -742,6 +749,16 @@ const OPTIONAL_COLUMNS = [
   ['users', 'suspended_at', 'TEXT'],
   ['users', 'deactivated_at', 'TEXT'],
   ['users', 'suspension_reason', 'TEXT'],
+  // Email confirmation (v110, 2026-11-09): optional email at signup,
+  // verified by a hashed one-time token; a verified email is also the
+  // password-reset channel, with SMS staying as the fallback.
+  ['users', 'email', 'TEXT'],
+  ['users', 'email_verified', 'INTEGER DEFAULT 0'],
+  ['users', 'email_verify_token_hash', 'TEXT'],
+  ['users', 'email_verify_expires', 'TEXT'],
+  ['users', 'reset_token_hash', 'TEXT'],
+  ['users', 'reset_token_expires', 'TEXT'],
+  ['pending_registrations', 'email', 'TEXT'],
   ['users', 'food_license_image', 'TEXT'],
   ['users', 'food_license_status', "TEXT DEFAULT 'none'"],
   ['users', 'food_license_number', 'TEXT'],
@@ -769,6 +786,10 @@ async function init() {
       await client.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
   }
+  // Email uniqueness (v110): one account per address, case-insensitive
+  // (addresses are stored lowercased). Partial so the many members with
+  // no email at all are unaffected.
+  await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email) WHERE email IS NOT NULL AND email != ''`);
   // Migration (Experiences Phase 3, 2026-11-08): experience_listings gains
   // a real FK on host_id (REFERENCES experience_hosts(id)), approval
   // columns (approval_status, approval_note), and 'suspended' in the

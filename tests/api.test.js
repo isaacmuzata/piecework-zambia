@@ -11,6 +11,7 @@
  * Run: npm test   (exit code 0 = all passed)
  */
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@libsql/client');
@@ -122,7 +123,7 @@ async function registerUser(name, phone, city) {
   try { fs.unlinkSync(DB); } catch { /* fresh db */ }
   server = spawn('node', ['server.js'], {
     cwd: APP,
-    env: { ...process.env, DB_PATH: DB, PORT: String(PORT), ADMIN_PHONES: ADMIN_PHONE_NORM, VAPID_PUBLIC_KEY: '', VAPID_PRIVATE_KEY: '' },
+    env: { ...process.env, DB_PATH: DB, PORT: String(PORT), ADMIN_PHONES: ADMIN_PHONE_NORM, VAPID_PUBLIC_KEY: '', VAPID_PRIVATE_KEY: '', MAIL_TRANSPORT: 'stream', BREVO_SMTP_USER: 'test@smtp-brevo.com', BREVO_SMTP_PASS: 'test-key' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   server.stderr.on('data', d => process.stderr.write('[server] ' + d));
@@ -867,8 +868,154 @@ async function signupOtpTests() {
   check('OTP: the resent code creates the account', newGood.status === 201 && !!newGood.cookie && (await userCount(p5)) === 1, 'status ' + newGood.status);
 }
 
+// Nov 9, 2026 (v110): optional email confirmation at signup + email-first
+// password reset, so SMS is reserved for job alerts. The test server runs
+// with MAIL_TRANSPORT=stream and dummy Brevo vars, so the mailer is
+// configured but nothing is ever sent; email tokens are seeded directly
+// into the DB (sha256 of a known token) because the raw token only ever
+// travels inside the email itself.
+async function emailTests() {
+  const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+  const start = (name, phone, email) => call('POST', '/api/auth/register', {
+    name, phone, password: 'test-pass-123', city: 'Lusaka', avatar: IMG, selfie: IMG,
+    ...(email !== undefined ? { email } : {}),
+  });
+  const verify = (phone, code) => call('POST', '/api/auth/register/verify', { phone, code });
+  const userByPhone = async (phone) => dbOne(
+    'SELECT * FROM users WHERE phone = ?', [normalizedTestPhone(phone)]);
+  const resetRows = async (userId) => Number((await dbOne(
+    'SELECT COUNT(*) AS n FROM password_resets WHERE user_id = ? AND used_at IS NULL', [userId]))?.n || 0);
+  const resetSmsRows = async (phone) => Number((await dbOne(
+    "SELECT COUNT(*) AS n FROM sms_log WHERE phone = ? AND kind = 'password_reset'", [normalizedTestPhone(phone)]))?.n || 0);
+
+  // Signup WITHOUT email: works exactly as before, emailSent false.
+  const n1 = '0970000701';
+  const s1 = await start('Email None', n1);
+  const c1 = await latestSignupCode(n1);
+  const v1 = await verify(n1, c1);
+  const u1 = await userByPhone(n1);
+  check('EMAIL: signup without email works, emailSent false, no email stored',
+    s1.status === 200 && v1.status === 201 && v1.json.emailSent === false
+    && !u1.email && Number(u1.email_verified) === 0, 'status ' + v1.status + ' ' + JSON.stringify(v1.json).slice(0, 120));
+
+  // Signup WITH email: stored lowercased and unverified, emailSent true.
+  const n2 = '0970000702';
+  const s2 = await start('Email User', n2, 'Test@Example.COM');
+  const c2 = await latestSignupCode(n2);
+  const v2 = await verify(n2, c2);
+  const u2 = await userByPhone(n2);
+  check('EMAIL: signup with email stores it lowercased, unverified, emailSent true',
+    s2.status === 200 && v2.status === 201 && v2.json.emailSent === true
+    && u2.email === 'test@example.com' && Number(u2.email_verified) === 0
+    && !!u2.email_verify_token_hash && !!u2.email_verify_expires,
+    'status ' + v2.status + ' ' + JSON.stringify(v2.json).slice(0, 120));
+
+  // Invalid email is rejected at start with a field error.
+  const bad = await start('Email Bad', '0970000703', 'not-an-email');
+  check('EMAIL: an invalid email is rejected at signup (422, fields.email)',
+    bad.status === 422 && !!(bad.json.fields && bad.json.fields.email), 'status ' + bad.status);
+
+  // Duplicate email is refused at start, case-insensitively.
+  const dup = await start('Email Dup', '0970000704', 'TEST@example.com');
+  check('EMAIL: a duplicate email is refused at signup (409)',
+    dup.status === 409, 'status ' + dup.status);
+
+  // Resend verification: works while unverified, and rotates the token.
+  const hashBefore = u2.email_verify_token_hash;
+  const resend = await call('POST', '/api/auth/resend-verification', {}, v2.cookie);
+  const u2r = await userByPhone(n2);
+  check('EMAIL: resend-verification sends a fresh token while unverified',
+    resend.status === 200 && resend.json.emailSent === true
+    && u2r.email_verify_token_hash !== hashBefore, 'status ' + resend.status + ' ' + JSON.stringify(resend.json).slice(0, 120));
+
+  // Verify the token: a seeded known token confirms the address, the
+  // token is cleared, and the link cannot be reused.
+  const token = 'verify-token-' + Date.now();
+  await dbExecute("UPDATE users SET email_verify_token_hash = ?, email_verify_expires = datetime('now', '+24 hours') WHERE phone = ?",
+    [sha(token), normalizedTestPhone(n2)]);
+  const page = await fetch(BASE + '/api/auth/verify-email?token=' + encodeURIComponent(token));
+  const pageText = await page.text();
+  const u2v = await userByPhone(n2);
+  check('EMAIL: the confirmation link verifies the email and burns the token',
+    page.status === 200 && pageText.includes('Email confirmed')
+    && Number(u2v.email_verified) === 1 && !u2v.email_verify_token_hash,
+    'status ' + page.status);
+  const again = await fetch(BASE + '/api/auth/verify-email?token=' + encodeURIComponent(token));
+  check('EMAIL: the confirmation link cannot be reused',
+    again.status === 400, 'status ' + again.status);
+  const noToken = await fetch(BASE + '/api/auth/verify-email');
+  check('EMAIL: verify-email without a token is rejected (400)',
+    noToken.status === 400, 'status ' + noToken.status);
+
+  // An expired token is rejected.
+  const tokenExp = 'verify-token-expired';
+  await dbExecute("UPDATE users SET email_verify_token_hash = ?, email_verify_expires = datetime('now', '-1 hour') WHERE phone = ?",
+    [sha(tokenExp), normalizedTestPhone(n2)]);
+  const expPage = await fetch(BASE + '/api/auth/verify-email?token=' + encodeURIComponent(tokenExp));
+  check('EMAIL: an expired confirmation token is rejected (400)',
+    expPage.status === 400, 'status ' + expPage.status);
+
+  // Resend after verification, and for an account with no email: refused.
+  const resendDone = await call('POST', '/api/auth/resend-verification', {}, v2.cookie);
+  check('EMAIL: resend-verification is refused once the email is confirmed (422)',
+    resendDone.status === 422, 'status ' + resendDone.status);
+  const resendNone = await call('POST', '/api/auth/resend-verification', {}, v1.cookie);
+  check('EMAIL: resend-verification is refused with no email on the account (422)',
+    resendNone.status === 422, 'status ' + resendNone.status);
+
+  // Password reset with a VERIFIED email: a reset link by email, NO SMS
+  // code row and no SMS log entry; the token is stored on the user.
+  const fgEmail = await call('POST', '/api/auth/forgot', { phone: n2 });
+  const u2f = await userByPhone(n2);
+  check('EMAIL: forgot-password with a verified email sends a link, no SMS code',
+    fgEmail.status === 200 && fgEmail.json.email_sent === true && fgEmail.json.sms_sent === false
+    && (await resetRows(u2.id)) === 0 && (await resetSmsRows(n2)) === 0
+    && !!u2f.reset_token_hash && !!u2f.reset_token_expires,
+    'status ' + fgEmail.status + ' ' + JSON.stringify(fgEmail.json).slice(0, 140));
+
+  // The reset form page renders for a live token and rejects a bad one.
+  const resetToken = 'reset-token-' + Date.now();
+  await dbExecute("UPDATE users SET reset_token_hash = ?, reset_token_expires = datetime('now', '+1 hours') WHERE phone = ?",
+    [sha(resetToken), normalizedTestPhone(n2)]);
+  const formPage = await fetch(BASE + '/api/auth/reset-password?token=' + encodeURIComponent(resetToken));
+  const formText = await formPage.text();
+  check('EMAIL: the reset form page renders for a live token',
+    formPage.status === 200 && formText.includes('Choose a new password'), 'status ' + formPage.status);
+  const formBad = await fetch(BASE + '/api/auth/reset-password?token=nope');
+  check('EMAIL: the reset form page rejects a bad token (400)',
+    formBad.status === 400, 'status ' + formBad.status);
+
+  // Redeem the email reset token: new password works, token is cleared,
+  // and the link cannot be reused.
+  const redeem = await call('POST', '/api/auth/reset-by-email', { token: resetToken, new_password: 'new-pass-456' });
+  const u2x = await userByPhone(n2);
+  const loginNew = await call('POST', '/api/auth/login', { phone: n2, password: 'new-pass-456' });
+  check('EMAIL: the email reset link sets a new password and signs in',
+    redeem.status === 200 && !!redeem.cookie && loginNew.status === 200 && !u2x.reset_token_hash,
+    'status ' + redeem.status + ' login ' + loginNew.status);
+  const redeemAgain = await call('POST', '/api/auth/reset-by-email', { token: resetToken, new_password: 'new-pass-789' });
+  check('EMAIL: the email reset link cannot be reused',
+    redeemAgain.status === 401, 'status ' + redeemAgain.status);
+
+  // An expired email reset token is rejected.
+  const resetExp = 'reset-token-expired';
+  await dbExecute("UPDATE users SET reset_token_hash = ?, reset_token_expires = datetime('now', '-1 hour') WHERE phone = ?",
+    [sha(resetExp), normalizedTestPhone(n2)]);
+  const redeemExp = await call('POST', '/api/auth/reset-by-email', { token: resetExp, new_password: 'new-pass-789' });
+  check('EMAIL: an expired email reset token is rejected (401)',
+    redeemExp.status === 401, 'status ' + redeemExp.status);
+
+  // Password reset with NO verified email: the SMS-code flow runs exactly
+  // as before (a password_resets row is created, no email is sent).
+  const fgSms = await call('POST', '/api/auth/forgot', { phone: n1 });
+  check('EMAIL: forgot-password without a verified email still uses the SMS code flow',
+    fgSms.status === 200 && !fgSms.json.email_sent && (await resetRows(u1.id)) === 1,
+    'status ' + fgSms.status + ' ' + JSON.stringify(fgSms.json).slice(0, 140));
+}
+
   await accountLifecycleTests(admin.cookie);
   await signupOtpTests();
+  await emailTests();
   await supportTests(admin.cookie, worker.cookie, third.cookie);
   await sharePreviewTests();
   await smsTests();

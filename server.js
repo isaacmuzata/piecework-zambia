@@ -18,6 +18,7 @@ const webpush = require('web-push');
 
 const { client, init } = require('./db');
 const { parseLatLng, resolveCoords, haversineKm, isValidLat, isValidLng } = require('./geo');
+const { sendConfirmationEmail, sendResetEmail } = require('./mailer');
 const createExperiencesRouter = require('./routes/experiences');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -453,6 +454,10 @@ function publicUser(row, includePhone = true) {
     created_at: row.created_at,
   };
   if (includePhone) u.phone = row.phone;
+  if (includePhone) {
+    u.email = row.email || null;
+    u.email_verified = !!row.email_verified;
+  }
   return u;
 }
 
@@ -576,13 +581,20 @@ app.use('/api/', apiLimiter);
 // here. The account is created only by POST /api/auth/register/verify
 // after the code is redeemed (see the signup verification section below).
 app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
-  const { name, phone, password, city, avatar, selfie } = req.body || {};
+  const { name, phone, password, city, avatar, selfie, email } = req.body || {};
   const fields = {};
   if (!name || String(name).trim().length < 2) fields.name = 'Please enter your full name.';
   const normPhone = normalizePhone(phone);
   if (!normPhone) fields.phone = 'Enter a valid phone number, e.g. 0977 123 456.';
   if (!password || String(password).length < 8) fields.password = 'Password must be at least 8 characters.';
   if (!city || !CITIES.includes(city)) fields.city = 'Please choose your city.';
+  // Email is OPTIONAL (v110): a member can join with phone only. When
+  // given, it must be a valid address and not already on another account.
+  let normEmail = '';
+  if (email !== undefined && email !== null && String(email).trim() !== '') {
+    normEmail = normalizeEmail(email);
+    if (!normEmail) fields.email = 'Enter a valid email address, or leave it blank.';
+  }
   const avatarErr = imageDataUrlError(avatar, 300000, 'A profile photo');
   if (avatarErr) fields.avatar = avatarErr;
   const selfieErr = imageDataUrlError(selfie, 500000, 'A verification selfie');
@@ -593,6 +605,15 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   // no SMS cost for numbers that already have an account.
   const exists = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
   if (exists) return err(res, 409, 'This number is already registered. Try signing in.');
+  if (normEmail) {
+    const emailTaken = await getOne('SELECT id FROM users WHERE email = ?', [normEmail]);
+    if (emailTaken) return err(res, 409, 'That email address is already used by another account.');
+    // Another phone mid-signup with this address: refuse, but allow the
+    // same phone to retry its own pending signup.
+    const pendingEmail = await getOne(
+      'SELECT id FROM pending_registrations WHERE email = ? AND phone != ?', [normEmail, normPhone]);
+    if (pendingEmail) return err(res, 409, 'That email address is already used by another account.');
+  }
 
   // Anti-fraud: one account per browser/device.
   const deviceId = req.deviceId;
@@ -633,20 +654,21 @@ app.post('/api/auth/register', registerLimiter, ah(async (req, res) => {
   await runWrite('DELETE FROM pending_registrations WHERE device_id = ? AND phone != ?', [deviceId, normPhone]);
   await runWrite(
     `INSERT INTO pending_registrations
-       (name, phone, password_hash, city, open_to_work, ref_code,
+       (name, phone, password_hash, city, email, open_to_work, ref_code,
         device_id, signup_ip, ip_duplicate, avatar, selfie,
         code_hash, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', ?))
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', ?))
      ON CONFLICT(phone) DO UPDATE SET
        name = excluded.name, password_hash = excluded.password_hash,
-       city = excluded.city, open_to_work = excluded.open_to_work,
+       city = excluded.city, email = excluded.email,
+       open_to_work = excluded.open_to_work,
        ref_code = excluded.ref_code, device_id = excluded.device_id,
        signup_ip = excluded.signup_ip, ip_duplicate = excluded.ip_duplicate,
        avatar = excluded.avatar, selfie = excluded.selfie,
        code_hash = excluded.code_hash,
        expires_at = datetime('now', ?), used_at = NULL, attempts = 0,
        last_sent_at = datetime('now'), updated_at = datetime('now')`,
-    [String(name).trim(), normPhone, hash, city, openToWork, refCode,
+    [String(name).trim(), normPhone, hash, city, normEmail, openToWork, refCode,
      deviceId, ip || '', ipDuplicate, String(avatar), String(selfie),
      hashResetCode(code), `+${SIGNUP_CODE_TTL_MIN} minutes`, `+${SIGNUP_CODE_TTL_MIN} minutes`]
   );
@@ -951,12 +973,36 @@ app.post('/api/auth/register/verify', resetLimiter, ah(async (req, res) => {
   const user = await getOne('SELECT * FROM users WHERE id = ?', [insertId(info)]);
   // Single use: the pending signup (and its code) is gone for good.
   await runWrite('DELETE FROM pending_registrations WHERE id = ?', [pending.id]);
+  // Optional email confirmation (v110): if an email was given at signup,
+  // store it unverified and send the confirmation link. Never blocks
+  // anything: the account works with phone only, and a failed send just
+  // leaves the address unverified (the member can resend from the app).
+  let emailSent = false;
+  const pendingEmail = String(pending.email || '').trim().toLowerCase();
+  if (pendingEmail) {
+    const token = newEmailToken();
+    await runWrite(
+      `UPDATE users SET email = ?, email_verified = 0,
+         email_verify_token_hash = ?, email_verify_expires = datetime('now', '+24 hours')
+       WHERE id = ?`,
+      [pendingEmail, hashResetCode(token), user.id]
+    );
+    user.email = pendingEmail;
+    user.email_verified = 0;
+    try {
+      const sent = await sendConfirmationEmail({ name: user.name, email: pendingEmail }, token);
+      emailSent = !!sent.ok;
+      if (!sent.ok) console.error('Confirmation email failed for user ' + user.id + ':', sent.reason);
+    } catch (e) {
+      console.error('Confirmation email failed for user ' + user.id + ':', e && e.message);
+    }
+  }
   setAuthCookie(res, signToken(user.id));
   // Registration confirmation text (fire-and-forget; logged either way).
   notifySms(user.id, 'welcome', composeSms(
     (n) => `Hi, this is Zac, your assistant. Welcome to 2911 Jobs, ${n}. Your account is ready: pieceworkzambia.com`,
     user.name, ''), user.phone).catch(() => {});
-  res.status(201).json({ user: publicUser(user) });
+  res.status(201).json({ user: publicUser(user), emailSent });
 }));
 
 // Resend: issue a fresh code for a pending signup. The new code replaces
@@ -998,6 +1044,165 @@ app.post('/api/auth/register/resend', registerLimiter, ah(async (req, res) => {
       ? `We sent a new 6-digit signup code to ${normPhone} by SMS.`
       : 'Request received. If the text does not arrive, message us on WhatsApp and we will send your signup code.',
   });
+}));
+
+// ------------------------------------------------------- email confirmation
+// v110: optional email confirmation for account creation, plus email-first
+// password reset, so SMS is reserved for job alerts. The links in the
+// emails land here: verify-email confirms the address, reset-password
+// serves the new-password form. Both pages are plain server-rendered
+// HTML so they work from an inbox without the app JavaScript.
+function emailNoticePage({ ok, title, body }) {
+  const accent = ok ? '#10B981' : '#DC2626';
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title} — 2911 Jobs</title></head><body style="margin:0;padding:0;background:#EEF2F7;font-family:Arial,Helvetica,sans-serif;color:#0B1F3B;">
+<div style="max-width:480px;margin:48px auto;padding:0 16px;">
+<div style="background:#0B1F3B;border-radius:16px 16px 0 0;padding:24px;text-align:center;">
+<p style="margin:0;color:#fff;font-size:24px;font-weight:bold;">2911 Jobs</p></div>
+<div style="background:#fff;border-radius:0 0 16px 16px;padding:28px 24px;text-align:center;">
+<p style="font-size:44px;margin:0 0 8px;">${ok ? '✅' : '⚠️'}</p>
+<h1 style="font-size:20px;margin:0 0 10px;color:${accent};">${title}</h1>
+<p style="font-size:15px;line-height:1.7;margin:0 0 20px;">${body}</p>
+<a href="/#/login" style="display:inline-block;background:#2563EB;color:#fff;text-decoration:none;font-weight:bold;font-size:16px;padding:12px 28px;border-radius:999px;">Sign in to 2911 Jobs</a>
+</div></div></body></html>`;
+}
+
+// One-time confirmation link from the signup email. Valid 24h; the token
+// hash is cleared on first use, so the link cannot be replayed.
+app.get('/api/auth/verify-email', ah(async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  if (!token || token.length > 128) {
+    return res.status(400).send(emailNoticePage({
+      ok: false, title: 'Link not valid',
+      body: 'That confirmation link is not valid. Sign in and ask for a new confirmation email.',
+    }));
+  }
+  const user = await getOne(
+    `SELECT id, name FROM users WHERE email_verify_token_hash = ? AND email_verify_expires > datetime('now')`,
+    [hashResetCode(token)]
+  );
+  if (!user) {
+    return res.status(400).send(emailNoticePage({
+      ok: false, title: 'Link expired or already used',
+      body: 'That confirmation link has expired or was already used. Sign in and ask for a new confirmation email.',
+    }));
+  }
+  await runWrite(
+    `UPDATE users SET email_verified = 1, email_verify_token_hash = NULL,
+       email_verify_expires = NULL WHERE id = ?`,
+    [user.id]
+  );
+  return res.send(emailNoticePage({
+    ok: true, title: 'Email confirmed',
+    body: `Thank you, ${String(user.name || '').split(' ')[0] || 'friend'}. Your email is confirmed, and it is now your backup way to get back into your account.`,
+  }));
+}));
+
+// Signed-in members with an unconfirmed email can ask for a fresh link.
+// No email on the account, or already confirmed: a plain error, no send.
+app.post('/api/auth/resend-verification', ah(auth), resetLimiter, ah(async (req, res) => {
+  const user = await getOne('SELECT * FROM users WHERE id = ?', [req.user.id]);
+  if (!user || !user.email) return err(res, 422, 'No email address on this account.');
+  if (user.email_verified) return err(res, 422, 'Your email is already confirmed.');
+  const token = newEmailToken();
+  await runWrite(
+    `UPDATE users SET email_verify_token_hash = ?, email_verify_expires = datetime('now', '+24 hours') WHERE id = ?`,
+    [hashResetCode(token), user.id]
+  );
+  let emailSent = false;
+  try {
+    const sent = await sendConfirmationEmail({ name: user.name, email: user.email }, token);
+    emailSent = !!sent.ok;
+    if (!sent.ok) console.error('Resend confirmation email failed for user ' + user.id + ':', sent.reason);
+  } catch (e) {
+    console.error('Resend confirmation email failed for user ' + user.id + ':', e && e.message);
+  }
+  res.json({
+    ok: true, emailSent,
+    message: emailSent
+      ? 'Confirmation email sent. Check your inbox.'
+      : 'We could not send the email right now. Please try again later.',
+  });
+}));
+
+// Reset form served from the email link. The token is checked before the
+// form is shown, and again when the new password is posted.
+function resetFormPage(token, error) {
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Reset password — 2911 Jobs</title></head><body style="margin:0;padding:0;background:#EEF2F7;font-family:Arial,Helvetica,sans-serif;color:#0B1F3B;">
+<div style="max-width:420px;margin:48px auto;padding:0 16px;">
+<div style="background:#0B1F3B;border-radius:16px 16px 0 0;padding:24px;text-align:center;">
+<p style="margin:0;color:#fff;font-size:24px;font-weight:bold;">2911 Jobs</p></div>
+<div style="background:#fff;border-radius:0 0 16px 16px;padding:28px 24px;">
+<h1 style="font-size:20px;margin:0 0 6px;">Choose a new password</h1>
+<p style="font-size:14px;color:#5B6B82;line-height:1.6;margin:0 0 16px;">This link works for 1 hour and can only be used once.</p>
+${error ? `<p style="background:#FEF2F2;color:#DC2626;border-radius:10px;padding:12px;font-size:14px;">${error}</p>` : ''}
+<form id="reset-form">
+<div style="margin-bottom:12px;"><label for="np" style="display:block;font-weight:bold;font-size:14px;margin-bottom:6px;">New password</label>
+<input id="np" name="new_password" type="password" autocomplete="new-password" placeholder="At least 8 characters" style="width:100%;box-sizing:border-box;padding:12px;border:1px solid #CBD5E1;border-radius:10px;font-size:16px;"></div>
+<button type="submit" style="width:100%;background:#2563EB;color:#fff;border:0;font-weight:bold;font-size:16px;padding:13px;border-radius:999px;cursor:pointer;">Set new password</button>
+</form>
+<p id="reset-msg" style="font-size:14px;line-height:1.6;"></p>
+<p style="text-align:center;font-size:14px;"><a href="/#/login" style="color:#2563EB;font-weight:600;">Back to sign in</a></p>
+</div></div>
+<script>
+document.getElementById('reset-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('reset-msg');
+  const pw = document.getElementById('np').value;
+  try {
+    const r = await fetch('/api/auth/reset-by-email', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: ${JSON.stringify(token)}, new_password: pw }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Could not reset the password.');
+    msg.innerHTML = '<b style="color:#10B981;">Password updated.</b> You are signed in. <a href="/#/dashboard" style="color:#2563EB;font-weight:600;">Open 2911 Jobs</a>';
+    document.getElementById('reset-form').style.display = 'none';
+  } catch (err2) { msg.innerHTML = '<b style="color:#DC2626;">' + err2.message + '</b>'; }
+});
+</script>
+</body></html>`;
+}
+
+app.get('/api/auth/reset-password', ah(async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  if (!token || token.length > 128) {
+    return res.status(400).send(emailNoticePage({
+      ok: false, title: 'Link not valid',
+      body: 'That reset link is not valid. Ask for a new one from the sign-in page.',
+    }));
+  }
+  const user = await getOne(
+    `SELECT id FROM users WHERE reset_token_hash = ? AND reset_token_expires > datetime('now')`,
+    [hashResetCode(token)]
+  );
+  if (!user) {
+    return res.status(400).send(emailNoticePage({
+      ok: false, title: 'Link expired or already used',
+      body: 'That reset link has expired or was already used. Ask for a new one from the sign-in page.',
+    }));
+  }
+  return res.send(resetFormPage(token, null));
+}));
+
+// Redeem an email reset link with a new password. One-time use: the token
+// is cleared whether the password changes or not.
+app.post('/api/auth/reset-by-email', resetLimiter, ah(async (req, res) => {
+  const { token, new_password } = req.body || {};
+  if (!token || String(token).length > 128) return err(res, 422, 'That reset link is not valid.');
+  if (!new_password || String(new_password).length < 8) {
+    return err(res, 422, 'New password must be at least 8 characters.');
+  }
+  const user = await getOne('SELECT * FROM users WHERE reset_token_hash = ?', [hashResetCode(String(token).trim())]);
+  if (!user) return err(res, 401, 'That reset link is not valid. Ask for a new one.');
+  if (new Date(user.reset_token_expires).getTime() < Date.now()) {
+    await runWrite("UPDATE users SET reset_token_hash = NULL, reset_token_expires = NULL WHERE id = ?", [user.id]);
+    return err(res, 401, 'That reset link has expired. Ask for a new one.');
+  }
+  await runWrite(
+    'UPDATE users SET password_hash = ?, reset_token_hash = NULL, reset_token_expires = NULL WHERE id = ?',
+    [bcrypt.hashSync(String(new_password), 12), user.id]
+  );
+  setAuthCookie(res, signToken(user.id));
+  res.json({ user: publicUser(user) });
 }));
 
 // ---------------------------------------------------------------- Web Push
@@ -1350,6 +1555,18 @@ function newResetCode() {
 function hashResetCode(code) {
   return crypto.createHash('sha256').update(String(code)).digest('hex');
 }
+// Email confirmation / reset tokens (v110): same sha256-at-rest treatment
+// as the SMS codes. The raw token only ever travels inside the email link.
+function newEmailToken() { return crypto.randomBytes(32).toString('hex'); }
+// Optional signup email: trimmed and lowercased so uniqueness is
+// case-insensitive. Returns '' for blank, null for an invalid address.
+function normalizeEmail(input) {
+  const v = String(input || '').trim().toLowerCase();
+  if (!v) return '';
+  if (v.length > 254) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return null;
+  return v;
+}
 function timingSafeEqual(a, b) {
   const ba = Buffer.from(String(a)), bb = Buffer.from(String(b));
   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
@@ -1362,13 +1579,43 @@ function timingSafeEqual(a, b) {
 app.post('/api/auth/forgot', forgotLimiter, ah(async (req, res) => {
   const normPhone = normalizePhone(req.body && req.body.phone);
   if (!normPhone) return err(res, 422, 'Enter a valid phone number.');
-  const user = await getOne('SELECT id FROM users WHERE phone = ?', [normPhone]);
+  const user = await getOne('SELECT * FROM users WHERE phone = ?', [normPhone]);
   if (!user) {
     return res.json({
       ok: true, sms_sent: false, account_found: false,
       message: 'No account found with that number. Check the number and try again, or sign up for a new account.',
       whatsapp: null,
     });
+  }
+  // Email-first reset (v110): a verified email gets a reset LINK by email
+  // and NO SMS is sent, so SMS stays for job alerts. If the email cannot
+  // be sent, fall through to the SMS-code flow below so the member is
+  // never locked out by a mail failure.
+  if (user.email_verified && user.email) {
+    // One live email token per user: a fresh request replaces the old one.
+    await runWrite("UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL", [user.id]);
+    const token = newEmailToken();
+    await runWrite(
+      `UPDATE users SET reset_token_hash = ?, reset_token_expires = datetime('now', '+1 hours') WHERE id = ?`,
+      [hashResetCode(token), user.id]
+    );
+    let emailSent = false;
+    try {
+      const sent = await sendResetEmail({ name: user.name, email: user.email }, token);
+      emailSent = !!sent.ok;
+      if (!sent.ok) console.error('Reset email failed for user ' + user.id + ':', sent.reason);
+    } catch (e) {
+      console.error('Reset email failed for user ' + user.id + ':', e && e.message);
+    }
+    if (emailSent) {
+      return res.json({
+        ok: true, email_sent: true, sms_sent: false, account_found: true,
+        message: 'We sent a password reset link to your email. It works for 1 hour.',
+        whatsapp: null,
+      });
+    }
+    // Email failed: clear the token and fall through to the SMS code.
+    await runWrite('UPDATE users SET reset_token_hash = NULL, reset_token_expires = NULL WHERE id = ?', [user.id]);
   }
   let smsSent = false;
   // One live code per user: retire older unused ones.
