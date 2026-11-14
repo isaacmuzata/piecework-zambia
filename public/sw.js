@@ -1,11 +1,11 @@
 // 2911 Jobs service worker: offline shell for static assets only.
 // API responses are NEVER cached — job listings are always fresh from the server.
-const CACHE = 'pwz-v114';
+const CACHE = 'pwz-v115';
 // Deploy rule: bump BOTH CACHE and ASSET_V on every frontend deploy.
 // The worker only reinstalls when sw.js bytes change, and versioned URLs are
 // fresh cache keys — together they guarantee returning visitors (and any
 // stale worker / HTTP cache) can never be stuck on a previous deploy's bundle.
-const ASSET_V = 'v=114';
+const ASSET_V = 'v=115';
 const CORE = [
   '/', '/index.html', `/styles.css?${ASSET_V}`, `/app.js?${ASSET_V}`,
   '/manifest.json', '/icon-192.png', '/icon-512.png',

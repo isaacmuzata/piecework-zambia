@@ -140,7 +140,7 @@ async function registerUser(name, phone, city) {
 
   const jobRes = await call('POST', '/api/jobs', {
     title: 'Test gardening job', category: 'Gardening', description: 'Cut the grass and tidy the yard.',
-    city: 'Lusaka', area: 'Kabulonga', date_needed: '2026-11-20', pay_amount: 150, pay_type: 'per_day',
+    city: 'Lusaka', area: 'Kabulonga', date_needed: '2027-11-20', pay_amount: 150, pay_type: 'per_day',
     workers_needed: 1, terms_accepted: true,
   }, admin.cookie);
   check('poster creates a job', jobRes.status === 200 || jobRes.status === 201, JSON.stringify(jobRes.json).slice(0, 160));
@@ -217,7 +217,7 @@ async function registerUser(name, phone, city) {
   check('categories endpoint lists the seeded job categories', catNames.includes('Gardening') && catNames.includes('Carpentry'), catNames.join(','));
   const tradesJob = await call('POST', '/api/jobs', {
     title: 'Fix a leaking tap', category: 'Plumbing', description: 'Bathroom tap leaks steadily.',
-    city: 'Lusaka', area: 'Chelston', date_needed: '2026-11-21', pay_amount: 200, pay_type: 'per_job',
+    city: 'Lusaka', area: 'Chelston', date_needed: '2027-11-21', pay_amount: 200, pay_type: 'per_job',
     workers_needed: 1, terms_accepted: true,
   }, admin.cookie);
   check('job in a trades category (Plumbing) posts successfully', tradesJob.status === 200 || tradesJob.status === 201, JSON.stringify(tradesJob.json).slice(0, 160));
@@ -250,7 +250,7 @@ async function registerUser(name, phone, city) {
   check('a block stops conversation creation between the two users', convBlocked.status === 403, 'status ' + convBlocked.status);
   const job3 = await call('POST', '/api/jobs', {
     title: 'Paint a fence', category: 'Painting', description: 'Two panels, white paint provided.',
-    city: 'Lusaka', area: 'Woodlands', date_needed: '2026-11-22', pay_amount: 300, pay_type: 'per_job',
+    city: 'Lusaka', area: 'Woodlands', date_needed: '2027-11-22', pay_amount: 300, pay_type: 'per_job',
     workers_needed: 1, terms_accepted: true,
   }, admin.cookie);
   const job3Id = job3.json.job ? job3.json.job.id : job3.json.id;
@@ -292,7 +292,7 @@ async function registerUser(name, phone, city) {
   const j1 = await call('POST', '/api/jobs', {
     title: 'Fix a leaking kitchen sink', category: 'Plumbing',
     description: 'Kitchen sink leaks under the cabinet, needs a proper fix.',
-    city: 'Lusaka', area: 'Kabulonga', date_needed: '2026-11-23', pay_amount: 450,
+    city: 'Lusaka', area: 'Kabulonga', date_needed: '2027-11-23', pay_amount: 450,
     pay_type: 'per_job', workers_needed: 1, terms_accepted: true,
     expected_duration: '1 day', start_time: '08:00', transport_provided: '1',
     materials_provided: '0', is_urgent: '1', instructions: 'Call when you arrive at the gate.',
@@ -341,7 +341,7 @@ async function registerUser(name, phone, city) {
   check('M1: publish blocked while fields are missing', pubEarly.status === 422, 'status ' + pubEarly.status);
   const complete = await call('PATCH', '/api/jobs/' + drId, {
     category: 'Cleaning', description: 'Deep clean a two bedroom flat before tenants move in.',
-    city: 'Lusaka', date_needed: '2026-11-24', pay_amount: 300, pay_type: 'per_day',
+    city: 'Lusaka', date_needed: '2027-11-24', pay_amount: 300, pay_type: 'per_day',
   }, p2.cookie);
   check('M1: draft can be completed by edit', complete.status === 200, JSON.stringify(complete.json).slice(0, 160));
   const pub = await call('POST', `/api/jobs/${drId}/publish`, { terms_accepted: true }, p2.cookie);
@@ -368,7 +368,7 @@ async function registerUser(name, phone, city) {
   const wSl = await call('PATCH', `/api/applications/${appM1Id}`, { status: 'shortlisted' }, w2.cookie);
   check('M1: worker cannot shortlist (not the poster)', wSl.status >= 400, 'status ' + wSl.status);
 
-  const rp = await call('POST', `/api/jobs/${j1id}/repost`, { date_needed: '2026-11-27', terms_accepted: true }, p2.cookie);
+  const rp = await call('POST', `/api/jobs/${j1id}/repost`, { date_needed: '2027-11-27', terms_accepted: true }, p2.cookie);
   check('M1: repost creates a new job', rp.status === 201 && rp.json.id && rp.json.id !== j1id, JSON.stringify(rp.json).slice(0, 160));
   const rpDetail = await call('GET', '/api/jobs/' + rp.json.id, null, p2.cookie);
   const rpj = rpDetail.json.job || {};
@@ -380,7 +380,7 @@ async function registerUser(name, phone, city) {
   await call('POST', '/api/jobs', {
     title: 'Livingstone falls guide needed', category: 'Tourism & Hospitality',
     description: 'Guide needed for a day trip group at the falls entrance.',
-    city: 'Livingstone', area: 'Falls', date_needed: '2026-11-25', pay_amount: 500,
+    city: 'Livingstone', area: 'Falls', date_needed: '2027-11-25', pay_amount: 500,
     pay_type: 'per_day', workers_needed: 1, terms_accepted: true,
   }, p2.cookie);
   const rec = await call('GET', '/api/jobs/recommended', null, w2.cookie);
@@ -1024,6 +1024,7 @@ async function emailTests() {
   await adsTests({ admin, third, p2, bizId, bizSlug });
   await experiencesTests(admin.cookie, worker.cookie, worker.id, third.id);
   await experiencesPhase3Tests(admin.cookie, worker.cookie, worker.id, third.id, third.cookie);
+  await hustleTests({ admin, p2, bizId, bizSlug });
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failures.length) console.log('Failures: ' + failures.join(' | '));
@@ -1185,7 +1186,7 @@ async function sharePreviewTests() {
   const logoRes = await fetch(BASE + '/api/businesses/' + bizId + '/image/logo');
   check('SHARE: business image route serves image bytes', logoRes.status === 200 && (logoRes.headers.get('content-type') || '').startsWith('image/'), 'status ' + logoRes.status);
 
-  const job = await call('POST', '/api/jobs', { title: 'Share Preview Job', category: 'Cleaning', description: 'A job for share preview tests.', city: 'Lusaka', date_needed: '2026-11-10', pay_amount: 100, pay_type: 'per_job', workers_needed: 1, terms_accepted: true, photos: [IMG] }, seller.cookie);
+  const job = await call('POST', '/api/jobs', { title: 'Share Preview Job', category: 'Cleaning', description: 'A job for share preview tests.', city: 'Lusaka', date_needed: '2027-11-10', pay_amount: 100, pay_type: 'per_job', workers_needed: 1, terms_accepted: true, photos: [IMG] }, seller.cookie);
   const jobId = job.json.job ? job.json.job.id : job.json.id;
   const sj = await raw('/s/job/' + jobId);
   check('SHARE: job preview names the job and uses its photo', sj.status === 200 && sj.text.includes('Share Preview Job') && sj.text.includes('/api/jobs/' + jobId + '/photos/'), 'status ' + sj.status);
@@ -1241,7 +1242,7 @@ async function smsTests() {
   check('SMS: offer request still succeeds', offer.status === 201 && !!offer.json.id, 'status ' + offer.status);
 
   // Application -> SMS to the poster (the admin); accept -> SMS to the worker.
-  const job = await call('POST', '/api/jobs', { title: 'SMS Test Job', category: 'Cleaning', description: 'A job for SMS notification tests.', city: 'Lusaka', date_needed: '2026-11-12', pay_amount: 200, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, adminC);
+  const job = await call('POST', '/api/jobs', { title: 'SMS Test Job', category: 'Cleaning', description: 'A job for SMS notification tests.', city: 'Lusaka', date_needed: '2027-11-12', pay_amount: 200, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, adminC);
   check('SMS: job created for application flow', job.status === 200 || job.status === 201, 'status ' + job.status);
   const jobId = job.json.job ? job.json.job.id : job.json.id;
   const appRes = await call('POST', `/api/jobs/${jobId}/apply`, { message: 'I can start today.' }, workerC);
@@ -1337,7 +1338,7 @@ async function adsTests(fx) {
   const prod = await call('POST', '/api/products', { title: 'ADS Test Item', category: 'Electronics', description: 'An item for ads banner tests.', price: 1500, condition: 'Good', city: 'Lusaka', photos: [IMG] }, admin.cookie);
   check('ADS: fixture product created', prod.status === 201, 'status ' + prod.status);
   const prodId = prod.json.id;
-  const job = await call('POST', '/api/jobs', { title: 'ADS Test Job', category: 'Cleaning', description: 'A job for ads banner tests.', city: 'Lusaka', date_needed: '2026-11-15', pay_amount: 300, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, admin.cookie);
+  const job = await call('POST', '/api/jobs', { title: 'ADS Test Job', category: 'Cleaning', description: 'A job for ads banner tests.', city: 'Lusaka', date_needed: '2027-11-15', pay_amount: 300, pay_type: 'per_job', workers_needed: 1, terms_accepted: true }, admin.cookie);
   const jobId = job.json.job ? job.json.job.id : job.json.id;
   check('ADS: fixture job created', (job.status === 200 || job.status === 201) && !!jobId, 'status ' + job.status);
   const cover = await call('PATCH', '/api/businesses/' + bizId, { cover: IMG }, p2.cookie);
@@ -2501,4 +2502,768 @@ async function experiencesPhase3Tests(adminCookie, memberCookie, memberId, other
   const goneDoc = await dbOne('SELECT id FROM experience_host_verifications WHERE id = ?', [nrcDocId]);
   check('EXP3: a pending document can be deleted by its owner',
     delPending.status === 200 && !goneDoc, 'status ' + delPending.status);
+}
+
+// "What's Your Hustle?" K10,000 Business Challenge (Nov 13, 2026).
+// Covers routes/hustle.js end to end against the router's real shapes:
+// competitions, reps, opt-in/completeness, applications, pitches, photos,
+// votes (incl. concurrency + freeze), fraud, finalise, notifications,
+// admin stats/export. Competition dates are computed relative to today so
+// the fixtures never expire. MAIL_TRANSPORT=stream in this suite, so every
+// notifySms lands in sms_log as 'skipped'; the suite asserts that.
+async function hustleTests({ admin, p2, bizId: m4BizId }) {
+  const adminC = admin.cookie;
+  const DAY = 86400000;
+  const t0 = Date.now();
+  const sqlTs = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+  const answers = () => ({
+    q1: 'We repair phones and sell accessories in Kamwala, Lusaka.',
+    q2: 'Broken phones keep people offline; we fix them the same day.',
+    q3: 'Market traders, students and families around Kamwala.',
+    q4: 'Same-day repairs with a 30 day guarantee on every fix.',
+    q5: 'Trading since 2022; over 800 phones repaired so far.',
+    q6: 'Myself plus two technicians, one full time and one part time.',
+    q7: 'About K8,000 in a typical month.',
+    q8: 'I would buy stock, tools and a small solar backup.',
+    q9: 'It would keep two jobs and add one trainee.',
+    q10: 'Because we already serve our community every single day.',
+  });
+  const spendOk = [
+    { label: 'Stock and spare parts', amount: 6000, note: '' },
+    { label: 'Tools and a workbench', amount: 4000, note: '' },
+  ];
+  const spendBad = [
+    { label: 'Stock and spare parts', amount: 6000, note: '' },
+    { label: 'Tools and a workbench', amount: 3000, note: '' },
+  ];
+  const YT = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const TT = 'https://www.tiktok.com/@hustletest/video/1234567890123456789';
+  const FBW = 'https://fb.watch/abc123xyz';
+
+  // ---------- actors ----------
+  const h1 = await registerUser('Hustle Owner One', '0970001101', 'Lusaka');
+  const h2 = await registerUser('Hustle Owner Two', '0970001102', 'Lusaka');
+  const h3 = await registerUser('Hustle Owner Three', '0970001103', 'Lusaka');
+  const h4 = await registerUser('Hustle Owner Four', '0970001104', 'Lusaka');
+  const h5 = await registerUser('Hustle Owner Five', '0970001105', 'Lusaka');
+  const h6 = await registerUser('Hustle Owner Six', '0970001106', 'Lusaka');
+  const rf = await registerUser('Hustle Rep', '0970001107', 'Lusaka');
+  const v1 = await registerUser('Hustle Voter One', '0970001108', 'Lusaka');
+  const v2 = await registerUser('Hustle Voter Two', '0970001109', 'Lusaka');
+  const v3 = await registerUser('Hustle Voter Three', '0970001110', 'Lusaka');
+  const v4 = await registerUser('Hustle Voter Four', '0970001111', 'Lusaka');
+  const v5 = await registerUser('Hustle Voter Five', '0970001112', 'Lusaka');
+  const v6 = await registerUser('Hustle Voter Six', '0970001113', 'Lusaka');
+  const v7 = await registerUser('Hustle Voter Seven', '0970001114', 'Lusaka');
+  const p1 = await registerUser('Hustle Pending Voter', '0970001115', 'Lusaka');
+  const vp = await registerUser('Hustle Probe Voter', '0970001116', 'Lusaka');
+  check('HUSTLE: 16 synthetic actors registered', !!h1.cookie && !!vp.cookie);
+  // Selfie-approved for everyone except the pending voter (p1). The
+  // winner's owner must be selfie-approved for finalise to accept them.
+  for (const u of [h1, h2, h3, h4, h5, h6, rf, v1, v2, v3, v4, v5, v6, v7, vp]) {
+    const ap = await call('POST', '/api/admin/verifications/' + u.id, { status: 'approved' }, adminC);
+    if (ap.status !== 200) throw new Error('selfie approve failed for ' + u.id + ': ' + JSON.stringify(ap.json));
+  }
+  const p1Row = await dbOne('SELECT selfie_status FROM users WHERE id = ?', [p1.id]);
+  check('HUSTLE: pending voter stays selfie-pending', p1Row && p1Row.selfie_status === 'pending');
+
+  // ---------- tables exist after init ----------
+  const hustleTables = ['hustle_business_reps', 'hustle_document_views', 'hustle_competitions',
+    'hustle_applications', 'hustle_spend_items', 'hustle_pitch_photos', 'hustle_pitch_videos',
+    'hustle_votes', 'hustle_vote_flags', 'hustle_results', 'hustle_notifications',
+    'hustle_events', 'hustle_announcements'];
+  const tableRows = await dbExecute(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'hustle_%'");
+  const tableNames = (tableRows.rows || []).map((r) => r.name);
+  check('HUSTLE: all 13 hustle_ tables exist after init',
+    hustleTables.every((t) => tableNames.includes(t)), 'missing: ' + hustleTables.filter((t) => !tableNames.includes(t)).join(','));
+
+  // ---------- competition create ----------
+  const compBody = {
+    name: "What's Your Hustle? Test Round", slug: 'hustle-test-round', prize_kwacha: 10000,
+    applications_open_at: sqlTs(t0 - 2 * DAY), applications_close_at: sqlTs(t0 + 20 * DAY),
+    voting_open_at: sqlTs(t0 - 1 * DAY), voting_close_at: sqlTs(t0 + 10 * DAY),
+    freeze_at: sqlTs(t0 + 11 * DAY), winner_at: sqlTs(t0 + 12 * DAY),
+  };
+  const compMember = await call('POST', '/api/admin/hustle/competitions', compBody, h1.cookie);
+  check('HUSTLE: member cannot create a competition (403)', compMember.status === 403, 'status ' + compMember.status);
+  const compShort = await call('POST', '/api/admin/hustle/competitions', { ...compBody, slug: 'hustle-short', name: 'X' }, adminC);
+  check('HUSTLE: competition name under 3 chars is 422', compShort.status === 422, 'status ' + compShort.status);
+  const compPrize = await call('POST', '/api/admin/hustle/competitions', { ...compBody, slug: 'hustle-prize', prize_kwacha: 0 }, adminC);
+  check('HUSTLE: competition prize of K0 is 422', compPrize.status === 422, 'status ' + compPrize.status);
+  const compDate = await call('POST', '/api/admin/hustle/competitions', { ...compBody, slug: 'hustle-date', voting_open_at: 'not-a-date' }, adminC);
+  check('HUSTLE: competition with an invalid date is 422', compDate.status === 422, 'status ' + compDate.status);
+  const compCreate = await call('POST', '/api/admin/hustle/competitions', compBody, adminC);
+  check('HUSTLE: admin creates the competition as a draft (201)',
+    compCreate.status === 201 && compCreate.json.competition && compCreate.json.competition.status === 'draft'
+    && compCreate.json.competition.prize_kwacha === 10000, 'status ' + compCreate.status + ' ' + JSON.stringify(compCreate.json).slice(0, 160));
+  const compId = compCreate.json.competition.id;
+  const compDup = await call('POST', '/api/admin/hustle/competitions', compBody, adminC);
+  check('HUSTLE: duplicate competition slug is 409', compDup.status === 409, 'status ' + compDup.status);
+  const curNone = await call('GET', '/api/hustle/competitions/current');
+  check('HUSTLE: no current competition while the only one is a draft (404)', curNone.status === 404, 'status ' + curNone.status);
+  const draftMember = await call('GET', '/api/hustle/competitions/' + compId, null, h1.cookie);
+  check('HUSTLE: draft competition is 404 to members', draftMember.status === 404, 'status ' + draftMember.status);
+  const draftAdmin = await call('GET', '/api/hustle/competitions/' + compId, null, adminC);
+  check('HUSTLE: draft competition is visible to admin', draftAdmin.status === 200 && draftAdmin.json.competition.id === compId);
+  const listDraft = await call('GET', '/api/hustle/competitions');
+  check('HUSTLE: public competition list hides drafts',
+    !(listDraft.json.competitions || []).some((c) => c.id === compId));
+  const jumpVoting = await call('PATCH', '/api/admin/hustle/competitions/' + compId, { status: 'voting_open' }, adminC);
+  check('HUSTLE: draft cannot jump straight to voting_open (422)', jumpVoting.status === 422, 'status ' + jumpVoting.status);
+  const openComp = await call('PATCH', '/api/admin/hustle/competitions/' + compId, { status: 'applications_open' }, adminC);
+  check('HUSTLE: admin opens applications (status applications_open)',
+    openComp.status === 200 && openComp.json.competition.status === 'applications_open', 'status ' + openComp.status);
+  const freezeViaPatch = await call('PATCH', '/api/admin/hustle/competitions/' + compId, { status: 'frozen' }, adminC);
+  check('HUSTLE: freeze via status PATCH is refused (422, freeze endpoint only)', freezeViaPatch.status === 422, 'status ' + freezeViaPatch.status);
+  const cur = await call('GET', '/api/hustle/competitions/current');
+  check('HUSTLE: GET current returns the open competition',
+    cur.status === 200 && cur.json.competition.id === compId && cur.json.competition.entry_count === 0,
+    'status ' + cur.status + ' ' + JSON.stringify(cur.json).slice(0, 120));
+  const bySlug = await call('GET', '/api/hustle/competitions/hustle-test-round');
+  check('HUSTLE: GET competition by slug works',
+    bySlug.status === 200 && bySlug.json.competition.id === compId && bySlug.json.competition.vote_count === 0,
+    'status ' + bySlug.status);
+
+  // ---------- businesses: complete, incomplete, unverified ----------
+  const bizBody = (n, ownerPhone) => ({
+    pacra_number: '12020001100' + n, tpin: '100123456' + n, owner_legal_name: 'Hustle Owner ' + ['One', 'Two', 'Three', 'Four', 'Five', 'Six'][n - 1],
+    address: 'Plot ' + n + ', Cairo Road', certificate: IMG,
+    name: 'Hustle Test Shop ' + n, category: 'Electronics', city: 'Lusaka',
+    description: 'A neighbourhood shop for the Hustle test round.',
+    phone: ownerPhone, whatsapp: ownerPhone, email: 'hustle' + n + '@example.com',
+    logo: IMG, cover: IMG, province: 'Lusaka', district: 'Lusaka', business_type: 'sole_proprietor',
+    year_started: 2022, services_text: 'Repairs, accessories and training.', hours_text: 'Mon to Sat, 8:00 to 17:30',
+  });
+  const mkBiz = async (n, owner) => {
+    const r = await call('POST', '/api/businesses', bizBody(n, '097000110' + n), owner.cookie);
+    if (r.status !== 201) throw new Error('business ' + n + ' create failed: ' + JSON.stringify(r.json).slice(0, 200));
+    await call('PATCH', '/api/admin/businesses/' + r.json.id, { status: 'active' }, adminC);
+    return { id: r.json.id, slug: r.json.slug };
+  };
+  const bizA = await mkBiz(1, h1);
+  const bizB = await mkBiz(2, h2);
+  const bizC = await mkBiz(3, h3);
+  const bizD = await mkBiz(4, h4);
+  const bizE = await mkBiz(5, h5);
+  const bizF = await mkBiz(6, h6);
+  check('HUSTLE: six test businesses created and activated', !!bizA.id && !!bizF.id);
+  // Strip D back to incomplete (no logo/cover/province/district/type/year/services/hours/contact).
+  await dbExecute(
+    "UPDATE businesses SET logo = NULL, cover = NULL, province = '', district = '', business_type = '', year_started = NULL, services_text = '', hours_text = '', hours_json = '', phone = '', whatsapp = '', email = '' WHERE id = ?",
+    [bizD.id]);
+  // Verify A and B via the admin verification endpoint, F the same way.
+  for (const b of [bizA, bizB, bizF]) {
+    const vf = await call('PATCH', '/api/admin/businesses/' + b.id + '/verification', { decision: 'verified', note: 'PACRA checked' }, adminC);
+    if (vf.status !== 200) throw new Error('verify failed for biz ' + b.id + ': ' + JSON.stringify(vf.json));
+  }
+  // Verify C via the Hustle per-document endpoint instead.
+  const docsC = await call('GET', '/api/businesses/' + bizC.id + '/documents', null, h3.cookie);
+  const pacraC = (docsC.json.documents || []).find((d) => d.kind === 'pacra');
+  check('HUSTLE: C has a PACRA document on file', !!pacraC, JSON.stringify(docsC.json).slice(0, 120));
+  const docDecideMember = await call('PATCH', `/api/admin/businesses/${bizC.id}/documents/${pacraC.id}`, { decision: 'approved' }, h3.cookie);
+  check('HUSTLE: member cannot decide a business document (403)', docDecideMember.status === 403, 'status ' + docDecideMember.status);
+  const docApprove = await call('PATCH', `/api/admin/businesses/${bizC.id}/documents/${pacraC.id}`, { decision: 'approved' }, adminC);
+  check('HUSTLE: admin approves the PACRA document via the Hustle endpoint',
+    docApprove.status === 200 && docApprove.json.document.status === 'approved', 'status ' + docApprove.status);
+  const bizCRow = await dbOne('SELECT verification_status FROM businesses WHERE id = ?', [bizC.id]);
+  check('HUSTLE: approving the PACRA document verifies the business',
+    bizCRow && bizCRow.verification_status === 'verified', JSON.stringify(bizCRow));
+  // D's document: changes_requested needs a note, then succeeds.
+  const docsD = await call('GET', '/api/businesses/' + bizD.id + '/documents', null, h4.cookie);
+  const pacraD = (docsD.json.documents || []).find((d) => d.kind === 'pacra');
+  const docNoNote = await call('PATCH', `/api/admin/businesses/${bizD.id}/documents/${pacraD.id}`, { decision: 'changes_requested' }, adminC);
+  check('HUSTLE: document changes_requested without a note is 422', docNoNote.status === 422, 'status ' + docNoNote.status);
+  const docChanges = await call('PATCH', `/api/admin/businesses/${bizD.id}/documents/${pacraD.id}`, { decision: 'changes_requested', note: 'Certificate is blurry, upload a clearer photo.' }, adminC);
+  check('HUSTLE: document changes_requested with a note succeeds',
+    docChanges.status === 200 && docChanges.json.document.status === 'changes_requested'
+    && docChanges.json.document.review_note === 'Certificate is blurry, upload a clearer photo.', 'status ' + docChanges.status);
+  // Hustle document read: owner gets bytes and the read is logged; stranger gets 403.
+  const docRead = await fetch(BASE + `/api/hustle/businesses/${bizC.id}/documents/${pacraC.id}`, { headers: { Cookie: h3.cookie } });
+  await docRead.text();
+  check('HUSTLE: owner reads the PACRA document bytes via the Hustle route',
+    docRead.status === 200 && (docRead.headers.get('content-type') || '').startsWith('image/'), 'status ' + docRead.status);
+  const docViews = await dbOne('SELECT COUNT(*) AS c FROM hustle_document_views WHERE document_id = ?', [pacraC.id]);
+  check('HUSTLE: the document read is logged in hustle_document_views', Number(docViews.c) === 1, 'views ' + JSON.stringify(docViews));
+  const docStranger = await call('GET', `/api/hustle/businesses/${bizC.id}/documents/${pacraC.id}`, null, h1.cookie);
+  check('HUSTLE: a stranger cannot read the document (403)', docStranger.status === 403, 'status ' + docStranger.status);
+
+  // ---------- hustle-profile ----------
+  const profOk = await call('PATCH', '/api/businesses/' + bizA.id + '/hustle-profile', { website: 'https://example.com/shop-one', province: 'Lusaka' }, h1.cookie);
+  check('HUSTLE: owner edits the hustle profile (200)', profOk.status === 200, 'status ' + profOk.status);
+  const profBad = await call('PATCH', '/api/businesses/' + bizA.id + '/hustle-profile', { province: 'Nowhere' }, h1.cookie);
+  check('HUSTLE: hustle profile rejects an unknown province (422)', profBad.status === 422, 'status ' + profBad.status);
+  const profStranger = await call('PATCH', '/api/businesses/' + bizA.id + '/hustle-profile', { website: 'https://example.com/hijack' }, h2.cookie);
+  check('HUSTLE: a stranger cannot edit the hustle profile (403)', profStranger.status === 403, 'status ' + profStranger.status);
+
+  // ---------- opt-in / completeness ----------
+  const optD = await call('POST', '/api/hustle/businesses/' + bizD.id + '/opt-in', {}, h4.cookie);
+  check('HUSTLE: incomplete business opt-in returns complete false with the missing list',
+    optD.status === 200 && optD.json.complete === false && optD.json.eligible === false
+    && ['logo', 'cover', 'province', 'district', 'business_type', 'year_started', 'phone', 'email', 'services', 'hours'].every((k) => (optD.json.missing || []).includes(k)),
+    JSON.stringify(optD.json).slice(0, 200));
+  const compD = await call('GET', '/api/hustle/businesses/' + bizD.id + '/completeness', null, h4.cookie);
+  check('HUSTLE: completeness endpoint matches the opt-in missing list',
+    compD.status === 200 && compD.json.complete === false && JSON.stringify(compD.json.missing) === JSON.stringify(optD.json.missing));
+  const optE = await call('POST', '/api/hustle/businesses/' + bizE.id + '/opt-in', {}, h5.cookie);
+  check('HUSTLE: complete-but-unverified business is complete yet not eligible',
+    optE.status === 200 && optE.json.complete === true && optE.json.verified === false && optE.json.eligible === false,
+    JSON.stringify(optE.json).slice(0, 160));
+  const optA = await call('POST', '/api/hustle/businesses/' + bizA.id + '/opt-in', {}, h1.cookie);
+  check('HUSTLE: complete verified business is eligible',
+    optA.status === 200 && optA.json.complete === true && optA.json.verified === true && optA.json.eligible === true,
+    JSON.stringify(optA.json).slice(0, 160));
+  const optStranger = await call('POST', '/api/hustle/businesses/' + bizA.id + '/opt-in', {}, h2.cookie);
+  check('HUSTLE: a stranger cannot run the opt-in check (403)', optStranger.status === 403, 'status ' + optStranger.status);
+  const optAnon = await call('POST', '/api/hustle/businesses/' + bizA.id + '/opt-in', {});
+  check('HUSTLE: signed-out opt-in is 401', optAnon.status === 401, 'status ' + optAnon.status);
+
+  // ---------- application create gates ----------
+  const appD = await call('POST', '/api/hustle/competitions/' + compId + '/applications', { business_id: bizD.id, answers: answers(), pitch_summary: 'Short pitch.', spend_items: spendOk }, h4.cookie);
+  check('HUSTLE: incomplete business cannot apply (422 with the missing list)',
+    appD.status === 422 && Array.isArray((appD.json.fields || {}).missing) && appD.json.fields.missing.includes('logo'),
+    'status ' + appD.status + ' ' + JSON.stringify(appD.json).slice(0, 160));
+  const appE = await call('POST', '/api/hustle/competitions/' + compId + '/applications', { business_id: bizE.id, answers: answers(), pitch_summary: 'Short pitch.', spend_items: spendOk }, h5.cookie);
+  check('HUSTLE: unverified business cannot apply (422, verification message)',
+    appE.status === 422 && String(appE.json.error || '').toLowerCase().includes('verif'), 'status ' + appE.status + ' ' + JSON.stringify(appE.json).slice(0, 160));
+  const appStranger = await call('POST', '/api/hustle/competitions/' + compId + '/applications', { business_id: bizA.id, answers: answers(), spend_items: spendOk }, h2.cookie);
+  check('HUSTLE: a stranger cannot apply for someone else business (403)', appStranger.status === 403, 'status ' + appStranger.status);
+
+  // ---------- representatives: invite / accept / cap / revoke (business F) ----------
+  const repNoAccount = await call('POST', '/api/businesses/' + bizF.id + '/representatives', { phone: '0970001999' }, h6.cookie);
+  check('HUSTLE: rep invite for a phone with no account is 422', repNoAccount.status === 422, 'status ' + repNoAccount.status);
+  const repSelf = await call('POST', '/api/businesses/' + bizF.id + '/representatives', { phone: '0970001106' }, h6.cookie);
+  check('HUSTLE: owner cannot invite themself as rep (422)', repSelf.status === 422, 'status ' + repSelf.status);
+  const repInvite = await call('POST', '/api/businesses/' + bizF.id + '/representatives', { phone: '0970001107' }, h6.cookie);
+  check('HUSTLE: owner invites a representative (201, invited)',
+    repInvite.status === 201 && repInvite.json.representative && repInvite.json.representative.status === 'invited',
+    'status ' + repInvite.status + ' ' + JSON.stringify(repInvite.json).slice(0, 160));
+  const repInvites = await call('GET', '/api/hustle/representative-invites', null, rf.cookie);
+  check('HUSTLE: the invitee sees the pending invite',
+    (repInvites.json.invites || []).some((i) => i.business_id === bizF.id), JSON.stringify(repInvites.json).slice(0, 160));
+  const repAcceptOther = await call('POST', '/api/hustle/representative-invites/' + bizF.id + '/accept', {}, h1.cookie);
+  check('HUSTLE: only the invited user can accept (someone else gets 404)', repAcceptOther.status === 404, 'status ' + repAcceptOther.status);
+  const repAccept = await call('POST', '/api/hustle/representative-invites/' + bizF.id + '/accept', {}, rf.cookie);
+  check('HUSTLE: the invitee accepts (invited -> active)',
+    repAccept.status === 200 && repAccept.json.representative.status === 'active', 'status ' + repAccept.status);
+  const repCap = await call('POST', '/api/businesses/' + bizF.id + '/representatives', { phone: '0970001108' }, h6.cookie);
+  check('HUSTLE: second rep invite while one is active is 422 (1-active-rep cap)', repCap.status === 422, 'status ' + repCap.status);
+  const repDup = await call('POST', '/api/businesses/' + bizF.id + '/representatives', { phone: '0970001107' }, h6.cookie);
+  check('HUSTLE: inviting the already-active rep again is 409', repDup.status === 409, 'status ' + repDup.status);
+  const repList = await call('GET', '/api/businesses/' + bizF.id + '/representatives', null, h6.cookie);
+  check('HUSTLE: owner lists representatives with name and status',
+    (repList.json.representatives || []).some((r) => r.user_id === rf.id && r.status === 'active' && r.name === 'Hustle Rep'),
+    JSON.stringify(repList.json).slice(0, 160));
+  const repProf = await call('PATCH', '/api/businesses/' + bizF.id + '/hustle-profile', { website: 'https://example.com/rep' }, rf.cookie);
+  check('HUSTLE: a rep cannot edit storefront fields (403)', repProf.status === 403, 'status ' + repProf.status);
+  const repNotif = await call('GET', '/api/hustle/notifications', null, rf.cookie);
+  check('HUSTLE: the rep invite wrote an inbox notification',
+    (repNotif.json.notifications || []).some((n) => n.kind === 'rep_invited' && n.related_id === bizF.id),
+    JSON.stringify(repNotif.json).slice(0, 160));
+
+  // ---------- F draft via the rep: spend sum, pitch allowlist, photo cap ----------
+  const appFWrong = await call('POST', '/api/hustle/competitions/' + compId + '/applications', { business_id: bizF.id, answers: answers(), pitch_summary: 'Rep drafted pitch.', spend_items: spendBad }, rf.cookie);
+  check('HUSTLE: rep creates a draft but a wrong spend sum is 422',
+    appFWrong.status === 422 && String(appFWrong.json.error || '').includes('K10,000'), 'status ' + appFWrong.status + ' ' + JSON.stringify(appFWrong.json).slice(0, 160));
+  const appFRow0 = await dbOne('SELECT COUNT(*) AS c FROM hustle_applications WHERE competition_id = ? AND business_id = ?', [compId, bizF.id]);
+  check('HUSTLE: the wrong-sum draft left no application row', Number(appFRow0.c) === 0, 'count ' + JSON.stringify(appFRow0));
+  const appF = await call('POST', '/api/hustle/competitions/' + compId + '/applications', { business_id: bizF.id, answers: answers(), pitch_summary: 'Rep drafted pitch.', spend_items: spendOk }, rf.cookie);
+  check('HUSTLE: rep creates the draft with an exact K10,000 spend (201)',
+    appF.status === 201 && appF.json.application.status === 'draft'
+    && (appF.json.application.spend_items || []).reduce((s, i) => s + i.amount, 0) === 10000,
+    'status ' + appF.status + ' ' + JSON.stringify(appF.json).slice(0, 160));
+  const appFId = appF.json.application.id;
+  const patchF = await call('PATCH', '/api/hustle/applications/' + appFId, { answers: { ...answers(), q1: 'Edited by the rep: we repair phones fast.' } }, rf.cookie);
+  check('HUSTLE: rep edits the draft answers (200)', patchF.status === 200 && patchF.json.application.answers.q1.startsWith('Edited by the rep'), 'status ' + patchF.status);
+  const patchFSpendBad = await call('PATCH', '/api/hustle/applications/' + appFId, { spend_items: spendBad }, rf.cookie);
+  check('HUSTLE: PATCH with a wrong spend sum is 422', patchFSpendBad.status === 422, 'status ' + patchFSpendBad.status);
+  const patchFSpendOk = await call('PATCH', '/api/hustle/applications/' + appFId, { spend_items: spendOk }, rf.cookie);
+  check('HUSTLE: PATCH with an exact spend sum succeeds', patchFSpendOk.status === 200
+    && (patchFSpendOk.json.application.spend_items || []).reduce((s, i) => s + i.amount, 0) === 10000, 'status ' + patchFSpendOk.status);
+  const pitchBad = await call('POST', '/api/hustle/applications/' + appFId + '/pitch', { video_url: 'https://example.com/video.mp4', pitch_summary: 'Rep drafted pitch.' }, rf.cookie);
+  check('HUSTLE: pitch video on a non-allowlisted domain is 422', pitchBad.status === 422, 'status ' + pitchBad.status + ' ' + JSON.stringify(pitchBad.json).slice(0, 120));
+  const pitchOk = await call('POST', '/api/hustle/applications/' + appFId + '/pitch', { video_url: YT, pitch_summary: 'Rep drafted pitch.' }, rf.cookie);
+  check('HUSTLE: pitch video on YouTube is accepted (platform youtube)',
+    pitchOk.status === 200 && pitchOk.json.application.pitch_video
+    && pitchOk.json.application.pitch_video.video_platform === 'youtube'
+    && pitchOk.json.application.pitch_video.status === 'pending', 'status ' + pitchOk.status + ' ' + JSON.stringify(pitchOk.json).slice(0, 160));
+  let photoIdsF = [];
+  for (let i = 0; i < 5; i++) {
+    const ph = await call('POST', '/api/hustle/applications/' + appFId + '/photos', { image: IMG }, rf.cookie);
+    if (ph.status !== 201) throw new Error('pitch photo ' + (i + 1) + ' failed: ' + JSON.stringify(ph.json));
+    photoIdsF.push(ph.json.photo.id);
+  }
+  check('HUSTLE: five pitch photos can be added (the cap)', photoIdsF.length === 5);
+  const photo6 = await call('POST', '/api/hustle/applications/' + appFId + '/photos', { image: IMG }, rf.cookie);
+  check('HUSTLE: a sixth pitch photo is refused (photo cap 5 enforced)', photo6.status === 422, 'status ' + photo6.status);
+  const photoDel = await call('DELETE', '/api/hustle/applications/' + appFId + '/photos/' + photoIdsF[4], null, rf.cookie);
+  const photoCountF = await dbOne('SELECT COUNT(*) AS c FROM hustle_pitch_photos WHERE application_id = ?', [appFId]);
+  check('HUSTLE: rep can delete a pitch photo', photoDel.status === 200 && Number(photoCountF.c) === 4, 'status ' + photoDel.status);
+  const photoAddBack = await call('POST', '/api/hustle/applications/' + appFId + '/photos', { image: IMG }, rf.cookie);
+  check('HUSTLE: a photo can be added again after a delete', photoAddBack.status === 201, 'status ' + photoAddBack.status);
+
+  // ---------- revoke: access ends immediately, re-invite works ----------
+  const revoke = await call('POST', `/api/businesses/${bizF.id}/representatives/${rf.id}/revoke`, {}, h6.cookie);
+  check('HUSTLE: owner revokes the representative',
+    revoke.status === 200 && revoke.json.representative.status === 'revoked', 'status ' + revoke.status);
+  const repGetGone = await call('GET', '/api/hustle/applications/' + appFId, null, rf.cookie);
+  check('HUSTLE: a revoked rep loses access immediately (403)', repGetGone.status === 403, 'status ' + repGetGone.status);
+  const repPatchGone = await call('PATCH', '/api/hustle/applications/' + appFId, { pitch_summary: 'Hijack.' }, rf.cookie);
+  check('HUSTLE: a revoked rep cannot edit the draft (403)', repPatchGone.status === 403, 'status ' + repPatchGone.status);
+  const reInvite = await call('POST', '/api/businesses/' + bizF.id + '/representatives', { phone: '0970001107' }, h6.cookie);
+  check('HUSTLE: a revoked rep can be invited again (201)', reInvite.status === 201 && reInvite.json.representative.status === 'invited', 'status ' + reInvite.status);
+  const reInviteDup = await call('POST', '/api/businesses/' + bizF.id + '/representatives', { phone: '0970001107' }, h6.cookie);
+  check('HUSTLE: inviting the same person twice while invited is 409', reInviteDup.status === 409, 'status ' + reInviteDup.status);
+  const reAccept = await call('POST', '/api/hustle/representative-invites/' + bizF.id + '/accept', {}, rf.cookie);
+  check('HUSTLE: the re-invited rep accepts again (active)', reAccept.status === 200 && reAccept.json.representative.status === 'active', 'status ' + reAccept.status);
+
+  // ---------- live entries: M4 (existing verified shop) + A + B + C ----------
+  // Complete the existing M4 shop (Kamwala Phone Repairs) for Hustle, then
+  // enter it: proves an already-verified business can join without re-applying.
+  const m4Complete = await call('PATCH', '/api/businesses/' + m4BizId, {
+    phone: '0970000011', whatsapp: '0970000011', email: 'kamwala@example.com',
+    logo: IMG, cover: IMG, province: 'Lusaka', district: 'Lusaka', business_type: 'sole_proprietor',
+    year_started: 2021, services_text: 'Phone repairs, screens, batteries and accessories.',
+  }, p2.cookie);
+  check('HUSTLE: existing M4 shop completes its Hustle profile', m4Complete.status === 200, 'status ' + m4Complete.status + ' ' + JSON.stringify(m4Complete.json).slice(0, 160));
+  const optM4 = await call('POST', '/api/hustle/businesses/' + m4BizId + '/opt-in', {}, p2.cookie);
+  check('HUSTLE: completed M4 shop is eligible',
+    optM4.status === 200 && optM4.json.eligible === true && optM4.json.complete === true, JSON.stringify(optM4.json).slice(0, 160));
+
+  const mkEntry = async (owner, biz, videoUrl, comp) => {
+    const cid = comp || compId;
+    const created = await call('POST', '/api/hustle/competitions/' + cid + '/applications',
+      { business_id: biz.id, answers: answers(), pitch_summary: 'Our hustle, in sixty seconds.', spend_items: spendOk }, owner.cookie);
+    if (created.status !== 201) throw new Error('entry create failed for biz ' + biz.id + ': ' + JSON.stringify(created.json).slice(0, 200));
+    const appId = created.json.application.id;
+    const pitch = await call('POST', '/api/hustle/applications/' + appId + '/pitch',
+      { video_url: videoUrl, pitch_summary: 'Our hustle, in sixty seconds.' }, owner.cookie);
+    if (pitch.status !== 200) throw new Error('pitch failed for app ' + appId + ': ' + JSON.stringify(pitch.json).slice(0, 200));
+    const photo = await call('POST', '/api/hustle/applications/' + appId + '/photos', { image: IMG }, owner.cookie);
+    if (photo.status !== 201) throw new Error('photo failed for app ' + appId + ': ' + JSON.stringify(photo.json).slice(0, 200));
+    const detail = await call('GET', '/api/hustle/applications/' + appId, null, owner.cookie);
+    return { appId, pitchId: (detail.json.application.pitch_video || {}).id };
+  };
+  const entryA = await mkEntry(h1, bizA, YT);
+  const appA2 = await call('POST', '/api/hustle/competitions/' + compId + '/applications',
+    { business_id: bizA.id, answers: answers(), spend_items: spendOk }, h1.cookie);
+  check('HUSTLE: second application for the same business and competition is 409', appA2.status === 409, 'status ' + appA2.status);
+  const entryB = await mkEntry(h2, bizB, YT);
+  const entryC = await mkEntry(h3, bizC, TT);
+  const entryM4 = await mkEntry(p2, { id: m4BizId }, FBW);
+  check('HUSTLE: four entries drafted with pitch + photo', !!entryA.appId && !!entryB.appId && !!entryC.appId && !!entryM4.appId);
+
+  // Submit: A submits (twice -> 422), B goes through changes_requested + resubmit.
+  const subA = await call('POST', '/api/hustle/applications/' + entryA.appId + '/submit', {}, h1.cookie);
+  check('HUSTLE: A submits its draft (submitted)',
+    subA.status === 200 && subA.json.application.status === 'submitted', 'status ' + subA.status);
+  const subA2 = await call('POST', '/api/hustle/applications/' + entryA.appId + '/submit', {}, h1.cookie);
+  check('HUSTLE: a submitted application cannot be submitted again (422)', subA2.status === 422, 'status ' + subA2.status);
+  const patchSubmitted = await call('PATCH', '/api/hustle/applications/' + entryA.appId, { pitch_summary: 'Too late.' }, h1.cookie);
+  check('HUSTLE: a submitted application can no longer be edited (422)', patchSubmitted.status === 422, 'status ' + patchSubmitted.status);
+  const subB = await call('POST', '/api/hustle/applications/' + entryB.appId + '/submit', {}, h2.cookie);
+  check('HUSTLE: B submits its draft', subB.status === 200 && subB.json.application.status === 'submitted', 'status ' + subB.status);
+  const subC = await call('POST', '/api/hustle/applications/' + entryC.appId + '/submit', {}, h3.cookie);
+  check('HUSTLE: C submits its draft', subC.status === 200 && subC.json.application.status === 'submitted', 'status ' + subC.status);
+  const subM4 = await call('POST', '/api/hustle/applications/' + entryM4.appId + '/submit', {}, p2.cookie);
+  check('HUSTLE: M4 submits its draft', subM4.status === 200 && subM4.json.application.status === 'submitted', 'status ' + subM4.status);
+  const queueMember = await call('GET', '/api/admin/hustle/applications?status=submitted', null, h1.cookie);
+  check('HUSTLE: admin application queue is admin-only (403)', queueMember.status === 403, 'status ' + queueMember.status);
+  const queue = await call('GET', '/api/admin/hustle/applications?status=submitted', null, adminC);
+  check('HUSTLE: admin queue lists the four submitted applications with spend totals',
+    queue.status === 200 && (queue.json.applications || []).length === 4
+    && (queue.json.applications || []).every((a) => a.spend_total === 10000 && a.spend_count === 2)
+    && (queue.json.counts || {}).submitted === 4, 'status ' + queue.status + ' ' + JSON.stringify(queue.json).slice(0, 200));
+  const chNoNote = await call('PATCH', '/api/admin/hustle/applications/' + entryB.appId, { decision: 'changes_requested' }, adminC);
+  check('HUSTLE: changes_requested without a note is 422', chNoNote.status === 422, 'status ' + chNoNote.status);
+  const chB = await call('PATCH', '/api/admin/hustle/applications/' + entryB.appId, { decision: 'changes_requested', note: 'Say how the K10,000 creates jobs.' }, adminC);
+  check('HUSTLE: admin sends B back for changes (note stored)',
+    chB.status === 200 && chB.json.application.status === 'changes_requested'
+    && chB.json.application.review_note === 'Say how the K10,000 creates jobs.', 'status ' + chB.status);
+  const patchB = await call('PATCH', '/api/hustle/applications/' + entryB.appId, { answers: { ...answers(), q9: 'It would keep two jobs and add one trainee, a young repair apprentice.' } }, h2.cookie);
+  check('HUSTLE: B edits its application after changes_requested', patchB.status === 200, 'status ' + patchB.status);
+  const resubB = await call('POST', '/api/hustle/applications/' + entryB.appId + '/resubmit', { note: 'Added the jobs detail.' }, h2.cookie);
+  check('HUSTLE: B resubmits with a note (submitted)',
+    resubB.status === 200 && resubB.json.application.status === 'submitted'
+    && String(resubB.json.application.review_note || '').includes('Resubmitted: Added the jobs detail.'), 'status ' + resubB.status);
+  const resubB2 = await call('POST', '/api/hustle/applications/' + entryB.appId + '/resubmit', { note: 'Again.' }, h2.cookie);
+  check('HUSTLE: only a changes_requested application can be resubmitted (422)', resubB2.status === 422, 'status ' + resubB2.status);
+
+  // Approve the pitch, then the application, in order A, B, C, M4 (approval
+  // order is the leaderboard tiebreak).
+  const approveEntry = async (entry) => {
+    const pp = await call('PATCH', '/api/admin/hustle/pitches/' + entry.pitchId, { decision: 'approved' }, adminC);
+    if (pp.status !== 200) throw new Error('pitch approve failed for ' + entry.pitchId + ': ' + JSON.stringify(pp.json));
+    const ap = await call('PATCH', '/api/admin/hustle/applications/' + entry.appId, { decision: 'approve' }, adminC);
+    if (ap.status !== 200) throw new Error('app approve failed for ' + entry.appId + ': ' + JSON.stringify(ap.json));
+    return ap.json.application;
+  };
+  const pitchBadDecision = await call('PATCH', '/api/admin/hustle/pitches/' + entryA.pitchId, { decision: 'maybe' }, adminC);
+  check('HUSTLE: pitch decision must be approved, rejected or changes_requested (422)', pitchBadDecision.status === 422, 'status ' + pitchBadDecision.status);
+  await approveEntry(entryA);
+  await approveEntry(entryB);
+  await approveEntry(entryC);
+  await approveEntry(entryM4);
+  const approvedRow = await dbOne("SELECT COUNT(*) AS c FROM hustle_applications WHERE competition_id = ? AND status = 'approved'", [compId]);
+  check('HUSTLE: all four entries are approved', Number(approvedRow.c) === 4, 'count ' + JSON.stringify(approvedRow));
+  const approveAgain = await call('PATCH', '/api/admin/hustle/applications/' + entryA.appId, { decision: 'approve' }, adminC);
+  check('HUSTLE: an approved application cannot be decided again (422)', approveAgain.status === 422, 'status ' + approveAgain.status);
+  const entries = await call('GET', '/api/hustle/competitions/' + compId + '/entries');
+  check('HUSTLE: public entries list shows the four approved entries with pitch + photos',
+    entries.status === 200 && (entries.json.entries || []).length === 4
+    && (entries.json.entries || []).every((e) => e.pitch_video && e.pitch_video.video_url && (e.photos || []).length === 1 && e.vote_count === 0),
+    'status ' + entries.status + ' ' + JSON.stringify(entries.json).slice(0, 200));
+  const entryDetail = await call('GET', '/api/hustle/entries/' + entryA.appId);
+  check('HUSTLE: public entry detail carries the business card and vote count',
+    entryDetail.status === 200 && entryDetail.json.entry.business.name === 'Hustle Test Shop 1'
+    && entryDetail.json.entry.vote_count === 0 && entryDetail.json.entry.you_have_voted === false,
+    'status ' + entryDetail.status + ' ' + JSON.stringify(entryDetail.json).slice(0, 200));
+  const mineH1 = await call('GET', '/api/hustle/applications/mine', null, h1.cookie);
+  check('HUSTLE: my applications lists the approved entry with its vote count',
+    (mineH1.json.applications || []).some((a) => a.id === entryA.appId && a.status === 'approved' && a.vote_count === 0),
+    JSON.stringify(mineH1.json).slice(0, 200));
+
+  // ---------- withdraw the F draft ----------
+  const withdrawF = await call('POST', '/api/hustle/applications/' + appFId + '/withdraw', {}, h6.cookie);
+  check('HUSTLE: owner withdraws the F draft (withdrawn)',
+    withdrawF.status === 200 && withdrawF.json.application.status === 'withdrawn', 'status ' + withdrawF.status);
+  const subWithdrawn = await call('POST', '/api/hustle/applications/' + appFId + '/submit', {}, h6.cookie);
+  check('HUSTLE: a withdrawn application cannot be submitted (422)', subWithdrawn.status === 422, 'status ' + subWithdrawn.status);
+  const withdrawF2 = await call('POST', '/api/hustle/applications/' + appFId + '/withdraw', {}, h6.cookie);
+  check('HUSTLE: a withdrawn application cannot be withdrawn again (422)', withdrawF2.status === 422, 'status ' + withdrawF2.status);
+  // A withdrawn draft must not lock the business out: one live entry per
+  // business, but a fresh application is allowed after a withdraw.
+  const reapplyF = await mkEntry(h6, bizF, YT, compId);
+  check('HUSTLE: business can apply again after withdrawing its draft',
+    !!reapplyF.appId, 'appId ' + JSON.stringify(reapplyF));
+
+  // ---------- vote outside the window + signed out ----------
+  const voteEarly = await call('POST', '/api/hustle/entries/' + entryB.appId + '/vote', {}, v7.cookie);
+  check('HUSTLE: vote while applications are still open is 422', voteEarly.status === 422, 'status ' + voteEarly.status + ' ' + JSON.stringify(voteEarly.json).slice(0, 120));
+  const voteAnon = await call('POST', '/api/hustle/entries/' + entryB.appId + '/vote', {});
+  check('HUSTLE: signed-out vote is 401', voteAnon.status === 401, 'status ' + voteAnon.status);
+  const closeApps = await call('PATCH', '/api/admin/hustle/competitions/' + compId, { status: 'applications_closed' }, adminC);
+  check('HUSTLE: admin closes applications', closeApps.status === 200 && closeApps.json.competition.status === 'applications_closed', 'status ' + closeApps.status);
+  const openVoting = await call('PATCH', '/api/admin/hustle/competitions/' + compId, { status: 'voting_open' }, adminC);
+  check('HUSTLE: admin opens voting', openVoting.status === 200 && openVoting.json.competition.status === 'voting_open', 'status ' + openVoting.status);
+
+  // ---------- votes: eligibility, tiebreak, duplicate, concurrency ----------
+  const votePending = await call('POST', '/api/hustle/entries/' + entryB.appId + '/vote', {}, p1.cookie);
+  check('HUSTLE: selfie-pending voter is rejected (403)', votePending.status === 403, 'status ' + votePending.status);
+  const voteSelf = await call('POST', '/api/hustle/entries/' + entryA.appId + '/vote', {}, h1.cookie);
+  check('HUSTLE: owner cannot vote for their own business (422)', voteSelf.status === 422, 'status ' + voteSelf.status);
+  const voteRepSelf = await call('POST', '/api/hustle/entries/' + appFId + '/vote', {}, rf.cookie);
+  check('HUSTLE: vote for a withdrawn entry is 422', voteRepSelf.status === 422, 'status ' + voteRepSelf.status);
+  const voteA1 = await call('POST', '/api/hustle/entries/' + entryA.appId + '/vote', {}, v1.cookie);
+  const voteA2 = await call('POST', '/api/hustle/entries/' + entryA.appId + '/vote', {}, v2.cookie);
+  const voteB1 = await call('POST', '/api/hustle/entries/' + entryB.appId + '/vote', {}, v3.cookie);
+  const voteB2 = await call('POST', '/api/hustle/entries/' + entryB.appId + '/vote', {}, v4.cookie);
+  const voteC1 = await call('POST', '/api/hustle/entries/' + entryC.appId + '/vote', {}, v5.cookie);
+  check('HUSTLE: five valid votes land (201 each)',
+    [voteA1, voteA2, voteB1, voteB2, voteC1].every((r) => r.status === 201),
+    [voteA1.status, voteA2.status, voteB1.status, voteB2.status, voteC1.status].join(','));
+  const board1 = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  const lb1 = board1.json.leaderboard || [];
+  check('HUSTLE: leaderboard shows A and B tied on 2 in approval order, then C on 1, M4 on 0',
+    board1.status === 200 && lb1.length === 4 && lb1[0].application_id === entryA.appId && lb1[0].vote_count === 2
+    && lb1[1].application_id === entryB.appId && lb1[1].vote_count === 2
+    && lb1[2].application_id === entryC.appId && lb1[2].vote_count === 1
+    && lb1[3].application_id === entryM4.appId && lb1[3].vote_count === 0,
+    'status ' + board1.status + ' ' + JSON.stringify(lb1.map((r) => [r.rank, r.application_id, r.vote_count])));
+
+  // CONCURRENCY: two simultaneous votes from the same voter, exactly one lands.
+  const [conc1, conc2] = await Promise.all([
+    call('POST', '/api/hustle/entries/' + entryC.appId + '/vote', {}, v6.cookie),
+    call('POST', '/api/hustle/entries/' + entryC.appId + '/vote', {}, v6.cookie),
+  ]);
+  const concStatuses = [conc1.status, conc2.status].sort();
+  check('HUSTLE: concurrent duplicate votes yield exactly one 201 and one 409',
+    concStatuses[0] === 201 && concStatuses[1] === 409, 'statuses ' + concStatuses.join(','));
+  const v6Rows = await dbOne('SELECT COUNT(*) AS c FROM hustle_votes WHERE competition_id = ? AND voter_id = ?', [compId, v6.id]);
+  check('HUSTLE: the concurrent race wrote exactly one vote row for the voter', Number(v6Rows.c) === 1, 'count ' + JSON.stringify(v6Rows));
+  const board2 = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  const lb2 = board2.json.leaderboard || [];
+  check('HUSTLE: the race vote ties all three entries on 2, in approval order (A, B, C)',
+    lb2[0].application_id === entryA.appId && lb2[0].vote_count === 2
+    && lb2[1].application_id === entryB.appId && lb2[1].vote_count === 2
+    && lb2[2].application_id === entryC.appId && lb2[2].vote_count === 2,
+    JSON.stringify(lb2.map((r) => [r.rank, r.application_id, r.vote_count])));
+  const dupVote = await call('POST', '/api/hustle/entries/' + entryB.appId + '/vote', {}, v1.cookie);
+  check('HUSTLE: a second vote from the same voter is 409', dupVote.status === 409, 'status ' + dupVote.status);
+  const v1Rows = await dbOne('SELECT COUNT(*) AS c FROM hustle_votes WHERE competition_id = ? AND voter_id = ?', [compId, v1.id]);
+  check('HUSTLE: the duplicate vote wrote no partial row (voter still has 1 vote)', Number(v1Rows.c) === 1, 'count ' + JSON.stringify(v1Rows));
+  const myVote = await call('GET', '/api/hustle/competitions/' + compId + '/votes/mine', null, v1.cookie);
+  check('HUSTLE: votes/mine names the entry the caller voted for',
+    myVote.status === 200 && myVote.json.vote && myVote.json.vote.application_id === entryA.appId && myVote.json.vote.is_valid === true,
+    JSON.stringify(myVote.json).slice(0, 160));
+  const myVoteEntry = await call('GET', '/api/hustle/entries/' + entryA.appId + '/my-vote', null, v1.cookie);
+  check('HUSTLE: my-vote on the entry reports voted true',
+    myVoteEntry.status === 200 && myVoteEntry.json.voted === true && myVoteEntry.json.vote.after_freeze === false,
+    JSON.stringify(myVoteEntry.json).slice(0, 120));
+  const boardMine = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard', null, h3.cookie);
+  check('HUSTLE: leaderboard carries the caller own rank (C owner is rank 3 in the tie)',
+    boardMine.status === 200 && boardMine.json.my_rank === 3 && boardMine.json.my_entry
+    && boardMine.json.my_entry.application_id === entryC.appId, 'my_rank ' + boardMine.json.my_rank);
+
+  // ---------- fraud: flag, invalidate, restore, invalidate again ----------
+  const adminVotes = await call('GET', '/api/admin/hustle/votes?competition_id=' + compId, null, adminC);
+  const v1Vote = (adminVotes.json.votes || []).find((x) => x.voter_id === v1.id);
+  check('HUSTLE: admin votes queue shows the vote with voter + entry',
+    !!v1Vote && v1Vote.application_id === entryA.appId && v1Vote.is_valid === true,
+    JSON.stringify(v1Vote || {}).slice(0, 200));
+  const flagNoReason = await call('PATCH', '/api/admin/hustle/votes/' + v1Vote.id + '/flag', { action: 'flag' }, adminC);
+  check('HUSTLE: flagging a vote without a reason is 422', flagNoReason.status === 422, 'status ' + flagNoReason.status);
+  const flagBadAction = await call('PATCH', '/api/admin/hustle/votes/' + v1Vote.id + '/flag', { action: 'nuke', reason: 'x' }, adminC);
+  check('HUSTLE: unknown flag action is 422', flagBadAction.status === 422, 'status ' + flagBadAction.status);
+  const flagMember = await call('PATCH', '/api/admin/hustle/votes/' + v1Vote.id + '/flag', { action: 'flag', reason: 'x' }, h1.cookie);
+  check('HUSTLE: member cannot flag a vote (403)', flagMember.status === 403, 'status ' + flagMember.status);
+  const flagIt = await call('PATCH', '/api/admin/hustle/votes/' + v1Vote.id + '/flag', { action: 'flag', reason: 'Same device as another voter.', detector: 'manual_report' }, adminC);
+  check('HUSTLE: admin flags the vote', flagIt.status === 200 && flagIt.json.action === 'flagged', 'status ' + flagIt.status);
+  const flaggedQueue = await call('GET', '/api/admin/hustle/votes?flagged=1&competition_id=' + compId, null, adminC);
+  check('HUSTLE: flagged=1 queue shows the flagged vote',
+    (flaggedQueue.json.votes || []).some((x) => x.id === v1Vote.id && (x.flags || []).length === 1),
+    JSON.stringify(flaggedQueue.json).slice(0, 200));
+  const statsFlagged = await call('GET', '/api/admin/hustle/stats', null, adminC);
+  check('HUSTLE: admin stats counts one open flagged vote',
+    statsFlagged.status === 200 && statsFlagged.json.stats.flagged_votes_open === 1,
+    JSON.stringify(statsFlagged.json).slice(0, 160));
+  const invalidateIt = await call('PATCH', '/api/admin/hustle/votes/' + v1Vote.id + '/flag', { action: 'invalidate', reason: 'Confirmed shared device.' }, adminC);
+  check('HUSTLE: admin invalidates the vote', invalidateIt.status === 200 && invalidateIt.json.action === 'invalidated', 'status ' + invalidateIt.status);
+  const v1VoteRow = await dbOne('SELECT is_valid, invalidation_reason FROM hustle_votes WHERE id = ?', [v1Vote.id]);
+  check('HUSTLE: the invalidated vote row is kept with is_valid=0 and a reason',
+    v1VoteRow && Number(v1VoteRow.is_valid) === 0 && v1VoteRow.invalidation_reason === 'Confirmed shared device.',
+    JSON.stringify(v1VoteRow));
+  const board3 = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  const lb3 = board3.json.leaderboard || [];
+  check('HUSTLE: invalidating drops A to 1 vote (B 2, C 2, A 1)',
+    lb3[0].application_id === entryB.appId && lb3[0].vote_count === 2
+    && lb3[1].application_id === entryC.appId && lb3[1].vote_count === 2
+    && lb3[2].application_id === entryA.appId && lb3[2].vote_count === 1,
+    JSON.stringify(lb3.map((r) => [r.rank, r.application_id, r.vote_count])));
+  const restoreIt = await call('PATCH', '/api/admin/hustle/votes/' + v1Vote.id + '/flag', { action: 'restore', reason: 'Appeal upheld, separate devices.' }, adminC);
+  check('HUSTLE: admin restores the vote', restoreIt.status === 200 && restoreIt.json.action === 'restored', 'status ' + restoreIt.status);
+  const board3b = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  check('HUSTLE: restoring returns A to 2 votes',
+    (board3b.json.leaderboard || []).find((r) => r.application_id === entryA.appId).vote_count === 2,
+    JSON.stringify((board3b.json.leaderboard || []).map((r) => [r.application_id, r.vote_count])));
+  await call('PATCH', '/api/admin/hustle/votes/' + v1Vote.id + '/flag', { action: 'invalidate', reason: 'Confirmed shared device on re-check.' }, adminC);
+  const board3c = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  check('HUSTLE: re-invalidating drops A to 1 vote again',
+    (board3c.json.leaderboard || []).find((r) => r.application_id === entryA.appId).vote_count === 1,
+    JSON.stringify((board3c.json.leaderboard || []).map((r) => [r.application_id, r.vote_count])));
+
+  // ---------- disqualify / reinstate / disqualify again ----------
+  const dqNoReason = await call('POST', '/api/admin/hustle/entries/' + entryC.appId + '/disqualify', {}, adminC);
+  check('HUSTLE: disqualify without a reason is 422', dqNoReason.status === 422, 'status ' + dqNoReason.status);
+  const dqC = await call('POST', '/api/admin/hustle/entries/' + entryC.appId + '/disqualify', { reason: 'Votes were bought. Evidence attached.' }, adminC);
+  check('HUSTLE: admin disqualifies C (status disqualified)',
+    dqC.status === 200 && dqC.json.application.status === 'disqualified', 'status ' + dqC.status);
+  const board4 = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  check('HUSTLE: disqualified C is gone from the leaderboard (B 2, A 1, M4 0)',
+    (board4.json.leaderboard || []).length === 3
+    && (board4.json.leaderboard || []).every((r) => r.application_id !== entryC.appId)
+    && board4.json.leaderboard[0].application_id === entryB.appId,
+    JSON.stringify((board4.json.leaderboard || []).map((r) => [r.rank, r.application_id, r.vote_count])));
+  const entriesAfterDq = await call('GET', '/api/hustle/competitions/' + compId + '/entries');
+  check('HUSTLE: disqualified C is gone from the public entries list',
+    !(entriesAfterDq.json.entries || []).some((e) => e.application_id === entryC.appId));
+  const cVotesKept = await dbOne('SELECT COUNT(*) AS c FROM hustle_votes WHERE application_id = ?', [entryC.appId]);
+  check('HUSTLE: disqualification keeps the vote rows (audit trail)', Number(cVotesKept.c) === 2, 'count ' + JSON.stringify(cVotesKept));
+  const voteDq = await call('POST', '/api/hustle/entries/' + entryC.appId + '/vote', {}, v7.cookie);
+  check('HUSTLE: a disqualified entry cannot be voted for (422)', voteDq.status === 422, 'status ' + voteDq.status);
+  const reinstateBad = await call('POST', '/api/admin/hustle/entries/' + entryA.appId + '/reinstate', { reason: 'x' }, adminC);
+  check('HUSTLE: only a disqualified entry can be reinstated (422)', reinstateBad.status === 422, 'status ' + reinstateBad.status);
+  const reinstateC = await call('POST', '/api/admin/hustle/entries/' + entryC.appId + '/reinstate', { reason: 'Appeal upheld, evidence was wrong.' }, adminC);
+  check('HUSTLE: admin reinstates C (approved again)',
+    reinstateC.status === 200 && reinstateC.json.application.status === 'approved', 'status ' + reinstateC.status);
+  const board4b = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  check('HUSTLE: reinstated C returns with its 2 votes, behind B on the tiebreak',
+    (board4b.json.leaderboard || [])[0].application_id === entryB.appId
+    && (board4b.json.leaderboard || [])[0].vote_count === 2
+    && (board4b.json.leaderboard || [])[1].application_id === entryC.appId
+    && (board4b.json.leaderboard || [])[1].vote_count === 2,
+    JSON.stringify((board4b.json.leaderboard || []).map((r) => [r.rank, r.application_id, r.vote_count])));
+  const dqC2 = await call('POST', '/api/admin/hustle/entries/' + entryC.appId + '/disqualify', { reason: 'Second review confirmed bought votes.' }, adminC);
+  check('HUSTLE: C is disqualified again for the freeze', dqC2.status === 200 && dqC2.json.application.status === 'disqualified', 'status ' + dqC2.status);
+
+  // ---------- freeze (permanent) + post-freeze votes ----------
+  const freezePatch = await call('PATCH', '/api/admin/hustle/competitions/' + compId, { status: 'frozen' }, adminC);
+  check('HUSTLE: freeze via status PATCH is still refused (422)', freezePatch.status === 422, 'status ' + freezePatch.status);
+  const freeze = await call('POST', '/api/admin/hustle/competitions/' + compId + '/freeze', {}, adminC);
+  check('HUSTLE: admin freezes the leaderboard (status frozen, Top 3 snapshotted)',
+    freeze.status === 200 && freeze.json.competition.status === 'frozen'
+    && (freeze.json.frozen || []).length === 3
+    && freeze.json.frozen[0].application_id === entryB.appId && freeze.json.frozen[0].vote_count === 2
+    && freeze.json.frozen[1].application_id === entryA.appId && freeze.json.frozen[1].vote_count === 1,
+    'status ' + freeze.status + ' ' + JSON.stringify(freeze.json).slice(0, 240));
+  const freeze2 = await call('POST', '/api/admin/hustle/competitions/' + compId + '/freeze', {}, adminC);
+  check('HUSTLE: a second freeze is rejected (freeze is permanent)', freeze2.status === 422, 'status ' + freeze2.status);
+  const frozenBoard = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  check('HUSTLE: frozen leaderboard serves the snapshot (frozen true, B 2, A 1, M4 0)',
+    frozenBoard.status === 200 && frozenBoard.json.frozen === true && !!frozenBoard.json.frozen_at
+    && (frozenBoard.json.leaderboard || []).length === 3
+    && frozenBoard.json.leaderboard[0].application_id === entryB.appId
+    && frozenBoard.json.leaderboard[0].vote_count === 2,
+    JSON.stringify(frozenBoard.json).slice(0, 240));
+  const snapRows = await dbOne('SELECT COUNT(*) AS c FROM hustle_results WHERE competition_id = ?', [compId]);
+  check('HUSTLE: the frozen snapshot lives in hustle_results (3 rows)', Number(snapRows.c) === 3, 'count ' + JSON.stringify(snapRows));
+  const voteAfterFreeze = await call('POST', '/api/hustle/entries/' + entryB.appId + '/vote', {}, v7.cookie);
+  check('HUSTLE: a vote after the early freeze is recorded with after_freeze',
+    voteAfterFreeze.status === 201 && voteAfterFreeze.json.vote.after_freeze === true,
+    'status ' + voteAfterFreeze.status + ' ' + JSON.stringify(voteAfterFreeze.json).slice(0, 160));
+  const v7VoteRow = await dbOne('SELECT after_freeze, is_valid FROM hustle_votes WHERE competition_id = ? AND voter_id = ?', [compId, v7.id]);
+  check('HUSTLE: the post-freeze vote row is stored (after_freeze=1, valid)',
+    v7VoteRow && Number(v7VoteRow.after_freeze) === 1 && Number(v7VoteRow.is_valid) === 1, JSON.stringify(v7VoteRow));
+  const boardAfterFreeze = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  check('HUSTLE: the post-freeze vote does not change the public totals (B still 2)',
+    (boardAfterFreeze.json.leaderboard || []).find((r) => r.application_id === entryB.appId).vote_count === 2,
+    JSON.stringify((boardAfterFreeze.json.leaderboard || []).map((r) => [r.application_id, r.vote_count])));
+  const entriesAfterFreeze = await call('GET', '/api/hustle/competitions/' + compId + '/entries');
+  check('HUSTLE: public entries still show the frozen count for B (2)',
+    (entriesAfterFreeze.json.entries || []).find((e) => e.application_id === entryB.appId).vote_count === 2);
+  const v7Mine = await call('GET', '/api/hustle/competitions/' + compId + '/votes/mine', null, v7.cookie);
+  check('HUSTLE: votes/mine flags the post-freeze vote as after_freeze',
+    v7Mine.json.vote && v7Mine.json.vote.after_freeze === true, JSON.stringify(v7Mine.json).slice(0, 120));
+
+  // ---------- finalise: winner must be the highest-ranked eligible entry ----------
+  const finWrong = await call('POST', '/api/admin/hustle/competitions/' + compId + '/finalise', { winner_application_id: entryA.appId }, adminC);
+  check('HUSTLE: finalise with the wrong winner is 422 (must be the top eligible entry)',
+    finWrong.status === 422 && String(finWrong.json.error || '').includes(String(entryB.appId)),
+    'status ' + finWrong.status + ' ' + JSON.stringify(finWrong.json).slice(0, 160));
+  const finMember = await call('POST', '/api/admin/hustle/competitions/' + compId + '/finalise', { winner_application_id: entryB.appId }, h2.cookie);
+  check('HUSTLE: member cannot finalise (403)', finMember.status === 403, 'status ' + finMember.status);
+  const fin = await call('POST', '/api/admin/hustle/competitions/' + compId + '/finalise', { winner_application_id: entryB.appId }, adminC);
+  check('HUSTLE: admin finalises B as the winner (winner_announced)',
+    fin.status === 200 && fin.json.competition.status === 'winner_announced'
+    && fin.json.winner_application_id === entryB.appId && fin.json.business.name === 'Hustle Test Shop 2',
+    'status ' + fin.status + ' ' + JSON.stringify(fin.json).slice(0, 200));
+  const fin2 = await call('POST', '/api/admin/hustle/competitions/' + compId + '/finalise', { winner_application_id: entryB.appId }, adminC);
+  check('HUSTLE: a second finalise is rejected (irreversible)', fin2.status === 422, 'status ' + fin2.status);
+  const boardWinner = await call('GET', '/api/hustle/competitions/' + compId + '/leaderboard');
+  check('HUSTLE: the winner row carries is_winner after finalise',
+    (boardWinner.json.leaderboard || []).find((r) => r.application_id === entryB.appId).is_winner === true,
+    JSON.stringify((boardWinner.json.leaderboard || []).map((r) => [r.application_id, r.is_winner])));
+  const curWinner = await call('GET', '/api/hustle/competitions/current');
+  check('HUSTLE: GET current reports the winner_announced competition',
+    curWinner.status === 200 && curWinner.json.competition.status === 'winner_announced', 'status ' + curWinner.status);
+
+  // ---------- prize payment tracking ----------
+  const resultB = await dbOne('SELECT id, is_winner FROM hustle_results WHERE competition_id = ? AND application_id = ?', [compId, entryB.appId]);
+  check('HUSTLE: the winner has a results row marked is_winner', !!resultB && Number(resultB.is_winner) === 1, JSON.stringify(resultB));
+  const prizeNoRef = await call('PATCH', '/api/admin/hustle/results/' + resultB.id + '/prize', { prize_payment_status: 'paid' }, adminC);
+  check('HUSTLE: marking the prize paid without a reference is 422', prizeNoRef.status === 422, 'status ' + prizeNoRef.status);
+  const prizeMember = await call('PATCH', '/api/admin/hustle/results/' + resultB.id + '/prize', { prize_payment_status: 'paid', prize_payment_reference: 'X' }, h2.cookie);
+  check('HUSTLE: member cannot mark the prize paid (403)', prizeMember.status === 403, 'status ' + prizeMember.status);
+  const prizePaid = await call('PATCH', '/api/admin/hustle/results/' + resultB.id + '/prize', { prize_payment_status: 'paid', prize_payment_reference: 'TEST-REF-1', prize_payment_method: 'Mobile Money' }, adminC);
+  check('HUSTLE: admin marks the prize paid with a reference',
+    prizePaid.status === 200 && prizePaid.json.result.prize_payment_status === 'paid'
+    && prizePaid.json.result.prize_payment_reference === 'TEST-REF-1', 'status ' + prizePaid.status);
+
+  // ---------- notifications inbox ----------
+  const unreadH1Before = await call('GET', '/api/hustle/notifications/unread-count', null, h1.cookie);
+  check('HUSTLE: owner has unread Hustle notifications (verify + submit + approvals)',
+    unreadH1Before.status === 200 && unreadH1Before.json.unread_count >= 3, JSON.stringify(unreadH1Before.json));
+  const inboxH1 = await call('GET', '/api/hustle/notifications', null, h1.cookie);
+  const receivedRow = (inboxH1.json.notifications || []).find((n) => n.kind === 'application_received' && n.related_id === entryA.appId);
+  check('HUSTLE: inbox lists the application-received notification for the entry',
+    !!receivedRow && receivedRow.read_at === null, JSON.stringify(receivedRow || {}).slice(0, 160));
+  const unreadAfterOne = await (async () => {
+    const mark = await call('POST', '/api/hustle/notifications/' + receivedRow.id + '/read', {}, h1.cookie);
+    if (mark.status !== 200) return null;
+    return call('GET', '/api/hustle/notifications/unread-count', null, h1.cookie);
+  })();
+  check('HUSTLE: marking one notification read drops the unread count by one',
+    unreadAfterOne && unreadAfterOne.json.unread_count === unreadH1Before.json.unread_count - 1,
+    JSON.stringify(unreadAfterOne && unreadAfterOne.json));
+  const markOther = await call('POST', '/api/hustle/notifications/' + receivedRow.id + '/read', {}, h2.cookie);
+  check('HUSTLE: another member cannot mark the notification read (404)', markOther.status === 404, 'status ' + markOther.status);
+  const readAll = await call('POST', '/api/hustle/notifications/read-all', {}, h1.cookie);
+  const unreadH1After = await call('GET', '/api/hustle/notifications/unread-count', null, h1.cookie);
+  check('HUSTLE: read-all clears the unread count',
+    readAll.status === 200 && unreadH1After.json.unread_count === 0, JSON.stringify(unreadH1After.json));
+
+  // ---------- announcements (union inbox, no per-user read state) ----------
+  const annBad = await call('POST', '/api/admin/hustle/announcements', { title: 'No kind', body: 'Missing kind.' }, adminC);
+  check('HUSTLE: announcement without a kind is 422', annBad.status === 422, 'status ' + annBad.status);
+  const annMember = await call('POST', '/api/admin/hustle/announcements', { kind: 'general', title: 'x', body: 'y' }, h1.cookie);
+  check('HUSTLE: member cannot post an announcement (403)', annMember.status === 403, 'status ' + annMember.status);
+  const unreadV1Before = await call('GET', '/api/hustle/notifications/unread-count', null, v1.cookie);
+  const ann = await call('POST', '/api/admin/hustle/announcements', { kind: 'voting_opened', title: 'Voting is open', body: 'Vote for your favourite Hustle business.', competition_id: compId }, adminC);
+  check('HUSTLE: admin posts an announcement (201)',
+    ann.status === 201 && ann.json.announcement && ann.json.announcement.kind === 'voting_opened', 'status ' + ann.status);
+  const inboxV1 = await call('GET', '/api/hustle/notifications', null, v1.cookie);
+  check('HUSTLE: the announcement appears in every member inbox as an announcement row',
+    (inboxV1.json.notifications || []).some((n) => n.announcement === true && String(n.id).startsWith('ann-') && n.kind === 'voting_opened'),
+    JSON.stringify(inboxV1.json).slice(0, 240));
+  const unreadV1After = await call('GET', '/api/hustle/notifications/unread-count', null, v1.cookie);
+  check('HUSTLE: announcements do not change the personal unread count',
+    unreadV1After.json.unread_count === unreadV1Before.json.unread_count, JSON.stringify(unreadV1After.json));
+
+  // ---------- admin stats + CSV export (no voter phones) ----------
+  const stats = await call('GET', '/api/admin/hustle/stats', null, adminC);
+  const s = stats.json.stats || {};
+  check('HUSTLE: admin stats carry the competition totals',
+    stats.status === 200 && (s.applications_by_status || {}).approved === 3
+    && (s.applications_by_status || {}).disqualified === 1 && (s.applications_by_status || {}).withdrawn === 1
+    && s.votes_cast === 7 && s.valid_votes === 6 && s.voters === 7 && s.flagged_votes_open === 0
+    && s.competitions === 1, JSON.stringify(s).slice(0, 240));
+  const statsMember = await call('GET', '/api/admin/hustle/stats', null, h1.cookie);
+  check('HUSTLE: admin stats are admin-only (403)', statsMember.status === 403, 'status ' + statsMember.status);
+  const expRes = await fetch(BASE + '/api/admin/hustle/competitions/' + compId + '/export', { headers: { Cookie: adminC } });
+  const expText = await expRes.text();
+  check('HUSTLE: CSV export serves text/csv with entry, vote and result sections',
+    expRes.status === 200 && (expRes.headers.get('content-type') || '').includes('text/csv')
+    && expText.includes('section,application_id,business_id,business_name,status,vote_count,flagged_votes')
+    && expText.includes('"entry"') && expText.includes('"vote"') && expText.includes('"result"'),
+    'status ' + expRes.status + ' ' + expText.slice(0, 200));
+  check('HUSTLE: CSV export carries no voter phone numbers',
+    !expText.includes('+260') && !expText.includes('0970000'), expText.slice(0, 400));
+  const expMember = await call('GET', '/api/admin/hustle/competitions/' + compId + '/export', null, h1.cookie);
+  check('HUSTLE: CSV export is admin-only (403)', expMember.status === 403, 'status ' + expMember.status);
+
+  // ---------- no real sends: every Hustle SMS is logged as skipped ----------
+  const smsBad = await dbOne("SELECT COUNT(*) AS c FROM sms_log WHERE kind LIKE 'hustle_%' AND status <> 'skipped'");
+  const smsTotal = await dbOne("SELECT COUNT(*) AS c FROM sms_log WHERE kind LIKE 'hustle_%'");
+  check('HUSTLE: no Hustle SMS was ever sent (all logged as skipped)',
+    Number(smsBad.c) === 0 && Number(smsTotal.c) > 0, 'skipped=' + JSON.stringify(smsTotal) + ' non-skipped=' + JSON.stringify(smsBad));
+  const winnerSms = await dbOne("SELECT status FROM sms_log WHERE kind = 'hustle_results_announced' ORDER BY id DESC LIMIT 1");
+  check('HUSTLE: the winner SMS is logged as skipped', !!winnerSms && winnerSms.status === 'skipped', JSON.stringify(winnerSms));
+
+  // ---------- no stray votes: rejected attempts inserted nothing ----------
+  const comp1Votes = await dbOne('SELECT COUNT(*) AS c FROM hustle_votes WHERE competition_id = ?', [compId]);
+  check('HUSTLE: exactly 7 vote rows exist for the competition (rejections inserted none)',
+    Number(comp1Votes.c) === 7, 'count ' + JSON.stringify(comp1Votes));
+
+  // ---------- second competition: voting window dates must be enforced ----------
+  // Plan Architecture 3.2 check 4: outside [voting_open_at, voting_close_at]
+  // a vote is 422. This competition has its voting window already closed
+  // while its status is voting_open.
+  const comp2Body = {
+    name: 'Hustle Window Probe', slug: 'hustle-window-probe', prize_kwacha: 10000,
+    applications_open_at: sqlTs(t0 - 2 * DAY), applications_close_at: sqlTs(t0 + 20 * DAY),
+    voting_open_at: sqlTs(t0 - 2 * DAY), voting_close_at: sqlTs(t0 - 60 * 60 * 1000),
+    freeze_at: sqlTs(t0 + 11 * DAY), winner_at: sqlTs(t0 + 12 * DAY),
+  };
+  const comp2Create = await call('POST', '/api/admin/hustle/competitions', comp2Body, adminC);
+  check('HUSTLE: probe competition created', comp2Create.status === 201, 'status ' + comp2Create.status);
+  const comp2Id = comp2Create.json.competition.id;
+  await call('PATCH', '/api/admin/hustle/competitions/' + comp2Id, { status: 'applications_open' }, adminC);
+  const entryA2 = await mkEntry(h1, bizA, YT, comp2Id);
+  const subA2b = await call('POST', '/api/hustle/applications/' + entryA2.appId + '/submit', {}, h1.cookie);
+  check('HUSTLE: probe entry submits while applications are open', subA2b.status === 200, 'status ' + subA2b.status);
+  await approveEntry(entryA2);
+  await call('PATCH', '/api/admin/hustle/competitions/' + comp2Id, { status: 'applications_closed' }, adminC);
+  await call('PATCH', '/api/admin/hustle/competitions/' + comp2Id, { status: 'voting_open' }, adminC);
+  const probeVote = await call('POST', '/api/hustle/entries/' + entryA2.appId + '/vote', {}, vp.cookie);
+  check('HUSTLE: vote after voting_close_at is 422 even though status is voting_open',
+    probeVote.status === 422, 'status ' + probeVote.status + ' ' + JSON.stringify(probeVote.json).slice(0, 120));
+
+  // ---------- analytics ----------
+  const analytics = await call('GET', '/api/hustle/analytics/' + bizA.id, null, h1.cookie);
+  check('HUSTLE: owner analytics returns counts, votes and followers',
+    analytics.status === 200 && analytics.json.counts && typeof analytics.json.counts.storefront_view === 'number'
+    && typeof analytics.json.votes === 'number' && analytics.json.votes >= 1,
+    'status ' + analytics.status + ' ' + JSON.stringify(analytics.json).slice(0, 200));
+  const analyticsOther = await call('GET', '/api/hustle/analytics/' + bizA.id, null, h2.cookie);
+  check('HUSTLE: analytics for someone else business is 403', analyticsOther.status === 403, 'status ' + analyticsOther.status);
 }

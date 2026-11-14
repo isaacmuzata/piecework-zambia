@@ -21,6 +21,7 @@ const { client, init } = require('./db');
 const { parseLatLng, resolveCoords, haversineKm, isValidLat, isValidLng } = require('./geo');
 const { sendConfirmationEmail, sendResetEmail } = require('./mailer');
 const createExperiencesRouter = require('./routes/experiences');
+const createHustleRouter = require('./routes/hustle');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const JWT_SECRET = process.env.JWT_SECRET || '';
@@ -58,6 +59,9 @@ const BIG_JSON_PREFIXES = [
   ['POST', '/api/businesses'], ['PATCH', '/api/businesses'],
   ['POST', '/api/applications'], ['PATCH', '/api/applications'],
   ['POST', '/api/experiences'], ['PATCH', '/api/experiences'],
+  // Hustle pitch photo uploads ride the 10 MB parser; the vote endpoint
+  // stays on the 400 KB default (a vote body is a few dozen bytes).
+  ['POST', '/api/hustle/applications'], ['PATCH', '/api/hustle/applications'],
 ];
 app.use((req, res, next) => {
   if (req.method === 'PATCH' && req.path === '/api/users/me') return json10mb(req, res, next);
@@ -92,6 +96,10 @@ function bustListCache(path) {
     // by listCache for up to 60s (stale to 5 min); a write to any of its
     // routes must bust it or lists serve stale results after every write.
     drop('/api/experiences');
+  } else if (path.startsWith('/api/hustle')) {
+    // Hustle: votes, applications and admin decisions must surface on
+    // the public entries/leaderboard lists, not wait out the cache TTL.
+    drop('/api/hustle');
   } else if (path.startsWith('/api/ads')) {
     drop('/api/ads');
   } else if (path.startsWith('/api/reviews')) {
@@ -3792,6 +3800,17 @@ function serializeBusiness(b, viewer) {
     category: b.category, city: b.city, area: b.area || '', address: b.address || '',
     phone: b.phone || '', whatsapp: b.whatsapp || '', email: b.email || '',
     hours_text: b.hours_text || '',
+    // Hustle profile fields (Database Design section 1 + the two pinned
+    // columns). Public: the business chose to publish them.
+    trading_name: b.trading_name || '', province: b.province || '', district: b.district || '',
+    business_type: b.business_type || '',
+    year_started: b.year_started == null ? null : Number(b.year_started),
+    website: b.website || '',
+    social_links: (() => { try { const p = JSON.parse(String(b.social_links || '[]')); return Array.isArray(p) ? p : []; } catch { return []; } })(),
+    registration_number: (isOwner || isAdm) ? (b.registration_number || '') : undefined,
+    is_draft: !!b.is_draft,
+    hours: (() => { try { const p = JSON.parse(String(b.hours_json || '')); return (p && typeof p === 'object') ? p : null; } catch { return null; } })(),
+    services_text: b.services_text || '',
     status: b.status, verified: b.verification_status === 'verified',
     verification_status: b.verification_status,
     verification_note: (isOwner || isAdm) ? (b.verification_note || '') : '',
@@ -3836,18 +3855,49 @@ app.post('/api/businesses', ah(auth), businessLimiter, ah(async (req, res) => {
   const b = req.body || {};
   const f = validateBusinessInput(b);
   if (Object.keys(f).length) return err(res, 422, Object.values(f)[0], f);
+  // PACRA certificate: image (JPG/PNG/WebP, 2.5M chars) or PDF (8M
+  // chars, ~6 MB), copying the Experiences document rule exactly.
   const cert = typeof b.certificate === 'string' ? b.certificate : '';
-  if (!/^data:image\/(jpeg|png|webp);base64,/.test(cert) || cert.length > 2_500_000) {
-    return err(res, 422, 'Attach a clear photo of your PACRA certificate (JPG, PNG or WebP).', { certificate: 'Attach a clear photo of your PACRA certificate.' });
+  const certIsPdf = /^data:application\/pdf;base64,/.test(cert);
+  const certIsImg = /^data:image\/(jpeg|png|webp);base64,/.test(cert);
+  if (certIsPdf) {
+    if (cert.length > 8_000_000) return err(res, 422, 'Keep PDFs under about 6 MB, or take a photo of the document instead.', { certificate: 'Keep PDFs under about 6 MB.' });
+  } else if (certIsImg) {
+    if (cert.length > 2_500_000) return err(res, 422, 'Attach a clear photo of your PACRA certificate (JPG, PNG or WebP).', { certificate: 'Attach a clear photo of your PACRA certificate.' });
+  } else {
+    return err(res, 422, 'Attach a clear photo or PDF of your PACRA certificate (JPG, PNG, WebP or PDF).', { certificate: 'Attach a clear photo or PDF of your PACRA certificate.' });
   }
   const owned = await getOne('SELECT COUNT(*) AS c FROM businesses WHERE owner_id = ?', [req.user.id]);
   if (Number(owned.c || 0) >= 3) return err(res, 422, 'You can run up to 3 business storefronts.');
   const coords = parseLatLng(b);
   if (coords && coords.error) return err(res, 422, coords.error);
+  // Hustle profile fields are optional at registration (the extended
+  // form collects them; PATCH /api/businesses/:id/hustle-profile edits
+  // them later). Invalid values are ignored here, not fatal.
+  const hustleCreate = {};
+  if (typeof b.trading_name === 'string') hustleCreate.trading_name = b.trading_name.trim().slice(0, 120);
+  if (typeof b.province === 'string') hustleCreate.province = b.province.trim().slice(0, 80);
+  if (typeof b.district === 'string') hustleCreate.district = b.district.trim().slice(0, 80);
+  if (['sole_proprietor', 'limited_company', 'partnership', 'cooperative', 'other'].includes(b.business_type)) hustleCreate.business_type = b.business_type;
+  if (Number.isInteger(Number(b.year_started)) && Number(b.year_started) >= 1900 && Number(b.year_started) <= new Date().getFullYear()) hustleCreate.year_started = Number(b.year_started);
+  if (typeof b.website === 'string' && /^https?:\/\/.+/i.test(b.website)) hustleCreate.website = b.website.trim().slice(0, 200);
+  if (Array.isArray(b.social_links)) {
+    hustleCreate.social_links = JSON.stringify(b.social_links
+      .filter((l) => l && ['facebook', 'instagram', 'tiktok', 'whatsapp', 'other'].includes(l.platform) && /^https?:\/\/.+/i.test(String(l.url || '')))
+      .map((l) => ({ platform: l.platform, url: String(l.url).trim().slice(0, 200) })));
+  }
+  if (typeof b.registration_number === 'string') hustleCreate.registration_number = b.registration_number.trim().slice(0, 40);
+  if (typeof b.services_text === 'string') hustleCreate.services_text = b.services_text.trim().slice(0, 1000);
+  if (b.hours_json !== undefined && b.hours_json !== null && b.hours_json !== '') {
+    hustleCreate.hours_json = typeof b.hours_json === 'string' ? b.hours_json : JSON.stringify(b.hours_json);
+  }
   const info = await runWrite(`
     INSERT INTO businesses (owner_id, name, slug, tagline, description, logo, cover, category,
-      city, area, address, phone, whatsapp, email, hours_text, lat, lng, pacra_number, tpin, owner_legal_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      city, area, address, phone, whatsapp, email, hours_text, lat, lng, pacra_number, tpin, owner_legal_name,
+      trading_name, province, district, business_type, year_started, website, social_links,
+      registration_number, services_text, hours_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     req.user.id, String(b.name).trim(), 'tmp-' + Date.now(),
     String(b.tagline || '').trim().slice(0, 120), String(b.description).trim(),
@@ -3857,13 +3907,23 @@ app.post('/api/businesses', ah(auth), businessLimiter, ah(async (req, res) => {
     String(b.email || '').trim().slice(0, 120), String(b.hours_text || '').trim().slice(0, 200),
     coords ? coords.lat : null, coords ? coords.lng : null,
     String(b.pacra_number).trim().slice(0, 40), String(b.tpin).replace(/\s/g, ''), String(b.owner_legal_name).trim().slice(0, 120),
+    hustleCreate.trading_name || '', hustleCreate.province || '', hustleCreate.district || '',
+    hustleCreate.business_type || '', hustleCreate.year_started ?? null,
+    hustleCreate.website || '', hustleCreate.social_links || '[]',
+    hustleCreate.registration_number || '', hustleCreate.services_text || '',
+    hustleCreate.hours_json || '',
   ]);
   const id = insertId(info);
   const slug = slugifyName(b.name) + '-' + id;
   await runWrite('UPDATE businesses SET slug = ? WHERE id = ?', [slug, id]);
   // The PACRA certificate arrives with the application: file it as the
   // first verification document and queue the shop for verification.
-  await runWrite('INSERT INTO business_documents (business_id, kind, image) VALUES (?, ?, ?)', [id, 'pacra', cert]);
+  const certParsed = /^data:([^;,]+);base64,(.*)$/s.exec(cert);
+  const certSize = certParsed ? Buffer.from(certParsed[2], 'base64').length : 0;
+  await runWrite(
+    'INSERT INTO business_documents (business_id, kind, image, mime, size_bytes, filename) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, 'pacra', cert, certParsed ? certParsed[1] : '', certSize,
+     String(b.certificate_filename || '').slice(0, 120)]);
   await runWrite("UPDATE businesses SET verification_status = 'pending' WHERE id = ?", [id]);
   res.status(201).json({ id, slug, status: 'pending' });
 }));
@@ -3878,10 +3938,14 @@ app.get('/api/businesses', listCache, ah(maybeAuth), ah(async (req, res) => {
   const params = [];
   if (req.query.category && marketCategorySet.has(req.query.category)) { conds.push('bz.category = ?'); params.push(req.query.category); }
   if (req.query.city && CITIES.includes(req.query.city)) { conds.push('bz.city = ?'); params.push(req.query.city); }
+  // Hustle filters: province, district, business type (plain-text columns).
+  if (req.query.province && String(req.query.province).trim()) { conds.push('bz.province = ?'); params.push(String(req.query.province).trim()); }
+  if (req.query.district && String(req.query.district).trim()) { conds.push('bz.district = ?'); params.push(String(req.query.district).trim()); }
+  if (req.query.business_type && ['sole_proprietor', 'limited_company', 'partnership', 'cooperative', 'other'].includes(req.query.business_type)) { conds.push('bz.business_type = ?'); params.push(req.query.business_type); }
   if (req.query.q && String(req.query.q).trim()) {
-    conds.push('(bz.name LIKE ? OR bz.description LIKE ? OR bz.tagline LIKE ?)');
+    conds.push('(bz.name LIKE ? OR bz.description LIKE ? OR bz.tagline LIKE ? OR bz.trading_name LIKE ? OR bz.services_text LIKE ?)');
     const q = `%${String(req.query.q).trim()}%`;
-    params.push(q, q, q);
+    params.push(q, q, q, q, q);
   }
   // Following filter (Oct 27, 2026, tester Kudzai's suggestion): only
   // the businesses the signed-in member follows. Signed out gets none.
@@ -3903,6 +3967,22 @@ app.get('/api/businesses/:slug', ah(maybeAuth), ah(async (req, res) => {
   }
   const business = serializeBusiness(row, req.user);
   business.active_ad = isOwner ? await activeAdFor('business', row.id) : null;
+  // Hustle analytics: a storefront view is an event row (never a
+  // fabricated count). Signed-in views dedup per actor per day; anonymous
+  // views are recorded raw (no IP column exists to dedup them).
+  const viewWrite = req.user
+    ? runWrite(
+        `INSERT INTO hustle_events (business_id, event_type, actor_user_id, ref_type, ref_id)
+         SELECT ?, 'storefront_view', ?, 'business', ? WHERE NOT EXISTS (
+           SELECT 1 FROM hustle_events
+           WHERE business_id = ? AND event_type = 'storefront_view' AND actor_user_id = ?
+             AND date(created_at, '+2 hours') = date('now', '+2 hours'))`,
+        [row.id, req.user.id, row.id, row.id, req.user.id])
+    : runWrite(
+        `INSERT INTO hustle_events (business_id, event_type, actor_user_id, ref_type, ref_id)
+         VALUES (?, 'storefront_view', NULL, 'business', ?)`,
+        [row.id, row.id]);
+  viewWrite.catch(() => { /* analytics must never break a storefront load */ });
   const products = await getAll(
     `${PRODUCT_SELECT} WHERE p.business_id = ? AND p.status = 'active' ORDER BY p.created_at DESC LIMIT 50`, [row.id]
   );
@@ -3962,6 +4042,24 @@ app.patch('/api/businesses/:id', ah(auth), ah(async (req, res) => {
   for (const k of ['name', 'tagline', 'description', 'category', 'city', 'area', 'address', 'phone', 'whatsapp', 'email', 'hours_text', 'pacra_number', 'tpin', 'owner_legal_name']) {
     if (b[k] !== undefined) updates[k] = typeof b[k] === 'string' ? b[k].trim() : b[k];
   }
+  // Hustle profile fields are editable from the manage page too (the same
+  // extended form); validated lightly here, strictly in hustle-profile.
+  for (const k of ['trading_name', 'province', 'district', 'website', 'registration_number', 'services_text']) {
+    if (b[k] !== undefined) updates[k] = typeof b[k] === 'string' ? b[k].trim().slice(0, k === 'services_text' ? 1000 : 200) : b[k];
+  }
+  if (b.business_type !== undefined && ['sole_proprietor', 'limited_company', 'partnership', 'cooperative', 'other', ''].includes(b.business_type)) updates.business_type = b.business_type;
+  if (b.year_started !== undefined) {
+    if (b.year_started === '' || b.year_started === null) updates.year_started = null;
+    else if (Number.isInteger(Number(b.year_started)) && Number(b.year_started) >= 1900 && Number(b.year_started) <= new Date().getFullYear()) updates.year_started = Number(b.year_started);
+  }
+  if (Array.isArray(b.social_links)) {
+    updates.social_links = JSON.stringify(b.social_links
+      .filter((l) => l && ['facebook', 'instagram', 'tiktok', 'whatsapp', 'other'].includes(l.platform) && /^https?:\/\/.+/i.test(String(l.url || '')))
+      .map((l) => ({ platform: l.platform, url: String(l.url).trim().slice(0, 200) })));
+  }
+  if (b.hours_json !== undefined && b.hours_json !== null && b.hours_json !== '') {
+    updates.hours_json = typeof b.hours_json === 'string' ? b.hours_json : JSON.stringify(b.hours_json);
+  }
   if (b.logo !== undefined) updates.logo = b.logo || null;
   if (b.cover !== undefined) updates.cover = b.cover || null;
   const coords = parseLatLng(b);
@@ -3975,15 +4073,22 @@ app.patch('/api/businesses/:id', ah(auth), ah(async (req, res) => {
     // next edit (or have one on file already via the documents upload).
     const docCount = await getOne('SELECT COUNT(*) AS c FROM business_documents WHERE business_id = ?', [id]);
     const cert = typeof b.certificate === 'string' ? b.certificate : '';
-    const certOk = /^data:image\/(jpeg|png|webp);base64,/.test(cert) && cert.length <= 2_500_000;
+    const certIsPdf = /^data:application\/pdf;base64,/.test(cert);
+    const certIsImg = /^data:image\/(jpeg|png|webp);base64,/.test(cert);
+    const certOk = (certIsImg && cert.length <= 2_500_000) || (certIsPdf && cert.length <= 8_000_000);
     if (Number(docCount.c || 0) === 0 && !certOk) {
-      return err(res, 422, 'A PACRA certificate photo is required. Upload it in the Verified badge section above, then save again.', { certificate: 'A PACRA certificate photo is required.' });
+      return err(res, 422, 'A PACRA certificate photo or PDF is required. Upload it in the Verified badge section above, then save again.', { certificate: 'A PACRA certificate photo or PDF is required.' });
     }
     const sets = Object.keys(updates).map((k) => `${k} = ?`).join(', ');
     await runWrite(`UPDATE businesses SET ${sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [...Object.values(updates), id]);
     if (certOk && Number(docCount.c || 0) === 0) {
-      await runWrite('INSERT INTO business_documents (business_id, kind, image) VALUES (?, ?, ?)', [id, 'pacra', cert]);
+      const certParsed = /^data:([^;,]+);base64,(.*)$/s.exec(cert);
+      const certSize = certParsed ? Buffer.from(certParsed[2], 'base64').length : 0;
+      await runWrite(
+        'INSERT INTO business_documents (business_id, kind, image, mime, size_bytes, filename) VALUES (?, ?, ?, ?, ?, ?)',
+        [id, 'pacra', cert, certParsed ? certParsed[1] : '', certSize,
+         String(b.certificate_filename || '').slice(0, 120)]);
       if (row.verification_status === 'unverified' || row.verification_status === 'rejected') {
         await runWrite("UPDATE businesses SET verification_status = 'pending', verification_note = '' WHERE id = ?", [id]);
       }
@@ -3999,12 +4104,21 @@ app.post('/api/businesses/:id/documents', ah(auth), ah(async (req, res) => {
   if (row.owner_id !== req.user.id) return err(res, 403, 'This is not your business.');
   const b = req.body || {};
   const kind = ['pacra', 'tpin', 'licence', 'other'].includes(b.kind) ? b.kind : 'other';
-  if (typeof b.image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(b.image)) {
-    return err(res, 422, 'Upload a photo or scan of the document (JPG, PNG or WebP).');
+  // Hustle: PDF accepted as well as images, copying the Experiences rule
+  // exactly (images 2.5M chars, PDFs 8M chars / ~6 MB).
+  const image = typeof b.image === 'string' ? b.image : '';
+  const isPdf = /^data:application\/pdf;base64,/.test(image);
+  const isImg = /^data:image\/(jpeg|png|webp);base64,/.test(image);
+  if (!isPdf && !isImg) {
+    return err(res, 422, 'Upload a photo or scan of the document (JPG, PNG, WebP or PDF).');
   }
-  if (b.image.length > 2_500_000) return err(res, 422, 'Document image must be under about 2 MB.');
+  if (isImg && image.length > 2_500_000) return err(res, 422, 'Document image must be under about 2 MB.');
+  if (isPdf && image.length > 8_000_000) return err(res, 422, 'Keep PDFs under about 6 MB, or take a photo of the document instead.');
+  const parsed = /^data:([^;,]+);base64,(.*)$/s.exec(image);
+  const sizeBytes = parsed ? Buffer.from(parsed[2], 'base64').length : 0;
   const info = await runWrite(
-    'INSERT INTO business_documents (business_id, kind, image) VALUES (?, ?, ?)', [id, kind, b.image]
+    'INSERT INTO business_documents (business_id, kind, image, mime, size_bytes, filename) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, kind, image, parsed ? parsed[1] : '', sizeBytes, String(b.filename || '').slice(0, 120)]
   );
   if (row.verification_status === 'unverified' || row.verification_status === 'rejected') {
     await runWrite("UPDATE businesses SET verification_status = 'pending', verification_note = '' WHERE id = ?", [id]);
@@ -4017,7 +4131,9 @@ app.get('/api/businesses/:id/documents', ah(auth), ah(async (req, res) => {
   const row = await getOne('SELECT * FROM businesses WHERE id = ?', [id]);
   if (!row) return err(res, 404, 'Business not found.');
   if (row.owner_id !== req.user.id && !isAdmin(req.user)) return err(res, 403, 'Not authorized.');
-  const docs = await getAll('SELECT id, kind, created_at FROM business_documents WHERE business_id = ? ORDER BY id', [id]);
+  const docs = await getAll(
+    'SELECT id, kind, status, reviewed_by, reviewed_at, review_note, mime, size_bytes, filename, created_at FROM business_documents WHERE business_id = ? ORDER BY id',
+    [id]);
   res.json({ documents: docs });
 }));
 
@@ -4039,7 +4155,9 @@ app.get('/api/admin/businesses', ah(auth), ah(async (req, res) => {
 app.get('/api/admin/businesses/:id/documents', ah(auth), ah(async (req, res) => {
   if (!isAdmin(req.user)) return err(res, 403, 'Not authorized.');
   const id = parseInt(req.params.id, 10);
-  const docs = await getAll('SELECT id, kind, image, created_at FROM business_documents WHERE business_id = ? ORDER BY id', [id]);
+  const docs = await getAll(
+    'SELECT id, kind, image, status, reviewed_by, reviewed_at, review_note, mime, size_bytes, filename, created_at FROM business_documents WHERE business_id = ? ORDER BY id',
+    [id]);
   res.json({ documents: docs });
 }));
 
@@ -4065,7 +4183,35 @@ app.patch('/api/admin/businesses/:id/verification', ah(auth), ah(async (req, res
   const note = String((req.body || {}).note || '').trim().slice(0, 300);
   await runWrite('UPDATE businesses SET verification_status = ?, verification_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     [decision, note, id]);
+  // Keep the per-document review state in sync with the business
+  // decision: the latest PACRA document carries the same outcome.
+  await runWrite(
+    `UPDATE business_documents SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, review_note = ?
+     WHERE id = (SELECT id FROM business_documents WHERE business_id = ? AND kind = 'pacra' ORDER BY id DESC LIMIT 1)`,
+    [decision === 'verified' ? 'approved' : 'rejected', req.user.id, note, id]);
   logAdmin(req, 'business.verification', 'business', id, `${row.name}: ${decision}${note ? ' (' + note + ')' : ''}`);
+  // Hustle: a PACRA decision notifies the owner (inbox + push + SMS,
+  // Architecture 6.2 event 2). notifySms logs 'skipped' without gateway
+  // creds, so tests never send a real text.
+  const title = decision === 'verified' ? 'Business verified' : 'Business verification declined';
+  const body = decision === 'verified'
+    ? `Your business ${row.name} is now a 2911 Verified Business. You can enter What's Your Hustle? once your profile is complete.`
+    : `Your business ${row.name} was not verified. ${note}`;
+  await runWrite(
+    `INSERT INTO hustle_notifications (user_id, kind, title, body, link, related_type, related_id, sent_via, delivery_status)
+     VALUES (?, ?, ?, ?, '#/business/mine', 'business', ?, 'sms', 'sent')`,
+    [row.owner_id, decision === 'verified' ? 'business_verified' : 'business_verification_changes_requested',
+     title.slice(0, 120), body.slice(0, 300), id]).catch(() => {});
+  notifyPush(row.owner_id, {
+    title: '2911 Jobs', body,
+    url: '#/business/mine', tag: `business-verification-${id}`,
+  }).catch(() => {});
+  notifySms(row.owner_id, 'hustle_business_verified', composeSms(
+    (n, t) => `Hi, this is Zac, your assistant. ${t}`, '',
+    decision === 'verified'
+      ? `Good news: ${row.name} is now a 2911 Verified Business.`
+      : `${row.name} was not verified. Open the app to see why.`
+  )).catch(() => {});
   res.json({ ok: true, id, verification_status: decision });
 }));
 
@@ -4086,6 +4232,17 @@ const productLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 40, standardHe
 // uploads reuse the existing productLimiter (40/hr) directly.
 const expHostLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true, handler: tooManyTries });
 
+// 2911 Hustle (Nov 13, 2026): dedicated buckets, keyed by user id (not
+// IP, so a shared household IP does not pool strangers together). The
+// vote endpoint must NOT share productLimiter (40/hr, shared by products
+// and Experiences writes; the suite already uses ~36/40 of that budget).
+// A legitimate voter casts at most 1 vote per competition, so 10/hr is
+// generous headroom for retries and leaves no room for a spray attack.
+const hustleUserKey = (prefix) => (req) =>
+  prefix + (req.user ? 'u' + req.user.id : 'ip-' + (req.ip || 'anon'));
+const hustleVoteLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, standardHeaders: true, handler: tooManyTries, keyGenerator: hustleUserKey('hustle-vote-') });
+const hustleApplyLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, standardHeaders: true, handler: tooManyTries, keyGenerator: hustleUserKey('hustle-apply-') });
+
 function serializeProduct(p) {
   return {
     id: p.id, seller_id: p.seller_id,
@@ -4094,6 +4251,7 @@ function serializeProduct(p) {
     seller_since: p.seller_created_at || null,
     title: p.title, description: p.description || '',
     price: Number(p.price || 0), negotiable: !!p.negotiable, category: p.category, condition: p.condition,
+    listing_type: p.listing_type || 'goods',
     seller_rating: p.seller_rating != null ? Number(p.seller_rating) : 0,
     seller_rating_count: Number(p.seller_rating_count || 0),
     city: p.city, area: p.area || '', status: p.status,
@@ -4131,7 +4289,10 @@ function validateProductInput(b) {
   if (!CITIES.includes(b.city)) f.city = 'Choose a valid city.';
   const price = Number(b.price);
   if (!Number.isInteger(price) || price < 1 || price > 10000000) f.price = 'Set a price in Kwacha (whole numbers).';
-  if (b.condition && !PRODUCT_CONDITIONS.includes(b.condition)) f.condition = 'Choose the item condition.';
+  // Hustle goods/service split: services ignore condition (the condition
+  // CHECK is deliberately not widened, so no products rebuild).
+  if (b.listing_type && !['goods', 'service'].includes(b.listing_type)) f.listing_type = 'Listing type must be goods or service.';
+  if (b.condition && b.listing_type !== 'service' && !PRODUCT_CONDITIONS.includes(b.condition)) f.condition = 'Choose the item condition.';
   return f;
 }
 
@@ -4218,13 +4379,17 @@ app.post('/api/products', ah(auth), productLimiter, ah(async (req, res) => {
     if (!biz) return err(res, 422, 'That business is not yours or is not live yet.');
     businessId = biz.id;
   }
+  // Hustle: services carry no condition (forced to the default 'Good').
+  const listingType = ['goods', 'service'].includes(b.listing_type) ? b.listing_type : 'goods';
+  const condition = listingType === 'service' ? 'Good' : (b.condition || 'Good');
   const info = await runWrite(`
-    INSERT INTO products (seller_id, title, description, price, category, condition, city, area, lat, lng, business_id, negotiable)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO products (seller_id, title, description, price, category, condition, city, area, lat, lng, business_id, negotiable, listing_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     req.user.id, title, String(b.description).trim(), Number(b.price), b.category,
-    b.condition || 'Good', b.city, String(b.area || '').trim().slice(0, 80),
+    condition, b.city, String(b.area || '').trim().slice(0, 80),
     coords ? coords.lat : null, coords ? coords.lng : null, businessId, b.negotiable ? 1 : 0,
+    listingType,
   ]);
   const id = insertId(info);
   if (Array.isArray(b.photos) && b.photos.length) {
@@ -4298,6 +4463,11 @@ app.patch('/api/products/:id', ah(auth), ah(async (req, res) => {
   if (b.price !== undefined) updates.price = Number(b.price);
   if (b.category !== undefined) updates.category = b.category;
   if (b.condition !== undefined) updates.condition = b.condition;
+  if (b.listing_type !== undefined) {
+    if (!['goods', 'service'].includes(b.listing_type)) return err(res, 422, 'Listing type must be goods or service.');
+    updates.listing_type = b.listing_type;
+    if (b.listing_type === 'service') updates.condition = 'Good';
+  }
   if (b.city !== undefined) updates.city = b.city;
   if (b.area !== undefined) updates.area = String(b.area).trim().slice(0, 80);
   if (b.negotiable !== undefined) updates.negotiable = b.negotiable ? 1 : 0;
@@ -4315,6 +4485,10 @@ app.patch('/api/products/:id', ah(auth), ah(async (req, res) => {
       updates.business_id = biz.id;
     }
   }
+  // A service never carries a condition: force the default so an edit
+  // can never write a value the condition CHECK rejects.
+  const effectiveListingType = updates.listing_type !== undefined ? updates.listing_type : row.listing_type;
+  if (effectiveListingType === 'service') updates.condition = 'Good';
   if (Object.keys(updates).length) {
     const probe = { ...row, ...updates };
     const f = validateProductInput(probe);
@@ -4695,6 +4869,13 @@ app.post('/api/conversations/:id/messages', ah(auth), msgLimiter, ah(async (req,
 // endpoints in the same router. Mounted here, before the share previews,
 // so /api/experiences/* resolves before the SPA fallback.
 app.use(createExperiencesRouter({ ah, err, maybeAuth, getOne, getAll, runWrite, listCache, auth, isAdmin, isSupport, logAdmin, CITIES, productLimiter, expHostLimiter }));
+
+// ---------------------------------------------------------------- 2911 Hustle (Phase 1 backend, Nov 13, 2026)
+// Competition module: same mount style as Experiences. The router takes
+// two deps Experiences does not: notifySms + notifyPush (Hustle sends its
+// own notifications) and client (the atomic vote write), plus its own
+// limiter instances and the shared normalizePhone / composeSms helpers.
+app.use(createHustleRouter({ ah, err, maybeAuth, getOne, getAll, runWrite, listCache, auth, isAdmin, isSupport, logAdmin, CITIES, client, notifySms, notifyPush, hustleVoteLimiter, hustleApplyLimiter, normalizePhone, composeSms }));
 
 // ---------------------------------------------------------------- share previews
 // Social apps (WhatsApp, Facebook) do not run the SPA and cannot read hash

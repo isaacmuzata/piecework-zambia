@@ -1670,3 +1670,65 @@ body{overflow-x:clip}
   .exp-book-col{position:sticky;top:80px}
   .exp-sticky-cta{display:none}
 }
+
+/* ================= What's Your Hustle? (Phase 1) =================
+   New tokens only (UISpec 1.5). No purple on Hustle pages. Variables only,
+   so dark mode works from the existing [data-theme="dark"] remap. */
+.hustle-hero{background:linear-gradient(140deg,var(--green-dark) 0%,#16294F 60%,var(--green-700) 100%);color:#fff;border-radius:26px;padding:24px 20px}
+.hustle-hero h1{font-size:27px;font-weight:800;line-height:1.2;margin:8px 0;color:#fff}
+.hustle-kicker{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.85)}
+.hustle-hero-sub{font-size:14px;color:rgba(255,255,255,.85);margin:8px 0}
+.hustle-prize-line{font-size:21px;font-weight:800;color:var(--amber);margin:10px 0 4px}
+.hustle-prize-line .muted{color:rgba(255,255,255,.75);font-size:14px;font-weight:700}
+.hustle-winner-line{font-size:14px;font-weight:700;color:#fff;margin:4px 0}
+.hustle-winner-name{font-size:22px;font-weight:800;color:#fff;margin:6px 0}
+.hustle-hero-note{font-size:12.5px;color:rgba(255,255,255,.75);margin:12px 0 0}
+.hustle-hero .btn-outline{color:#fff;border-color:#fff}
+.hustle-countdown-label{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.85);margin:12px 0 6px}
+.hustle-countdown{display:flex;gap:8px}
+.hustle-cd{flex:1;background:rgba(255,255,255,.12);border-radius:14px;padding:10px 6px;text-align:center}
+.hustle-cd b{display:block;font-size:22px;font-weight:800;color:#fff}
+.hustle-cd span{font-size:11px;font-weight:700;text-transform:uppercase;color:rgba(255,255,255,.75)}
+.hustle-phase{font-size:12px;font-weight:800}
+.hustle-phase-open{background:#e7f6ec;color:#0b6b34}
+.hustle-phase-closed{background:#f3f4f6;color:#4b5563}
+.hustle-phase-frozen{background:#fffbeb;color:#b45309}
+.hustle-phase-winner{background:#FFF7E8;color:#92400E}
+.hustle-phase-disqualified{background:#fef2f2;color:#b91c1c}
+.hustle-vote-voted{color:var(--green)}
+.hustle-rank{flex:0 0 44px;width:44px;height:44px;border-radius:50%;background:var(--fill);color:var(--ink);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800}
+.hustle-rank-top{background:var(--amber);color:#0B1F3B}
+.hustle-spend-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.hustle-spend-row input[type=text]{flex:1;min-width:0;padding:10px 12px;border-radius:14px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)}
+.hustle-spend-row input[type=number]{width:96px;padding:10px 12px;border-radius:14px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)}
+.hustle-spend-k{font-weight:800;color:var(--gray)}
+.hustle-spend-total{display:flex;justify-content:space-between;gap:10px;align-items:center;background:var(--fill);border:1.5px solid var(--line);border-radius:14px;padding:12px 14px;font-size:15px;margin-top:10px}
+.hustle-spend-total.exact{background:var(--green-tint);border-color:var(--green);color:var(--green)}
+.hustle-hours-grid{display:flex;flex-direction:column;gap:8px}
+.hustle-hours-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hustle-hours-day{flex:0 0 40px;font-weight:700;font-size:13.5px}
+.hustle-hours-closed{margin:0;padding:6px 8px;flex:0 0 auto}
+.hustle-hours-row input[type=time]{padding:9px 10px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px;background:var(--card);color:var(--ink)}
+@media(max-width:380px){.hustle-hours-row{flex-direction:column;align-items:flex-start}.hustle-hours-row input[type=time]{width:100%}}
+.hustle-notif-row{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:8px;cursor:pointer}
+.hustle-notif-row.unread b{font-weight:800}
+.hustle-notif-ico{width:44px;height:44px;flex:0 0 44px;border-radius:13px;background:var(--green-tint);color:var(--green);display:flex;align-items:center;justify-content:center}
+.hustle-notif-ico svg{width:22px;height:22px}
+.hustle-notif-dot{display:block;width:8px;height:8px;border-radius:50%;background:var(--green);margin:2px auto 0}
+.hustle-video{border-radius:20px;overflow:hidden;background:var(--green-tint);min-height:180px}
+.hustle-video iframe{width:100%;height:300px;border:0;display:block}
+.hustle-video-tall iframe{height:300px}
+@media(min-width:900px){.hustle-video-tall iframe{height:420px}}
+.hustle-video-link,.hustle-video-missing{display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;text-align:center;padding:32px 20px}
+.hustle-video-ico{width:56px;height:56px;border-radius:50%;background:var(--card);color:var(--green);display:flex;align-items:center;justify-content:center}
+.hustle-video-ico svg{width:26px;height:26px}
+.hustle-strip .btn{margin-top:4px}
+[data-theme="dark"] .hustle-phase-open{background:#132E4D;color:#6EE7B7}
+[data-theme="dark"] .hustle-phase-closed{background:#1B3358;color:#A7B6C8}
+[data-theme="dark"] .hustle-phase-frozen{background:#2A2113;color:#F5C97A}
+[data-theme="dark"] .hustle-phase-winner{background:#2A2113;color:#F5C97A}
+[data-theme="dark"] .hustle-phase-disqualified{background:#2B1518;color:#F08A8A}
+[data-theme="dark"] .hustle-rank{background:#1B3358;color:#EDF2F7}
+[data-theme="dark"] .hustle-rank-top{background:var(--amber);color:#0B1F3B}
+[data-theme="dark"] .hustle-spend-total.exact{background:#132E4D;border-color:#0DA271;color:#6EE7B7}
+[data-theme="dark"] .hustle-notif-row{background:var(--card)}

@@ -62,6 +62,14 @@ const ICONS = {
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   facebook: '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>',
+  /* 2911 Hustle (Phase 1): same 24x24, stroke 2, round caps/joins. */
+  trophy: '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v6a5 5 0 0 1-10 0z"/><path d="M7 6H4a2 2 0 0 0 2 4h1"/><path d="M17 6h3a2 2 0 0 1-2 4h-1"/>',
+  megaphone: '<path d="M3 11l18-5v12L3 13z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M7 15l4-6 4 3 5-8"/>',
+  whatsapp: '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M8.5 10.5c.8 2.6 3.4 5.2 6 6l1.5-1.5 2 1c-.3 1.5-1.4 2-2.5 1.7-3.6-.8-7.2-4.4-8-8-.3-1.1.2-2.2 1.7-2.5l1 2z"/>',
+  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
+  id: '<rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="8" cy="11" r="2"/><path d="M14 9h4M14 13h4M5 17h6"/>',
   /* 2911 Experiences (Phase 2): same 24x24, stroke 2, round caps/joins. */
   compass: '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
   backpack: '<path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"/><path d="M8 10h8"/><path d="M8 17h8"/>',
@@ -560,6 +568,8 @@ function renderChrome() {
           <a href="#/profile">${icon('user')}<span>Profile</span></a>
           <a href="#/dashboard">${icon('clipboard')}<span>My Gigs</span></a>
           <a href="#/saved">${icon('bookmark')}<span>Saved jobs</span></a>
+          <a href="#/notifications">${icon('bell')}<span>Notifications</span><span class="drawer-badge js-notif-badge" style="margin-left:auto" hidden></span></a>
+          <a href="#/business/mine">${icon('grid')}<span>My businesses</span></a>
           ${staff ? `<a href="#/admin">${icon('shield')}<span>Admin</span></a>` : ''}
           <a href="#/how">${icon('help')}<span>Help &amp; Support</span></a>
           <button type="button" id="acct-logout">${icon('logout')}<span>Log out</span></button>
@@ -612,10 +622,22 @@ function renderChrome() {
       link('#/experiences/category/events', 'ticket', 'Events'),
       link(expHostCache && expHostCache.individual && expHostCache.individual.status === 'approved' ? '#/host/dashboard' : '#/host/apply', 'plus', expHostCache && expHostCache.individual && expHostCache.individual.status === 'approved' ? 'My Host Dashboard' : 'Become a Host'),
     ])
+    // 2911 Hustle: "Grow your business" group, after Travel and stays.
+    + group('Grow your business', [
+      linkStarts('#/hustle', 'trophy', "What's Your Hustle"),
+      link('#/hustle/leaderboard', 'chart', 'Leaderboard'),
+      link('#/businesses', 'grid', 'Businesses'),
+      ...(currentUser ? [
+        link('#/business/mine', 'grid', 'My businesses'),
+        ...(hustleMineCount ? [link('#/hustle/my-entry', 'trophy', 'My entry')] : []),
+        ...(!hustleMineCount ? [link('#/business/apply', 'plus', 'Open a business storefront')] : []),
+      ] : []),
+    ])
     + (currentUser ? group('Your account', [
       link('#/messages', 'message', 'Messages', '<span class="drawer-badge js-msg-badge" hidden></span>'),
       link('#/dashboard', 'clipboard', 'My Gigs'),
       link('#/saved', 'bookmark', 'Saved jobs'),
+      link('#/notifications', 'bell', 'Notifications', '<span class="drawer-badge js-notif-badge" hidden></span>'),
       ...(staff ? [link('#/admin', 'shield', 'Admin')] : []),
     ]) : '')
     + group('Support', [link('#/how', 'help', 'Help & Support'), link('#/about', 'info', 'About 2911 Jobs')])
@@ -634,11 +656,12 @@ function renderChrome() {
       // Experiences (Phase 2, PROVISIONAL no-sixth-tab decision): the
       // desktop nav item covers home, search, category, detail and host pages.
       if (href === '#/experiences') return h === '#/experiences' || h.startsWith('#/experiences/') || h.startsWith('#/experience/') || h.startsWith('#/host/');
+      if (href === '#/hustle') return h === '#/hustle' || h.startsWith('#/hustle/');
       return h.startsWith(href);
     };
     const ditems = currentUser
-      ? [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/experiences', 'Experiences'], ['#/messages', 'Messages'], ['#/dashboard', 'My Gigs']]
-      : [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/experiences', 'Experiences'], ['#/how', 'Help']];
+      ? [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/experiences', 'Experiences'], ['#/hustle', 'Hustle'], ['#/messages', 'Messages'], ['#/dashboard', 'My Gigs']]
+      : [['#/jobs', 'Find Work'], ['#/workers', 'Looking for Work'], ['#/market', 'Marketplace'], ['#/experiences', 'Experiences'], ['#/hustle', 'Hustle'], ['#/how', 'Help']];
     dnav.innerHTML = ditems.map(([href, label]) =>
       `<a href="${href}" class="${dMatch(href) ? 'active' : ''}">${label}${href === '#/messages' ? '<span class="dnav-badge js-msg-badge" hidden></span>' : ''}</a>`
     ).join('');
@@ -654,7 +677,7 @@ function renderChrome() {
     { href: '#/messages', label: 'Messages', ic: 'message', match: (hh) => hh.startsWith('#/messages') || hh.startsWith('#/chat/') },
     {
       href: currentUser ? '#/profile' : '#/login', label: currentUser ? 'Profile' : 'Sign in', ic: 'user',
-      match: (hh) => hh.startsWith('#/profile') || hh.startsWith('#/user/') || hh.startsWith('#/login') || hh.startsWith('#/register') || hh.startsWith('#/dashboard'),
+      match: (hh) => hh.startsWith('#/profile') || hh.startsWith('#/user/') || hh.startsWith('#/login') || hh.startsWith('#/register') || hh.startsWith('#/dashboard') || hh.startsWith('#/business/mine') || hh.startsWith('#/business/') && hh.endsWith('/manage') || hh.startsWith('#/hustle/my-entry') || hh.startsWith('#/notifications'),
     },
   ];
   tabbar.innerHTML = tabs.map(t =>
@@ -667,6 +690,16 @@ function renderChrome() {
         else b.hidden = true;
       });
     }).catch(() => {});
+    refreshNotifBadge();
+    // Drawer "My entry" vs "Open a business storefront" depends on owning
+    // a storefront. Fetch once per page load, then re-render the drawer.
+    if (hustleMineCount === null) {
+      hustleMineCount = -1;
+      api('/api/businesses/mine').then((d) => {
+        hustleMineCount = (d.businesses || []).length;
+        renderChrome();
+      }).catch(() => { hustleMineCount = 0; });
+    }
   }
 }
 
@@ -982,11 +1015,13 @@ async function viewHome() {
         <div class="hero95-photo"><img src="/img/landing/zambia-man.jpg" alt="A Zambian worker" loading="lazy"><span>People open to work</span></div>
       </div>
     </section>
+    <div id="hustle-promo"></div>
     <div class="entry-cards">
       <a class="entry-card" href="#/jobs"><span class="entry-ico">${icon('briefcase')}</span><span class="entry-text"><b>Find work</b><span>Piece work a few kilometres from home</span></span>${icon('chevR')}</a>
       <a class="entry-card" href="#/post"><span class="entry-ico">${icon('users')}</span><span class="entry-text"><b>Hire help</b><span>Post a job. People nearby apply</span></span>${icon('chevR')}</a>
       <a class="entry-card" href="#/market"><span class="entry-ico">${icon('tag')}</span><span class="entry-text"><b>Buy &amp; sell</b><span>Phones, furniture, produce and more</span></span>${icon('chevR')}</a>
       <a class="entry-card" href="#/experiences"><span class="entry-ico">${icon('compass')}</span><span class="entry-text"><b>Explore Zambia</b><span>Tours, stays, transport and experiences</span></span>${icon('chevR')}</a>
+      <a class="entry-card" href="#/hustle"><span class="entry-ico">${icon('trophy')}</span><span class="entry-text"><b>What's Your Hustle?</b><span>Win K10,000 for your business</span></span>${icon('chevR')}</a>
     </div>
     <div class="page" style="padding-top:6px">
       <div id="home-ads"></div>
@@ -1032,6 +1067,26 @@ async function viewHome() {
 
   const q = document.getElementById('home-q');
   mountAdsBanner('home-ads');
+  // 2911 Hustle promo: hero-adjacent, phase aware, hides when no live phase
+  // or when the settings call fails. Never shows a stale phase.
+  getCurrentComp().then((comp) => {
+    const slot = document.getElementById('hustle-promo');
+    if (!slot || !comp) return;
+    const phase = hustlePhase(comp);
+    const live = ['applications', 'voting', 'winner'].includes(phase.key);
+    if (!live) return;
+    const sub = phase.key === 'applications'
+      ? 'Applications are open. Tell Zambia your hustle.'
+      : phase.key === 'voting'
+        ? 'Voting is open. Watch your favourite business win.'
+        : 'Winner announced. See who took home K10,000.';
+    slot.innerHTML = `
+      <a class="promo-card" href="#/hustle" style="text-decoration:none;color:#fff;background:linear-gradient(135deg,#0B1F3B,#2563EB);display:flex;align-items:center;gap:14px;padding:18px">
+        <span style="color:var(--amber);flex:0 0 auto;width:34px;height:34px;display:flex">${icon('trophy')}</span>
+        <span class="promo-text" style="flex:1;min-width:0"><span style="display:block;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.85">What's Your Hustle?</span><h3 style="margin:2px 0">Win K10,000 to grow your business.</h3><p style="margin:0">${esc(sub)}</p></span>
+        ${icon('chevR')}
+      </a>`;
+  }).catch(() => {});
   // Rotating hero headline (deed demo): Find work / Hire help / Buy & sell.
   const rotEl = document.getElementById('hero-rot');
   if (rotEl) {
@@ -2927,8 +2982,9 @@ function businessCard(b) {
     ${b.logo ? `<img class="biz-logo" src="${b.logo}" alt="${esc(b.name)} logo">` : `<div class="biz-logo biz-logo-fallback">${icon('tag')}</div>`}
     <span class="biz-card-body">
       <b>${esc(b.name)}</b> ${bizBadge(b)}
+      ${b.trading_name && b.trading_name !== b.name ? `<span class="small muted" style="display:block">Trading as ${esc(b.trading_name)}</span>` : ''}
       ${b.tagline ? `<span class="small muted" style="display:block">${esc(b.tagline)}</span>` : ''}
-      <span class="small muted" style="display:block">${esc(b.category)} · ${esc(b.city)}${b.owner_rating ? ` · ⭐ ${Number(b.owner_rating).toFixed(1)} (${b.owner_reviews})` : ''}</span>
+      <span class="small muted" style="display:block">${esc(b.category)} · ${esc([b.province, b.city].filter(Boolean).join(' · '))}${b.owner_rating ? ` · ⭐ ${Number(b.owner_rating).toFixed(1)} (${b.owner_reviews})` : ''}</span>
       <span class="small" style="display:block">${b.product_count || 0} items for sale</span>
     </span>
   </a>`;
@@ -2941,16 +2997,37 @@ async function viewBusinesses() {
     <p class="page-sub">Local shops and formal businesses on 2911 Jobs. Verified shops have shown their registration documents.</p>
     ${currentUser ? `<a class="btn btn-primary" href="#/business/apply" style="margin-bottom:12px">${icon('plus')} Open a business storefront</a>
     <a class="btn btn-outline" href="#/business/mine" style="margin-bottom:12px">My businesses</a>` : ''}
-    <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="bz-q" type="search" placeholder="Search businesses" aria-label="Search businesses"></div>
+    <div class="searchbar" style="margin-bottom:10px">${icon('search')}<input id="bz-q" type="search" placeholder="Search businesses, products, or services" aria-label="Search businesses"></div>
+    <p class="small muted" style="margin:0 0 6px">Filter by location</p>
+    <div class="form-2col">
+      <div class="field"><label for="bz-province">Province</label><select id="bz-province"><option value="">All provinces</option></select></div>
+      <div class="field"><label for="bz-district">District</label><select id="bz-district" disabled><option value="">Choose a province first</option></select></div>
+    </div>
+    <div style="text-align:right" id="bz-clear"></div>
     <div class="chips" id="bz-chips">
       <button class="chip active" data-bzcat="">All</button>
       <button class="chip" data-bzfollow="1">⭐ Following</button>
       ${MARKET_CATEGORIES.map(c => `<button class="chip" data-bzcat="${esc(c)}">${esc(c)}</button>`).join('')}
     </div>
+    <div id="bz-count" class="small muted" style="margin-top:8px"></div>
     <div id="bz-results" style="margin-top:12px">${skeletonCards(2)}</div>
   </div></div>`;
   const results = document.getElementById('bz-results');
-  let cat = '', q = '', followOnly = false;
+  let cat = '', q = '', followOnly = false, prov = '', dist = '';
+  const provSel = document.getElementById('bz-province');
+  const distSel = document.getElementById('bz-district');
+  const locs = await getHustleLocations();
+  if (locs && provSel) {
+    provSel.innerHTML = '<option value="">All provinces</option>' + locs.map(p => `<option>${esc(p.name)}</option>`).join('');
+    const fillDist = (provName) => {
+      const p = (locs || []).find(x => x.name === provName);
+      if (!p) { distSel.innerHTML = '<option value="">Choose a province first</option>'; distSel.disabled = true; return; }
+      distSel.disabled = false;
+      distSel.innerHTML = '<option value="">All districts</option>' + p.districts.map(d => `<option>${esc(d.name)}</option>`).join('');
+    };
+    provSel.addEventListener('change', () => { prov = provSel.value; dist = ''; fillDist(prov); load(); });
+    distSel.addEventListener('change', () => { dist = distSel.value; load(); });
+  }
   async function load() {
     results.innerHTML = skeletonCards(2);
     try {
@@ -2958,12 +3035,26 @@ async function viewBusinesses() {
       if (cat) params.set('category', cat);
       if (q) params.set('q', q);
       if (followOnly) params.set('following', '1');
+      if (prov) params.set('province', prov);
+      if (dist) params.set('district', dist);
       const data = await api('/api/businesses?' + params.toString());
+      const anyFilter = cat || q || followOnly || prov || dist;
+      document.getElementById('bz-count').textContent = anyFilter ? (data.businesses.length === 1 ? '1 business' : data.businesses.length + ' businesses') : '';
+      document.getElementById('bz-clear').innerHTML = anyFilter ? `<button class="btn btn-ghost btn-sm" id="bz-clear-btn">Clear filters</button>` : '';
+      const clearBtn = document.getElementById('bz-clear-btn');
+      if (clearBtn) clearBtn.addEventListener('click', () => {
+        cat = ''; q = ''; followOnly = false; prov = ''; dist = '';
+        document.getElementById('bz-q').value = '';
+        if (provSel) provSel.value = '';
+        if (distSel) { distSel.value = ''; distSel.disabled = true; }
+        document.querySelectorAll('#bz-chips .chip').forEach(c => c.classList.toggle('active', c.dataset.bzcat === ''));
+        load();
+      });
       results.innerHTML = data.businesses.length
         ? data.businesses.map(businessCard).join('')
         : (followOnly
           ? emptyHtml('users', 'No businesses followed yet', 'Open a business and tap Follow. Everything you follow will live here, easy to find.')
-          : emptyHtml('tag', 'No businesses found', 'Try another search, or open the first storefront in this category.', currentUser ? `<a class="btn btn-sm btn-primary" href="#/business/apply">Open a storefront</a>` : ''));
+          : emptyHtml('tag', 'No businesses found', 'Try another search, or open the first storefront in this category.' + (prov || dist ? ' Try clearing the province or district filter.' : ''), currentUser ? `<a class="btn btn-sm btn-primary" href="#/business/apply">Open a storefront</a>` : ''));
     } catch (e) { results.innerHTML = errorHtml(e.message); }
   }
   let qt;
@@ -2996,6 +3087,24 @@ async function viewBusiness(slug) {
   try {
     const { business: b, products, jobs, reviews } = await api('/api/businesses/' + encodeURIComponent(slug));
     const isOwner = currentUser && currentUser.id === b.owner_id;
+    // Competition participation for this business (public states only).
+    let hustleEntry = null, hustleComp = null;
+    try {
+      hustleComp = await getCurrentComp();
+      if (hustleComp) {
+        const ed = await api('/api/hustle/competitions/' + hustleComp.id + '/entries');
+        hustleEntry = normEntries(ed).find(e => String(e.business_id) === String(b.id)) || null;
+      }
+    } catch (e) { hustleEntry = null; }
+    const galleryPhotos = (products || []).slice(0, 12).map(p => ({ img: p.cover_photo || (p.photos && p.photos[0] ? (typeof p.photos[0] === 'string' ? p.photos[0] : p.photos[0].image || '') : ''), product_id: p.id })).filter(g => g.img);
+    const services = hustleServicesList(b);
+    const socials = hustleSocialLinks(b);
+    const hours = hustleParseHours(b.hours);
+    const hasHours = b.hours || b.hours_text;
+    const todayKey = HUSTLE_DAY_KEYS[(new Date().getDay() + 6) % 7];
+    const waDigits = hustleWaDigits(b);
+    const waNumber = b.whatsapp || b.phone || '';
+    const websiteHost = (() => { try { return new URL(b.website).hostname.replace(/^www\./, ''); } catch (e) { return b.website || ''; } })();
     box.innerHTML = `
       ${b.cover ? `<img class="biz-cover" src="${b.cover}" alt="${esc(b.name)}">` : ''}
       <div class="card" style="margin-top:${b.cover ? '-30px' : '0'};position:relative;z-index:1">
@@ -3003,14 +3112,17 @@ async function viewBusiness(slug) {
           ${b.logo ? `<img class="biz-logo" src="${b.logo}" alt="${esc(b.name)} logo">` : `<div class="biz-logo biz-logo-fallback">${icon('tag')}</div>`}
           <div style="flex:1;min-width:0">
             <h1 class="page-title" style="font-size:22px;margin:0">${esc(b.name)}</h1>
-            <div style="margin:4px 0">${bizBadge(b)}</div>
+            ${b.trading_name && b.trading_name !== b.name ? `<p class="small muted" style="margin:2px 0">Trading as ${esc(b.trading_name)}</p>` : ''}
+            <div style="margin:4px 0">${bizBadge(b)}${b.business_type ? ` <span class="small muted">${esc(b.business_type)}${b.year_started ? ' · Since ' + esc(String(b.year_started)) : ''}</span>` : b.year_started ? ` <span class="small muted">Since ${esc(String(b.year_started))}</span>` : ''}</div>
             ${b.tagline ? `<p class="muted" style="margin:2px 0">${esc(b.tagline)}</p>` : ''}
-            <p class="small muted" style="margin:2px 0">${esc(b.category)} · ${esc(b.city)}${b.area ? ' · ' + esc(b.area) : ''}${b.owner_rating ? ` · ⭐ ${Number(b.owner_rating).toFixed(1)} from ${b.owner_reviews} reviews` : ''}</p>
+            <p class="small muted" style="margin:2px 0">${esc(b.category)} · ${esc(hustleLocLine(b))}${b.area ? ' · ' + esc(b.area) : ''}${b.owner_rating ? ` · ⭐ ${Number(b.owner_rating).toFixed(1)} from ${b.owner_reviews} reviews` : ''}</p>
           </div>
         </div>
         ${b.description ? `<p style="margin-top:12px;white-space:pre-wrap">${esc(b.description)}</p>` : ''}
+        ${services.length ? `<div style="margin-top:12px"><h4 style="margin:0 0 4px">What we offer</h4><ul style="margin:0;padding-left:18px" class="small">${services.map(s => `<li>${esc(s)}</li>`).join('')}</ul></div>` : ''}
         ${isOwner ? `<div class="btn-row" style="margin-top:12px"><a class="btn btn-outline" href="#/business/${b.id}/manage">${icon('edit')} Manage storefront</a></div>${adPromoHtml(b.active_ad)}` : `
         <div class="btn-row" style="margin-top:12px">
+          ${waDigits ? `<a class="btn btn-primary" href="https://wa.me/${waDigits}" target="_blank" rel="noopener" data-hustle-wa="${b.id}">${icon('whatsapp')} WhatsApp</a>` : ''}
           <a class="btn btn-outline" href="#/user/${b.owner_id}">${icon('message')} Message</a>
           ${currentUser ? `<button class="btn ${b.following ? 'btn-outline' : 'btn-primary'}" id="biz-follow">${b.following ? 'Following' : 'Follow'}</button>` : `<a class="btn btn-primary" href="#/login">Follow</a>`}
           <span class="small muted" id="biz-followers">${b.follower_count || 0} followers</span>
@@ -3019,8 +3131,10 @@ async function viewBusiness(slug) {
           <button class="btn btn-outline" data-share-business="${esc(b.slug)}" data-title="${esc(b.name)}" aria-label="Share this storefront">${icon('share')} Share storefront</button>
         </div>
       </div>
+      <div id="biz-hustle-strip"></div>
       <div class="biz-tabs" role="tablist">
         <button class="biz-tab active" data-btab="products">Products</button>
+        ${galleryPhotos.length ? `<button class="biz-tab" data-btab="gallery">Gallery</button>` : ''}
         <button class="biz-tab" data-btab="about">About</button>
         <button class="biz-tab" data-btab="reviews">Reviews (${(reviews || []).length})</button>
       </div>
@@ -3028,13 +3142,22 @@ async function viewBusiness(slug) {
         ${products.length ? `<div class="product-grid">${products.map(productCard).join('')}</div>` : '<p class="small muted">Nothing listed right now.</p>'}
         ${jobs.length ? `<div class="section-title"><span>Jobs from this business</span></div>${jobs.map(jobCard).join('')}` : ''}
       </div>
+      ${galleryPhotos.length ? `<div data-bpanel="gallery" hidden>
+        <img class="pd-main" id="biz-gallery-main" src="${esc(galleryPhotos[0].img)}" alt="Storefront gallery photo" style="width:100%;height:300px;object-fit:cover;border-radius:20px">
+        <div class="pd-thumbs" style="display:flex;gap:8px;margin-top:8px;overflow-x:auto">${galleryPhotos.map(g => `<img src="${esc(g.img)}" alt="Gallery photo" data-biz-thumb="${esc(g.img)}" style="width:64px;height:64px;border-radius:12px;object-fit:cover;cursor:pointer">`).join('')}</div>
+        <p class="small muted" style="margin-top:6px">${galleryPhotos.length} photo${galleryPhotos.length === 1 ? '' : 's'}${isOwner ? ' · <a href="#/business/' + b.id + '/manage">Add photos</a>' : ''}</p>
+      </div>` : ''}
       <div data-bpanel="about" hidden>
         <div class="card">
           <h3 style="margin-top:0">Contact and hours</h3>
-          ${b.address ? `<p class="small icon-line">${icon('pin')} ${esc(b.address)}, ${esc(b.city)}</p>` : ''}
-          ${b.hours_text ? `<p class="small icon-line">${icon('clock')} ${esc(b.hours_text)}</p>` : ''}
+          ${b.address ? `<p class="small icon-line">${icon('pin')} ${esc(b.address)}, ${esc(hustleLocLine(b))}</p>` : ''}
+          ${hasHours ? (b.hours ? `<div style="margin:8px 0"><b class="small">Opening hours</b>${HUSTLE_DAY_KEYS.map((k, i) => `<div class="split small" style="padding:3px 0"><span>${HUSTLE_DAYS[i]}${k === todayKey ? ' <span class="presence-dot online"></span>' : ''}</span><b>${hours[k].closed ? 'Closed' : esc(hours[k].open) + ' - ' + esc(hours[k].close)}</b></div>`).join('')}${b.hours_text ? `<p class="small muted" style="margin:6px 0 0">${esc(b.hours_text)}</p>` : ''}</div>` : `<p class="small icon-line">${icon('clock')} ${esc(b.hours_text)}</p>`) : ''}
           ${b.phone ? `<p class="small icon-line">${icon('phone')} <a href="tel:${esc(b.phone.replace(/\D/g, ''))}">${esc(b.phone)}</a></p>` : ''}
+          ${b.whatsapp && b.whatsapp !== b.phone ? `<p class="small icon-line">${icon('whatsapp')} WhatsApp: <a href="https://wa.me/${esc(hustleWaDigits(b))}" target="_blank" rel="noopener">${esc(b.whatsapp)}</a></p>` : ''}
           ${b.email ? `<p class="small icon-line">${icon('send')} <a href="mailto:${esc(b.email)}">${esc(b.email)}</a></p>` : ''}
+          ${b.website ? `<p class="small icon-line">${icon('share')} <a href="${esc(b.website)}" target="_blank" rel="noopener">${esc(websiteHost)}</a></p>` : ''}
+          ${socials.length ? `<div style="margin:8px 0;display:flex;gap:8px;flex-wrap:wrap">${socials.map(s => `<a class="chip" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(String(s.platform).charAt(0).toUpperCase() + String(s.platform).slice(1))}</a>`).join('')}</div>` : ''}
+          ${services.length ? `<div style="margin-top:10px"><b class="small">Products and services</b><ul style="margin:4px 0 0;padding-left:18px" class="small">${services.map(s => `<li>${esc(s)}</li>`).join('')}</ul></div>` : ''}
           <p class="small muted">Run by <a href="#/user/${b.owner_id}">${esc(b.owner_name)}</a></p>
         </div>
       </div>
@@ -3055,6 +3178,59 @@ async function viewBusiness(slug) {
       box.querySelectorAll('[data-btab]').forEach(x => x.classList.toggle('active', x === btn));
       box.querySelectorAll('[data-bpanel]').forEach(pn => { pn.hidden = pn.dataset.bpanel !== btn.dataset.btab; });
     }));
+    box.querySelectorAll('[data-biz-thumb]').forEach(t => t.addEventListener('click', () => {
+      const main = document.getElementById('biz-gallery-main');
+      if (main) main.src = t.dataset.bizThumb;
+    }));
+    // Competition strip (public states only) and the owner opt-in card.
+    const stripSlot = document.getElementById('biz-hustle-strip');
+    if (stripSlot) {
+      if (hustleEntry) {
+        const ph = hustlePhase(hustleComp);
+        const st = hustleEntry.status || '';
+        let badge = 'Application under review', text = 'This business has applied for What\'s Your Hustle? The pitch goes live for voting once our team approves it.', btn = '', amber = false;
+        if (st === 'approved' && ph.key === 'voting') { badge = 'Voting open'; text = 'This business is competing for K10,000. Watch the pitch and vote.'; btn = `<a class="btn btn-sm btn-primary" href="#/hustle/entry/${hustleEntry.application_id}">View pitch and vote</a>`; }
+        else if (st === 'approved') { badge = 'Approved'; text = 'This business is in What\'s Your Hustle? Voting opens soon.'; btn = `<a class="btn btn-sm btn-outline" href="#/hustle">See the competition</a>`; }
+        else if (ph.key === 'frozen') { badge = 'Results under verification'; text = 'Voting has closed. Final results follow verification.'; btn = `<a class="btn btn-sm btn-outline" href="#/hustle/leaderboard">See the leaderboard</a>`; }
+        else if (ph.key === 'closed' || ph.key === 'winner') {
+          if (hustleComp && String(hustleComp.winner_application_id) === String(hustleEntry.application_id)) {
+            badge = 'Winner'; text = 'CONGRATULATIONS TO OUR K10,000 WINNER! This business won What\'s Your Hustle?'; btn = `<a class="btn btn-sm btn-primary" href="#/hustle/entry/${hustleEntry.application_id}">See the winning pitch</a>`; amber = true;
+          } else { badge = 'Voting closed'; text = 'Voting has closed. Final results follow verification.'; btn = `<a class="btn btn-sm btn-outline" href="#/hustle/leaderboard">See the leaderboard</a>`; }
+        }
+        else if (st === 'disqualified') { badge = 'Disqualified'; text = 'This entry was disqualified.'; btn = `<a class="btn btn-sm btn-outline" href="#/hustle/leaderboard">See the leaderboard</a>`; }
+        stripSlot.innerHTML = `<div class="card hustle-strip" style="${amber ? 'background:var(--amber-tint);' : ''}margin-top:12px">
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <span style="color:var(--amber);width:28px;height:28px;flex:0 0 28px;display:flex">${icon('trophy')}</span>
+            <span style="flex:1;min-width:0"><span class="badge hustle-phase ${amber ? 'hustle-phase-winner' : 'hustle-phase-open'}">${esc(badge)}</span>
+            <p class="small" style="margin:6px 0">${esc(text)}</p>
+            ${btn}
+            ${isOwner ? `<p class="small muted" style="margin:8px 0 0">Your application is ${esc(hustleAppStatusLabel(st))}. Manage it from your <a href="#/business/${b.id}/manage">dashboard</a>.</p>` : ''}</span>
+          </div></div>`;
+      } else if (isOwner) {
+        stripSlot.innerHTML = `<div class="card" style="margin-top:12px">
+          <h3 style="margin-top:0">Enter What's Your Hustle?</h3>
+          <p class="small" style="margin:4px 0 10px">Compete for K10,000 with your storefront.</p>
+          <div id="biz-optin-body"><button class="btn btn-primary" id="biz-optin-btn">Enter What's Your Hustle?</button></div>
+        </div>`;
+        document.getElementById('biz-optin-btn').addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          btn.textContent = 'Checking…';
+          try {
+            const r = await api('/api/hustle/businesses/' + b.id + '/opt-in', { method: 'POST', body: '{}' });
+            const missing = r.missing || r.missing_fields || [];
+            const verifiedBiz = r.verified === true || b.verified || b.verification_status === 'verified';
+            const body = document.getElementById('biz-optin-body');
+            if (r.complete && verifiedBiz) { location.hash = '#/hustle/apply'; return; }
+            if (missing.length) {
+              body.innerHTML = `<p class="small"><b>Finish onboarding to enter.</b> ${missing.length} thing${missing.length === 1 ? '' : 's'} left: ${esc(hustleMissingLabels(missing).slice(0, 3).join(', '))}${missing.length > 3 ? ', and more' : ''}.</p><a class="btn btn-primary" href="#/business/${b.id}/complete">Finish onboarding</a>`;
+              return;
+            }
+            body.innerHTML = `<p class="small"><b>Finish verification to enter.</b> The competition is open to verified businesses only.</p><a class="btn btn-outline" href="#/business/${b.id}/manage">Go to verification</a>`;
+          } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = "Enter What's Your Hustle?"; }
+        });
+      }
+    }
     if (isOwner) wireAdPromo(box, 'business', b.id, () => viewBusiness(slug));
     const followBtn = document.getElementById('biz-follow');
     if (followBtn) followBtn.addEventListener('click', async () => {
@@ -3074,6 +3250,13 @@ async function viewBusiness(slug) {
   }
 }
 
+/** The API stores business types as codes (sole_proprietor, ...); older
+ * rows may hold the display words, so map those to codes on load. */
+function hustleBusinessTypeCode(v) {
+  const map = { 'Sole proprietor': 'sole_proprietor', 'Business name': 'sole_proprietor', 'Limited company': 'limited_company', 'Partnership': 'partnership', 'Cooperative': 'cooperative', 'Other': 'other' };
+  return map[v] || v || '';
+}
+
 function businessFormHtml(prefill, isEdit) {
   const p = prefill || {};
   return `
@@ -3082,6 +3265,25 @@ function businessFormHtml(prefill, isEdit) {
       <input id="bf-name" maxlength="80" required value="${esc(p.name || '')}" placeholder="e.g. Kamwala Phone Repairs"></div>
     <div class="field"><label for="bf-tagline">Tagline</label>
       <input id="bf-tagline" maxlength="120" value="${esc(p.tagline || '')}" placeholder="One short line about the business"></div>
+    <div class="field"><label for="bf-trading">Trading name</label>
+      <input id="bf-trading" maxlength="80" value="${esc(p.trading_name || '')}" placeholder="The name customers know, if different from the registered name">
+      <div class="hint">Leave blank if the trading name is the same as the business name.</div></div>
+    <div class="form-2col">
+      <div class="field"><label for="bf-btype">Business type *</label>
+        <select id="bf-btype" required>
+          <option value="">Choose a type</option>
+          ${[['sole_proprietor', 'Sole proprietor'], ['limited_company', 'Limited company'], ['partnership', 'Partnership'], ['cooperative', 'Cooperative'], ['other', 'Other']].map(([v, l]) => `<option value="${v}" ${hustleBusinessTypeCode(p.business_type) === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select></div>
+      <div class="field"><label for="bf-year">Year started</label>
+        <input id="bf-year" type="number" min="1900" max="${new Date().getFullYear()}" value="${esc(p.year_started != null ? String(p.year_started) : '')}" placeholder="e.g. 2021">
+        <div class="hint">The year the business started trading, not the PACRA registration year if they differ.</div></div>
+    </div>
+    <div class="form-2col">
+      <div class="field"><label for="bf-province">Province *</label>
+        <select id="bf-province" required><option value="">Loading…</option></select></div>
+      <div class="field"><label for="bf-district">District *</label>
+        <select id="bf-district" required disabled><option value="">Choose a province first</option></select></div>
+    </div>
     <div class="form-2col">
       <div class="field"><label for="bf-category">Category *</label>
         <select id="bf-category" required>${MARKET_CATEGORIES.map(c => `<option ${p.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
@@ -3090,6 +3292,9 @@ function businessFormHtml(prefill, isEdit) {
     </div>
     <div class="field"><label for="bf-desc">About the business *</label>
       <textarea id="bf-desc" rows="4" maxlength="2000" required placeholder="What you sell or do, how long you have traded, what makes you different">${esc(p.description || '')}</textarea></div>
+    <div class="field"><label for="bf-services">Products and services offered</label>
+      <textarea id="bf-services" rows="3" maxlength="1000" placeholder="List what you sell or do, one per line. e.g. Phone repairs, Screen replacement, Accessories">${esc(hustleServicesText(p))}</textarea>
+      <div class="hint">One per line. These words are searchable on the Businesses page.</div></div>
     <div class="form-2col">
       <div class="field"><label for="bf-area">Area</label>
         <input id="bf-area" maxlength="80" value="${esc(p.area || '')}" placeholder="e.g. Kamwala"></div>
@@ -3099,9 +3304,26 @@ function businessFormHtml(prefill, isEdit) {
     <div class="form-2col">
       <div class="field"><label for="bf-phone">Phone</label>
         <input id="bf-phone" maxlength="30" value="${esc(p.phone || '')}" placeholder="09..."></div>
+      <div class="field"><label for="bf-whatsapp">WhatsApp number</label>
+        <input id="bf-whatsapp" maxlength="30" value="${esc(p.whatsapp || '')}" placeholder="09... (WhatsApp number, if different from Phone)">
+        <div class="hint">This is the number the WhatsApp button on your storefront uses. Leave blank to use your Phone number.</div></div>
+    </div>
+    <div class="form-2col">
       <div class="field"><label for="bf-email">Email</label>
         <input id="bf-email" type="email" maxlength="120" value="${esc(p.email || '')}" placeholder="shop@example.com"></div>
+      <div class="field"><label for="bf-website">Website</label>
+        <input id="bf-website" type="url" maxlength="200" value="${esc(p.website || '')}" placeholder="https://...">
+        <div class="hint">Your website, if you have one.</div></div>
     </div>
+    <div class="field"><label>Social links</label>
+      <div class="form-2col" style="margin-bottom:0">
+        <div class="field"><label for="bf-soc-fb">Facebook</label>
+          <input id="bf-soc-fb" type="url" maxlength="200" value="${esc(hustleSocialUrl(p, 'facebook'))}" placeholder="Link to your page"></div>
+        <div class="field"><label for="bf-soc-ig">Instagram</label>
+          <input id="bf-soc-ig" type="url" maxlength="200" value="${esc(hustleSocialUrl(p, 'instagram'))}" placeholder="Link to your page"></div>
+        <div class="field"><label for="bf-soc-tt">TikTok</label>
+          <input id="bf-soc-tt" type="url" maxlength="200" value="${esc(hustleSocialUrl(p, 'tiktok'))}" placeholder="Link to your page"></div>
+      </div></div>
     <div class="form-2col">
       <div class="field"><label for="bf-pacra">PACRA registration number *</label>
         <input id="bf-pacra" maxlength="40" required value="${esc(p.pacra_number || '')}" placeholder="As printed on the certificate"></div>
@@ -3110,11 +3332,17 @@ function businessFormHtml(prefill, isEdit) {
     </div>
     <div class="field"><label for="bf-ownername">Owner / director full legal name *</label>
       <input id="bf-ownername" maxlength="120" required value="${esc(p.owner_legal_name || '')}" placeholder="As it appears on the PACRA record"></div>
-    ${isEdit ? '' : `<div class="field"><label for="bf-cert">PACRA certificate photo *</label>
-      <input id="bf-cert" type="file" accept="image/*">
-      <div class="hint" style="margin-top:6px">A clear photo or scan of your PACRA registration certificate. Our team checks it against your numbers for the Verified badge.</div></div>`}
-    <div class="field"><label for="bf-hours">Opening hours</label>
-      <input id="bf-hours" maxlength="200" value="${esc(p.hours_text || '')}" placeholder="e.g. Mon to Sat, 8:00 to 17:30"></div>
+    ${isEdit ? '' : `<div class="field"><label for="bf-cert">PACRA certificate *</label>
+      <input id="bf-cert" type="file" accept="application/pdf, image/jpeg, image/png, image/webp">
+      <div class="hint" style="margin-top:6px">PDF, JPG, or PNG, up to 6 MB for PDF. A clear photo or scan of your PACRA registration certificate. Only you and the 2911 Jobs team can see this document.</div>
+      <div id="bf-cert-row" style="margin-top:8px"></div></div>`}
+    <div class="field"><label>Opening hours</label>
+      <div class="hustle-hours-grid" id="bf-hours-grid">
+        ${hustleHoursRows(p)}
+      </div>
+      <div class="hint">Default hours are 08:00 to 17:30, Sunday closed. Tick Closed for a day instead of setting times.</div></div>
+    <div class="field"><label for="bf-hours">Hours note (optional)</label>
+      <input id="bf-hours" maxlength="200" value="${esc(p.hours_text || '')}" placeholder="e.g. Closed on public holidays"></div>
     <div class="form-2col">
       <div class="field"><label for="bf-logo">Logo</label>
         <input id="bf-logo" type="file" accept="image/*">
@@ -3123,8 +3351,13 @@ function businessFormHtml(prefill, isEdit) {
         <input id="bf-cover" type="file" accept="image/*">
         ${p.cover ? `<img src="${p.cover}" alt="Current cover" style="width:100%;height:56px;border-radius:14px;object-fit:cover;margin-top:6px">` : ''}</div>
     </div>
-    <button class="btn btn-primary btn-block" type="submit">${isEdit ? 'Save changes' : 'Submit for approval'}</button>
-    ${isEdit ? '' : '<p class="small muted" style="margin-top:8px">An admin reviews every new storefront before it goes public. Your PACRA certificate and numbers are checked by our team for the Verified badge.</p>'}
+    ${isEdit
+      ? `<button class="btn btn-primary btn-block" type="submit">Save changes</button>`
+      : `<div class="form-actions" style="position:static;padding:0;margin-top:12px">
+          <button class="btn btn-outline" type="button" id="bf-save-draft">Save draft</button>
+          <button class="btn btn-primary" type="submit" style="flex:1">Submit for approval</button>
+        </div>`}
+    ${isEdit ? '' : '<p class="small muted" style="margin-top:8px">An admin reviews every new storefront before it goes public. Your PACRA certificate and numbers are checked by our team for the Verified badge. Your PACRA certificate and numbers are never shown publicly.</p>'}
   </form>`;
 }
 
@@ -3143,24 +3376,131 @@ async function wireBusinessForm(form, existing) {
   };
   bind('#bf-logo', '_logo', fileToLogoImage);
   bind('#bf-cover', '_cover', fileToDoc);
-  bind('#bf-cert', '_cert', fileToDoc);
+  // PACRA certificate: PDF or image, with a file row (name, size, preview)
+  // shown before submit. The file is not uploaded until submit or draft save.
+  const certInput = form.querySelector('#bf-cert');
+  if (certInput) certInput.addEventListener('change', async () => {
+    const f = (certInput.files || [])[0];
+    const row = document.getElementById('bf-cert-row');
+    if (!f) { if (row) row.innerHTML = ''; form._cert = undefined; return; }
+    try {
+      form._cert = await fileToPdfOrDoc(f);
+      form._certName = f.name;
+      if (row) {
+        const size = f.size > 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : Math.round(f.size / 1024) + ' KB';
+        row.innerHTML = `<div class="card" style="display:flex;gap:10px;align-items:center;padding:10px">
+          ${f.type.startsWith('image/') ? `<img src="${esc(form._cert)}" alt="Certificate preview" style="width:64px;height:64px;border-radius:12px;object-fit:cover">` : `<span style="width:64px;height:64px;border-radius:12px;background:var(--fill);display:flex;align-items:center;justify-content:center;color:var(--error)">${icon('clipboard')}</span>`}
+          <span style="flex:1;min-width:0"><b>${esc(f.name)}</b><span class="small muted" style="display:block">${size}</span></span>
+          <button class="btn btn-ghost btn-sm" type="button" id="bf-cert-remove">Remove</button></div>`;
+        document.getElementById('bf-cert-remove').addEventListener('click', () => {
+          certInput.value = '';
+          form._cert = undefined;
+          row.innerHTML = '';
+        });
+      }
+      toast('Certificate ready.');
+    } catch (e) {
+      toast(e.message, true);
+      certInput.value = '';
+      form._cert = undefined;
+    }
+  });
+  // Hours grid: Closed disables the time inputs for that day.
+  form.querySelectorAll('[data-hday]').forEach(rowEl => {
+    const cb = rowEl.querySelector('[data-hclosed]');
+    if (cb) cb.addEventListener('change', () => {
+      rowEl.querySelector('[data-hopen]').disabled = cb.checked;
+      rowEl.querySelector('[data-hclose]').disabled = cb.checked;
+    });
+  });
+  // Province, district, town from the Experiences location hierarchy.
+  // If the endpoint fails, both fall back to free-text inputs (same ids).
+  const provSel = form.querySelector('#bf-province');
+  const distSel = form.querySelector('#bf-district');
+  const townSel = form.querySelector('#bf-city');
+  const prefill = existing || {};
+  const locs = await getHustleLocations();
+  if (provSel && locs) {
+    provSel.innerHTML = '<option value="">Choose a province</option>' + locs.map(p => `<option ${prefill.province === p.name ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+    const fillDistricts = (provName, keep) => {
+      const p = locs.find(x => x.name === provName);
+      if (!p || !p.districts.length) {
+        const input = document.createElement('input');
+        input.id = 'bf-district';
+        input.maxLength = 80;
+        input.placeholder = 'District';
+        input.required = true;
+        input.value = keep || prefill.district || '';
+        distSel.replaceWith(input);
+        return;
+      }
+      distSel.disabled = false;
+      distSel.innerHTML = '<option value="">Choose a district</option>' + p.districts.map(d => `<option ${prefill.district === d.name ? 'selected' : ''}>${esc(d.name)}</option>`).join('');
+    };
+    if (prefill.province) fillDistricts(prefill.province, prefill.district);
+    provSel.addEventListener('change', () => {
+      fillDistricts(provSel.value, '');
+      fillTowns();
+    });
+    const fillTowns = () => {
+      if (!townSel) return;
+      const p = locs.find(x => x.name === provSel.value);
+      const distEl = document.getElementById('bf-district');
+      const d = p && distEl ? p.districts.find(x => x.name === distEl.value) : null;
+      const towns = d ? d.towns : [];
+      const current = prefill.city || '';
+      townSel.innerHTML = (towns.length ? `<optgroup label="${esc(d.name)}">${towns.map(t => `<option ${current === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</optgroup>` : '')
+        + CITIES.map(c => `<option ${current === c && !towns.includes(c) ? 'selected' : ''}>${esc(c)}</option>`).join('');
+    };
+    distSel.addEventListener('change', fillTowns);
+    if (prefill.province) fillTowns();
+  } else if (provSel) {
+    const toText = (el, val, label) => {
+      const input = document.createElement('input');
+      input.id = el.id;
+      input.maxLength = 80;
+      input.placeholder = label;
+      input.required = true;
+      input.value = val || '';
+      el.replaceWith(input);
+    };
+    toText(provSel, prefill.province, 'Province');
+    toText(distSel, prefill.district, 'District');
+  }
 }
 
 function collectBusinessData(form) {
+  const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const social = [];
+  const fb = val('bf-soc-fb'), ig = val('bf-soc-ig'), tt = val('bf-soc-tt');
+  if (fb) social.push({ platform: 'facebook', url: fb });
+  if (ig) social.push({ platform: 'instagram', url: ig });
+  if (tt) social.push({ platform: 'tiktok', url: tt });
+  const btype = val('bf-btype');
   const data = {
-    name: document.getElementById('bf-name').value.trim(),
-    tagline: document.getElementById('bf-tagline').value.trim(),
-    category: document.getElementById('bf-category').value,
-    city: document.getElementById('bf-city').value,
-    description: document.getElementById('bf-desc').value.trim(),
-    area: document.getElementById('bf-area').value.trim(),
-    address: document.getElementById('bf-address').value.trim(),
-    phone: document.getElementById('bf-phone').value.trim(),
-    email: document.getElementById('bf-email').value.trim(),
-    hours_text: document.getElementById('bf-hours').value.trim(),
-    pacra_number: document.getElementById('bf-pacra').value.trim(),
-    tpin: document.getElementById('bf-tpin').value.trim(),
-    owner_legal_name: document.getElementById('bf-ownername').value.trim(),
+    name: val('bf-name'),
+    trading_name: val('bf-trading'),
+    tagline: val('bf-tagline'),
+    category: val('bf-category'),
+    business_type: btype,
+    year_started: val('bf-year') ? Number(val('bf-year')) : '',
+    province: val('bf-province'),
+    district: val('bf-district'),
+    city: val('bf-city'),
+    description: val('bf-desc'),
+    services_text: val('bf-services'),
+    area: val('bf-area'),
+    address: val('bf-address'),
+    phone: val('bf-phone'),
+    whatsapp: val('bf-whatsapp'),
+    email: val('bf-email'),
+    website: val('bf-website'),
+    social_links: social,
+    hours_json: hustleCollectHours(form),
+    hours_text: val('bf-hours'),
+    pacra_number: val('bf-pacra'),
+    tpin: val('bf-tpin'),
+    owner_legal_name: val('bf-ownername'),
   };
   if (form._cert !== undefined) data.certificate = form._cert;
   if (form._logo !== undefined) data.logo = form._logo;
@@ -3168,23 +3508,138 @@ function collectBusinessData(form) {
   return data;
 }
 
+/** Registration validation, UISpec 3.4. Shows .ferr under the first bad
+ * field, scrolls to it, and toasts the first problem. */
+function validateBusinessForm(form, isEdit) {
+  const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  form.querySelectorAll('.field-error').forEach(el => el.remove());
+  form.querySelectorAll('.invalid').forEach(el => el.classList.remove('invalid'));
+  let firstBad = null, firstMsg = '';
+  const fail = (id, msg) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.add('invalid');
+      const wrap = el.closest('.field') || el.parentElement;
+      const ferr = document.createElement('div');
+      ferr.className = 'field-error';
+      ferr.textContent = msg;
+      wrap.appendChild(ferr);
+    }
+    if (!firstBad) { firstBad = el; firstMsg = msg; }
+  };
+  const plausiblePhone = (v) => {
+    const digits = v.replace(/\D/g, '');
+    return digits.length >= 9 && digits.length <= 13;
+  };
+  const isUrl = (v) => /^https:\/\//.test(v);
+  if (val('bf-name').length < 3) fail('bf-name', 'Business name needs at least 3 characters.');
+  if (!val('bf-category')) fail('bf-category', 'Choose a category.');
+  if (!val('bf-btype')) fail('bf-btype', 'Choose a business type.');
+  const year = val('bf-year');
+  if (year && (!/^\d{4}$/.test(year) || Number(year) < 1900 || Number(year) > new Date().getFullYear())) fail('bf-year', 'Year started must be a year between 1900 and ' + new Date().getFullYear() + '.');
+  if (val('bf-desc').length < 10) fail('bf-desc', 'Tell customers what you do, in at least 10 characters.');
+  if (!val('bf-province')) fail('bf-province', 'Choose a province.');
+  if (!val('bf-district')) fail('bf-district', 'Choose a district, or type it in.');
+  if (!val('bf-city')) fail('bf-city', 'Choose a town.');
+  if (val('bf-address').length < 5) fail('bf-address', 'Street address needs at least 5 characters.');
+  if (val('bf-phone') && !plausiblePhone(val('bf-phone'))) fail('bf-phone', 'That phone number does not look right. Use a Zambian mobile number, e.g. 09...');
+  if (val('bf-whatsapp') && !plausiblePhone(val('bf-whatsapp'))) fail('bf-whatsapp', 'That phone number does not look right. Use a Zambian mobile number, e.g. 09...');
+  if (val('bf-email') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val('bf-email'))) fail('bf-email', 'That email address does not look right.');
+  if (val('bf-website') && !isUrl(val('bf-website'))) fail('bf-website', 'That link does not look right. Use a full link starting with https://');
+  ['bf-soc-fb', 'bf-soc-ig', 'bf-soc-tt'].forEach(id => { if (val(id) && !isUrl(val(id))) fail(id, 'That link does not look right. Use a full link starting with https://'); });
+  if (val('bf-pacra').length < 5) fail('bf-pacra', 'PACRA registration number needs at least 5 characters.');
+  if (!/^\d{10}$/.test(val('bf-tpin'))) fail('bf-tpin', 'TPIN must be exactly 10 digits.');
+  if (val('bf-ownername').length < 5) fail('bf-ownername', 'Owner or director full legal name needs at least 5 characters.');
+  if (!isEdit && form._cert === undefined) fail('bf-cert', 'Add your PACRA certificate. A photo or scan, PDF, JPG, or PNG.');
+  // Hours: an open day needs both times, and close must be after open.
+  let hoursBad = null;
+  form.querySelectorAll('[data-hday]').forEach(row => {
+    const day = row.dataset.hday;
+    const closed = row.querySelector('[data-hclosed]').checked;
+    const open = row.querySelector('[data-hopen]').value;
+    const close = row.querySelector('[data-hclose]').value;
+    if (!closed && (!open || !close)) hoursBad = 'Set an opening and closing time, or tick Closed for ' + day + '.';
+    else if (!closed && open && close && close <= open) hoursBad = 'Closing time must be after opening time on ' + day + '.';
+  });
+  if (hoursBad && !firstBad) { firstMsg = hoursBad; toast(hoursBad, true); return false; }
+  if (firstBad) {
+    firstBad.scrollIntoView({ block: 'center' });
+    toast('Check the highlighted fields, then submit again.', true);
+    return false;
+  }
+  return true;
+}
+
 async function viewBusinessApply() {
   if (!requireAuth('#/business/apply')) return;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading…')}</div></div>`;
+  let mine = [];
+  try { mine = (await api('/api/businesses/mine')).businesses || []; } catch (e) { mine = []; }
+  if (mine.length >= 3) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('tag', 'You already have 3 storefronts', 'You can run up to 3 business storefronts. Manage one below, or close one first.', `<a class="btn btn-sm btn-primary" href="#/business/mine">My businesses</a>`)}</div></div>`;
+    return;
+  }
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem('pw_biz_draft') || 'null'); } catch (e) { draft = null; }
+  if (draft && draft.saved_at && Date.now() - draft.saved_at > 90 * 86400 * 1000) { draft = null; localStorage.removeItem('pw_biz_draft'); }
   app.innerHTML = `
   <div class="view"><div class="page">
+    <a class="small" href="#/businesses">Back to Businesses</a>
     <h1 class="page-title">Open a business storefront</h1>
-    <p class="page-sub">Your own shop page on 2911 Jobs: logo, hours, contact, and your catalogue in one link.</p>
-    ${businessFormHtml({ city: currentUser.city }, false)}
+    <p class="page-sub">Your own shop page on 2911 Jobs: logo, hours, contact, and your catalogue in one link. Verified businesses can also enter <a href="#/hustle">What's Your Hustle?</a> and win K10,000.</p>
+    ${draft ? `<div class="card" style="background:var(--amber-tint);margin-bottom:12px" id="biz-draft-banner">
+      <p class="small" style="margin:0 0 10px">You have a saved draft from ${esc(fmtDate(new Date(draft.saved_at).toISOString()))}.</p>
+      <div class="btn-row"><button class="btn btn-primary btn-sm" id="biz-resume-draft">Resume draft</button><button class="btn btn-ghost btn-sm" id="biz-fresh-draft">Start fresh</button></div>
+    </div>` : ''}
+    ${businessFormHtml(draft ? draft.data : { city: currentUser.city }, false)}
   </div></div>`;
   const form = document.getElementById('business-form');
-  wireBusinessForm(form, null);
+  wireBusinessForm(form, draft ? draft.data : null);
+  const applyDraftToForm = (d) => {
+    if (!d) return;
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+    set('bf-name', d.name); set('bf-trading', d.trading_name); set('bf-tagline', d.tagline);
+    set('bf-btype', hustleBusinessTypeCode(d.business_type));
+    set('bf-year', d.year_started); set('bf-province', d.province); set('bf-district', d.district);
+    set('bf-category', d.category); set('bf-city', d.city); set('bf-desc', d.description);
+    set('bf-services', d.services_text || d.products_services); set('bf-area', d.area); set('bf-address', d.address);
+    set('bf-phone', d.phone); set('bf-whatsapp', d.whatsapp); set('bf-email', d.email);
+    set('bf-website', d.website); set('bf-hours', d.hours_text);
+    set('bf-pacra', d.pacra_number); set('bf-tpin', d.tpin); set('bf-ownername', d.owner_legal_name);
+    const social = Array.isArray(d.social_links) ? d.social_links : [];
+    social.forEach(s => set('bf-soc-' + ({ facebook: 'fb', instagram: 'ig', tiktok: 'tt' }[s.platform] || ''), s.url));
+    if (d.certificate) { form._cert = d.certificate; const row = document.getElementById('bf-cert-row'); if (row) row.innerHTML = `<p class="small muted">Certificate saved with the draft.</p>`; }
+    if (d.logo) form._logo = d.logo;
+    if (d.cover) form._cover = d.cover;
+  };
+  const resumeBtn = document.getElementById('biz-resume-draft');
+  if (resumeBtn) resumeBtn.addEventListener('click', () => { applyDraftToForm(draft.data); document.getElementById('biz-draft-banner').remove(); toast('Draft loaded.'); });
+  const freshBtn = document.getElementById('biz-fresh-draft');
+  if (freshBtn) freshBtn.addEventListener('click', () => {
+    if (!confirm('Discard this draft? This cannot be undone.')) return;
+    localStorage.removeItem('pw_biz_draft');
+    document.getElementById('biz-draft-banner').remove();
+    form.reset();
+  });
+  const saveDraftBtn = document.getElementById('bf-save-draft');
+  if (saveDraftBtn) saveDraftBtn.addEventListener('click', () => {
+    try {
+      const data = collectBusinessData(form);
+      localStorage.setItem('pw_biz_draft', JSON.stringify({ data, saved_at: Date.now() }));
+      toast('Draft saved. Come back any time to finish it.');
+    } catch (e) { toast('Draft could not be saved on this device (the certificate may be too large).', true); }
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (!validateBusinessForm(form, false)) return;
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
     try {
       const { id } = await api('/api/businesses', { method: 'POST', body: JSON.stringify(collectBusinessData(form)) });
+      try { localStorage.removeItem('pw_biz_draft'); } catch (e2) {}
       toast('Application sent. Your storefront goes public after admin approval.');
       location.hash = '#/business/' + id + '/manage';
-    } catch (e2) { toast(e2.message, true); }
+    } catch (e2) { toast(e2.message, true); btn.disabled = false; }
   });
 }
 
@@ -3204,11 +3659,37 @@ async function viewMyBusinesses() {
       <div class="card" style="display:flex;gap:12px;align-items:center">
         ${b.logo ? `<img class="biz-logo" src="${b.logo}" alt="">` : `<div class="biz-logo biz-logo-fallback">${icon('tag')}</div>`}
         <span style="flex:1;min-width:0"><b>${esc(b.name)}</b> ${bizBadge(b)}
-          <span class="small muted" style="display:block">Status: ${esc(b.status)} · ${esc(b.city)}</span></span>
+          <span class="small muted" style="display:block">Status: ${esc(b.status)} · ${esc(b.city)}</span>
+          <span class="small" style="display:block" data-mybiz-hustle="${b.id}"></span>
+          <span class="small muted" style="display:block" data-mybiz-views="${b.id}"></span></span>
         <a class="btn btn-sm btn-outline" href="#/business/${b.id}/manage">Manage</a>
         ${b.status === 'active' ? `<a class="btn btn-sm btn-outline" href="#/business/${esc(b.slug)}">View</a>` : ''}
       </div>`).join('')
       : emptyHtml('tag', 'No storefronts yet', 'Open a storefront to give your business its own page.', `<a class="btn btn-sm btn-primary" href="#/business/apply">Open a storefront</a>`);
+    // Competition line and 30-day views, from real data only.
+    api('/api/hustle/applications/mine').then((d) => {
+      const apps = d.applications || [];
+      document.querySelectorAll('[data-mybiz-hustle]').forEach(slot => {
+        const a = apps.find(x => String(x.business_id) === slot.dataset.mybizHustle);
+        if (!a) return;
+        slot.innerHTML = `${hustleAppBadge(a.status)}${a.vote_count != null && (a.status === 'approved') ? ' · ' + Number(a.vote_count).toLocaleString('en-ZM') + ' votes' : ''}`;
+      });
+    }).catch(() => {});
+    (data.businesses || []).forEach(b => {
+      if (b.status !== 'active') return;
+      api('/api/hustle/analytics/' + b.id).then((a) => {
+        const slot = document.querySelector('[data-mybiz-views="' + b.id + '"]');
+        if (!slot) return;
+        const v = (a.daily || []).filter(r => r.event_type === 'storefront_view').reduce((t, r) => t + Number(r.count || 0), 0);
+        slot.textContent = v === 0 ? 'No views yet in the last 30 days.' : v + ' views in the last 30 days';
+      }).catch(() => {});
+      // Incomplete businesses get the onboarding nudge instead of a blank line.
+      api('/api/hustle/businesses/' + b.id + '/completeness').then((c) => {
+        if (c.complete) return;
+        const slot = document.querySelector('[data-mybiz-hustle="' + b.id + '"]');
+        if (slot && !slot.textContent) slot.innerHTML = `<a href="#/business/${b.id}/complete">Finish onboarding to enter</a>`;
+      }).catch(() => {});
+    });
   } catch (e) {
     document.getElementById('mybiz-list').innerHTML = errorHtml(e.message);
   }
@@ -3228,14 +3709,22 @@ async function viewBusinessManage(id) {
     const verLabel = { unverified: 'Not verified yet', pending: 'Documents with the admin, under review', verified: 'Verified', rejected: 'Verification was not approved' }[b.verification_status];
     app.innerHTML = `
     <div class="view"><div class="page">
+      <a class="small" href="#/business/mine">Back to My businesses</a>
       <h1 class="page-title">Manage storefront</h1>
-      <p class="page-sub">${esc(b.name)} · Status: <b>${esc(b.status)}</b>${b.status === 'pending' ? ' (waiting for admin approval)' : ''}</p>
+      <p class="page-sub">${esc(b.name)} · Status: <b>${esc(b.status)}</b>${b.status === 'pending' ? ' (waiting for admin approval)' : ''}${b.status === 'active' ? ` · <a href="#/business/${esc(b.slug)}">View storefront</a>` : ''}</p>
+      <div class="card">
+        <h3 style="margin-top:0">Storefront status</h3>
+        <div class="split"><span>Storefront status</span><span class="badge ${b.status === 'active' ? 'badge-app-approved' : b.status === 'pending' ? 'badge-app-pending' : 'badge-app-rejected'}">${esc(b.status)}</span></div>
+        <p class="small muted" style="margin:6px 0 0">${b.status === 'pending' ? 'Your storefront is waiting for admin approval. It is not public yet.' : b.status === 'active' ? 'Your storefront is live on 2911 Jobs.' : b.status === 'rejected' ? 'Your storefront was not approved. See the note below, fix it, and submit again.' : 'Your storefront is suspended. Contact support if you think this is a mistake.'}</p>
+        <div class="split" style="margin-top:10px"><span>Verified badge</span><b class="small">${esc(verLabel)}</b></div>
+        ${b.verification_note ? `<p class="small muted">Admin note: ${esc(b.verification_note)}</p>` : ''}
+      </div>
       <div class="card">
         <h3 style="margin-top:0">Verified badge</h3>
         <p class="small"><b>${esc(verLabel)}</b></p>
         ${b.verification_note ? `<p class="small muted">Admin note: ${esc(b.verification_note)}</p>` : ''}
         <p class="small muted">Upload a clear photo or scan of your PACRA certificate, TPIN certificate, or trading licence. Verified shops show a green badge everywhere.</p>
-        <p class="small">Documents on file: ${docs.documents.length ? docs.documents.map(d => esc(d.kind.toUpperCase())).join(', ') : 'none yet'}</p>
+        <p class="small">Documents on file: ${docs.documents.length ? docs.documents.map(d => esc(d.kind.toUpperCase()) + (d.status ? ' (' + esc(d.status) + ')' : '')).join(', ') : 'none yet'}</p>
         <form id="doc-form" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
           <select id="doc-kind" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
             <option value="pacra">PACRA certificate</option>
@@ -3243,16 +3732,27 @@ async function viewBusinessManage(id) {
             <option value="licence">Trading licence</option>
             <option value="other">Other document</option>
           </select>
-          <input id="doc-file" type="file" accept="image/*" required>
+          <input id="doc-file" type="file" accept="application/pdf, image/jpeg, image/png, image/webp" required>
           <button class="btn btn-primary" type="submit">Upload document</button>
         </form>
+        <p class="hint">PDF up to 6 MB, photos up to 2 MB.</p>
       </div>
       ${businessFormHtml(b, true)}
+      <div id="biz-reps-card"></div>
+      <div id="biz-hustle-card"></div>
+      <div id="biz-analytics-card"></div>
+      <div class="card" style="margin-top:12px">
+        <h3 style="margin-top:0;color:var(--error)">Close this storefront</h3>
+        <p class="small muted">Closing removes the storefront from the public list. Your competition entry, if live, is withdrawn. This cannot be undone from here; contact support to reopen.</p>
+        <button class="btn btn-danger" id="biz-close-btn">Close storefront</button>
+        <span class="small muted" id="biz-close-note"></span>
+      </div>
     </div></div>`;
     const form = document.getElementById('business-form');
     wireBusinessForm(form, b);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!validateBusinessForm(form, true)) return;
       try {
         await api('/api/businesses/' + b.id, { method: 'PATCH', body: JSON.stringify(collectBusinessData(form)) });
         toast('Storefront updated.');
@@ -3264,11 +3764,155 @@ async function viewBusinessManage(id) {
       const f = (document.getElementById('doc-file').files || [])[0];
       if (!f) return;
       try {
-        const image = await fileToDoc(f);
+        const image = await fileToPdfOrDoc(f);
         await api('/api/businesses/' + b.id + '/documents', { method: 'POST', body: JSON.stringify({ kind: document.getElementById('doc-kind').value, image }) });
         toast('Document uploaded. Verification is now under review.');
         viewBusinessManage(id);
       } catch (e2) { toast(e2.message, true); }
+    });
+    // Representatives card.
+    (async () => {
+      const slot = document.getElementById('biz-reps-card');
+      if (!slot) return;
+      let reps = [];
+      try { reps = (await api('/api/businesses/' + b.id + '/representatives')).representatives || []; } catch (e) { reps = []; }
+      slot.innerHTML = `
+      <div class="card" style="margin-top:12px">
+        <h3 style="margin-top:0">Representatives</h3>
+        <p class="small muted" style="margin-top:0">A representative can apply for What's Your Hustle? on this business's behalf. They cannot edit this storefront.</p>
+        <form id="rep-form" style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="rep-phone" maxlength="30" placeholder="Representative phone, e.g. 09..." style="flex:1;min-width:180px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);font-family:inherit;font-size:14px">
+          <button class="btn btn-primary" type="submit">Invite representative</button>
+        </form>
+        <div style="margin-top:10px">${reps.length ? reps.map(r => `
+          <div class="split" style="padding:6px 0;border-bottom:1px solid var(--line)">
+            <span><b>${esc(r.name || r.user_name || '')}</b> <span class="small muted">${esc(r.phone || '')} · ${esc(r.status || '')}</span></span>
+            <button class="btn btn-ghost btn-sm" data-rep-remove="${r.user_id || r.id}">Remove</button>
+          </div>`).join('') : '<p class="small muted">No representatives yet.</p>'}</div>
+      </div>`;
+      document.getElementById('rep-form').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const phone = document.getElementById('rep-phone').value.trim();
+        if (!phone) { toast('Add the representative phone number.', true); return; }
+        try {
+          await api('/api/businesses/' + b.id + '/representatives', { method: 'POST', body: JSON.stringify({ phone }) });
+          toast('Representative invited. They accept from their Notifications inbox.');
+          viewBusinessManage(id);
+        } catch (e2) { toast(e2.message, true); }
+      });
+      slot.querySelectorAll('[data-rep-remove]').forEach(btn => btn.addEventListener('click', async () => {
+        try {
+          await api('/api/businesses/' + b.id + '/representatives/' + btn.dataset.repRemove + '/revoke', { method: 'POST', body: '{}' });
+          toast('Representative removed.');
+          viewBusinessManage(id);
+        } catch (e2) { toast(e2.message, true); }
+      }));
+    })();
+    // Competition Management section.
+    (async () => {
+      const slot = document.getElementById('biz-hustle-card');
+      if (!slot) return;
+      slot.innerHTML = `<div class="card" style="margin-top:12px">${skeletonCards(1)}</div>`;
+      let comp = null, myApps = [], completeness = { complete: false, missing: [] };
+      try { comp = await getCurrentComp(); } catch (e) {}
+      try { myApps = (await api('/api/hustle/applications/mine')).applications || []; } catch (e) {}
+      try { completeness = await api('/api/hustle/businesses/' + b.id + '/completeness'); } catch (e) {}
+      const a = myApps.find(x => String(x.business_id) === String(b.id));
+      const verifiedBiz = b.verified || b.verification_status === 'verified';
+      const phase = hustlePhase(comp);
+      const votingLive = phase.key === 'voting';
+      let inner = '';
+      if (a) {
+        const e2 = normEntry(a);
+        if (a.status === 'draft') inner = `<p><b>Draft application</b> <span class="small muted">saved ${esc(fmtDate(a.updated_at || a.created_at))}</span></p><div class="btn-row"><a class="btn btn-primary" href="#/hustle/apply/${a.id}">Continue application</a><button class="btn btn-ghost" id="hz-del-draft">Delete draft</button></div>`;
+        else if (a.status === 'changes_requested') inner = `${hustleAppBadge(a.status)}<p class="small" style="margin:8px 0">Our team asked for: ${esc(a.review_note || a.admin_note || a.note || '')}</p><a class="btn btn-primary" href="#/hustle/apply/${a.id}">Edit application</a>`;
+        else if (a.status === 'submitted' || a.status === 'under_review') inner = `${hustleAppBadge(a.status)}<p class="small" style="margin:8px 0">Your hustle has been submitted. Our team will review your application before it goes live for public voting.</p><p class="small muted">Submitted ${esc(fmtLusaka(a.submitted_at || a.created_at))}.</p><a class="btn btn-outline" href="#/hustle/my-entry">View your application</a>`;
+        else if (a.status === 'approved') inner = `${hustleAppBadge(a.status)}<p class="small" style="margin:8px 0">${votingLive ? 'Voting is open.' : 'Your pitch is approved. Voting opens on ' + esc(fmtLusaka(comp ? comp.voting_opens_at : '', false)) + '.'} Share your storefront and get ready.</p>${votingLive && a.vote_count != null ? `<p class="small"><b>${Number(a.vote_count).toLocaleString('en-ZM')} votes</b>${a.rank != null ? ' · Rank ' + esc(String(a.rank)) : ''}</p>` : ''}<div class="btn-row"><a class="btn btn-primary" href="#/hustle/entry/${a.id}">View your entry</a><a class="btn btn-outline" href="#/hustle/leaderboard">See the leaderboard</a></div>`;
+        else if (a.status === 'winner' || (comp && String(comp.winner_application_id) === String(a.id))) inner = `<span class="badge hustle-phase hustle-phase-winner">Winner</span><p class="small" style="margin:8px 0">CONGRATULATIONS TO OUR K10,000 WINNER! Your business won What's Your Hustle?</p>${a.vote_count != null ? `<p class="small">Verified final votes: <b>${Number(a.vote_count).toLocaleString('en-ZM')}</b></p>` : ''}`;
+        else if (a.status === 'rejected' || a.status === 'disqualified') inner = `${hustleAppBadge(a.status)}<p class="small" style="margin:8px 0">${esc(a.review_note || a.admin_note || a.note || '')}</p>${phase.key === 'applications' ? `<a class="btn btn-primary" href="#/hustle/apply">Apply again</a>` : '<p class="small muted">Applications are closed for this round.</p>'}`;
+        else inner = `${hustleAppBadge(a.status)}<p class="small" style="margin:8px 0"><a href="#/hustle/my-entry">View your application</a></p>`;
+      } else if (!verifiedBiz) {
+        inner = `<p class="small"><b>Verify your storefront first.</b> The competition is open to verified businesses only.</p><a class="btn btn-outline" href="#/business/${b.id}/manage">Go to verification</a>${!completeness.complete ? `<p class="small" style="margin:10px 0 0">Your profile is also incomplete: ${esc(hustleMissingLabels(completeness.missing || []).join(', '))}.</p><a class="btn btn-primary" href="#/business/${b.id}/complete">Finish onboarding</a>` : ''}`;
+      } else if (!completeness.complete) {
+        const missing = completeness.missing || [];
+        inner = `<p class="small"><b>Finish onboarding to enter.</b> ${missing.length} thing${missing.length === 1 ? '' : 's'} left: ${esc(hustleMissingLabels(missing).slice(0, 3).join(', '))}.</p><a class="btn btn-primary" href="#/business/${b.id}/complete">Finish onboarding</a>`;
+      } else {
+        inner = `<p class="small">Your business is verified. You can enter What's Your Hustle? and compete for K10,000.</p><a class="btn btn-primary" href="#/hustle/apply">Apply for What's Your Hustle?</a><p class="small muted" style="margin:8px 0 0">You need a verified storefront, a 60 to 90 second pitch video, up to 5 photos, and a plan for the K10,000. <a href="#/hustle">See the rules on the competition page.</a></p>`;
+      }
+      slot.innerHTML = `
+      <div class="card" style="margin-top:12px">
+        <h3 style="margin-top:0">What's Your Hustle? Competition</h3>
+        ${inner}
+        <p class="small" style="margin:12px 0 0"><a href="#/notifications?filter=hustle">Competition notifications</a> <span id="hz-notif-count"></span></p>
+      </div>`;
+      const del = document.getElementById('hz-del-draft');
+      if (del) del.addEventListener('click', async () => {
+        if (!confirm('Delete this draft application? This cannot be undone.')) return;
+        try {
+          await api('/api/hustle/applications/' + a.id + '/withdraw', { method: 'POST', body: '{}' });
+          try { localStorage.removeItem(hustleDraftKey(comp ? comp.id : '', b.id)); } catch (e) {}
+          toast('Draft deleted.');
+          viewBusinessManage(id);
+        } catch (e) { toast(e.message, true); }
+      });
+      api('/api/hustle/notifications/unread-count').then((d) => {
+        const el = document.getElementById('hz-notif-count');
+        if (el && d.unread_count > 0) el.textContent = '(' + d.unread_count + ' unread)';
+      }).catch(() => {});
+      // Danger zone state: cannot close while the entry is live for voting.
+      const closeBtn = document.getElementById('biz-close-btn');
+      const closeNote = document.getElementById('biz-close-note');
+      if (closeBtn && a && votingLive && a.status === 'approved') {
+        closeBtn.disabled = true;
+        if (closeNote) closeNote.textContent = 'You cannot close a storefront while its entry is live for voting.';
+      }
+    })();
+    // Business Analytics section (real events only).
+    (async () => {
+      const slot = document.getElementById('biz-analytics-card');
+      if (!slot) return;
+      let range = '30d';
+      async function renderAnalytics() {
+        slot.innerHTML = `<div class="card" style="margin-top:12px"><h3 style="margin-top:0">Business Analytics</h3><p class="small muted" style="margin-top:0">These numbers come from real visits and taps on your storefront. A number with no activity yet shows 0 or No data yet.</p><div class="seg" id="hz-range"><button data-range="7d" class="${range === '7d' ? 'active' : ''}">7 days</button><button data-range="30d" class="${range === '30d' ? 'active' : ''}">30 days</button><button data-range="all" class="${range === 'all' ? 'active' : ''}">All time</button></div><div id="hz-analytics-body" style="margin-top:10px">${skeletonCards(2)}</div></div>`;
+        slot.querySelectorAll('#hz-range button').forEach(btn => btn.addEventListener('click', () => { range = btn.dataset.range; renderAnalytics(); }));
+        const body = document.getElementById('hz-analytics-body');
+        try {
+          const d = await api('/api/hustle/analytics/' + b.id);
+          // The API returns counts (all time) plus daily rows for the last
+          // 30 days; the 7d and 30d ranges are summed client-side.
+          const counts = d.counts || {};
+          const sumDaily = (type, days) => {
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - (days - 1));
+            const cut = cutoff.toISOString().slice(0, 10);
+            return (d.daily || []).filter(r => r.event_type === type && r.day >= cut).reduce((a, r) => a + Number(r.count || 0), 0);
+          };
+          const val = (type) => (range === 'all' ? (counts[type] != null ? counts[type] : 0) : sumDaily(type, range === '7d' ? 7 : 30));
+          const tile = (label, v, noData) => `<div class="card stat-card"><h3>${noData ? '<span style="font-size:15px;color:var(--gray)">No data yet</span>' : (v == null ? 0 : Number(v).toLocaleString('en-ZM'))}</h3><p class="small muted">${label}</p></div>`;
+          const appsRes = await api('/api/hustle/applications/mine').catch(() => ({ applications: [] }));
+          const hasEntry = (appsRes.applications || []).some(x => String(x.business_id) === String(b.id) && x.status !== 'draft');
+          body.innerHTML = `<div class="stat-grid">
+            ${tile('Storefront views', val('storefront_view'))}
+            ${tile('Product views', val('product_view'))}
+            ${tile('Contact clicks', val('contact_click'))}
+            ${tile('WhatsApp clicks', val('whatsapp_click'))}
+            ${tile('Pitch views', val('pitch_view'), !hasEntry)}
+            ${tile('Votes', d.votes != null ? d.votes : 0, !hasEntry)}
+          </div>`;
+        } catch (e) {
+          body.innerHTML = errorHtml(e.message);
+        }
+      }
+      renderAnalytics();
+    })();
+    document.getElementById('biz-close-btn').addEventListener('click', async () => {
+      if (document.getElementById('biz-close-btn').disabled) return;
+      if (!confirm('Close this storefront? It will be removed from the public list. Your competition entry, if live, is withdrawn.')) return;
+      try {
+        await api('/api/admin/businesses/' + b.id, { method: 'PATCH', body: JSON.stringify({ status: 'suspended' }) }).catch(() => api('/api/businesses/' + b.id, { method: 'PATCH', body: JSON.stringify({ status: 'suspended' }) }));
+        toast('Storefront closed.');
+        location.hash = '#/business/mine';
+      } catch (e) { toast(e.message, true); }
     });
   } catch (e) {
     app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
@@ -3289,6 +3933,7 @@ async function viewAdminBusinesses() {
       <button class="chip active" data-abstatus="pending">Pending approval</button>
       <button class="chip" data-abstatus="active">Live</button>
       <button class="chip" data-abstatus="">All</button>
+      <button class="chip" data-abstatus="hustle">Hustle applicants</button>
     </div>
     <div id="ab-list" style="margin-top:12px">${skeletonCards(2)}</div>
   </div></div>`;
@@ -3296,8 +3941,16 @@ async function viewAdminBusinesses() {
   async function load(status) {
     list.innerHTML = skeletonCards(2);
     try {
-      const data = await api('/api/admin/businesses' + (status ? '?status=' + status : ''));
-      list.innerHTML = data.businesses.length ? data.businesses.map(b => `
+      const data = await api('/api/admin/businesses' + (status && status !== 'hustle' ? '?status=' + status : ''));
+      let rows = data.businesses;
+      if (status === 'hustle') {
+        try {
+          const apps = await hustleAdminApps('');
+          const ids = new Set(apps.map(a => a.business_id));
+          rows = rows.filter(b => ids.has(b.id));
+        } catch (e) { rows = []; }
+      }
+      list.innerHTML = rows.length ? rows.map(b => `
         <div class="card" style="margin-bottom:10px">
           <b>${esc(b.name)}</b> ${bizBadge(b)}
           <span class="small muted" style="display:block">by ${esc(b.owner_name)} · ${esc(b.category)} · ${esc(b.city)} · status ${esc(b.status)} · verification ${esc(b.verification_status)} · ${b.doc_count} documents</span>
@@ -3333,7 +3986,10 @@ async function viewAdminBusinesses() {
         const slot = document.getElementById('ab-docs-' + btn.dataset.abDocs);
         try {
           const d = await api('/api/admin/businesses/' + btn.dataset.abDocs + '/documents');
-          slot.innerHTML = `<div class="job-gallery" style="margin-top:8px">${d.documents.map(doc => `<img src="${doc.image}" alt="${esc(doc.kind)} document">`).join('')}</div>`;
+          slot.innerHTML = `<div class="job-gallery" style="margin-top:8px">${d.documents.map(doc => {
+            const isPdf = (doc.mime || '').includes('pdf') || String(doc.image || '').startsWith('data:application/pdf');
+            return isPdf ? `<a class="btn btn-sm btn-outline" href="${esc(doc.image)}" target="_blank" rel="noopener">${esc(doc.kind)} (PDF)</a>` : `<img src="${esc(doc.image)}" alt="${esc(doc.kind)} document">`;
+          }).join('')}</div>`;
         } catch (e) { toast(e.message, true); }
       }));
     } catch (e) { list.innerHTML = errorHtml(e.message); }
@@ -4531,17 +5187,30 @@ async function viewProfile() {
         <a href="#/dashboard">${icon('clipboard')}<span>My Jobs</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/selling">${icon('tag')}<span>My Products</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/business/mine">${icon('grid')}<span>My Business Store</span><span class="chev">${icon('chevR')}</span></a>
+        <a href="#/notifications">${icon('bell')}<span>Notifications</span><span class="small muted" id="pf-notif-count" style="margin-left:auto"></span></a>
+        <a href="#/hustle/my-entry" id="pf-hustle-entry" hidden>${icon('trophy')}<span>My competition entry</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/saved">${icon('heart')}<span>Saved Items</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/invite">${icon('sparkles')}<span>Win cash — invite friends</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/how">${icon('help')}<span>Help &amp; support</span><span class="chev">${icon('chevR')}</span></a>
         <a href="#/terms">${icon('shield')}<span>Terms and conditions</span><span class="chev">${icon('chevR')}</span></a>
         <button id="pf-push">${icon('bell')}<span>Notifications</span><span class="small muted" id="pf-push-state" style="margin-left:auto">Off</span></button>
+        <p class="small muted" style="margin:0 0 10px">Push is per device. Your inbox keeps every notification, even when push is off.</p>
         <button id="pf-logout">${icon('logout')}<span>Sign out</span></button>
       </div>
     </div>
   </div>`;
 
   document.getElementById('pf-edit').addEventListener('click', () => { location.hash = '#/profile/edit'; });
+  // Show the competition entry row only when the user owns a storefront
+  // or has a draft or submitted application.
+  Promise.all([
+    api('/api/businesses/mine').catch(() => ({ businesses: [] })),
+    api('/api/hustle/applications/mine').catch(() => ({ applications: [] })),
+  ]).then(([mine, apps]) => {
+    const row = document.getElementById('pf-hustle-entry');
+    if (row && (((mine.businesses || []).length) || ((apps.applications || []).length))) row.hidden = false;
+  }).catch(() => {});
+  refreshNotifBadge();
   document.getElementById('pf-share').addEventListener('click', () => shareProfile(currentUser.id, currentUser.name));
   document.getElementById('pf-logout').addEventListener('click', logout);
   const pushBtn = document.getElementById('pf-push');
@@ -4951,6 +5620,92 @@ function fileToLogoImage(file) {
 /** Shrink a document/ID photo (keeps aspect ratio so text stays readable). */
 function fileToDoc(file) {
   return fileToSizedImage(file, 1024, false);
+}
+
+/* ---------------- Hustle: business form helpers ---------------- */
+/** PACRA certificate: PDF up to ~6 MB read as a data URL, images up to ~2 MB shrunk. */
+function fileToPdfOrDoc(file) {
+  if (file.type === 'application/pdf') {
+    return new Promise((resolve, reject) => {
+      if (file.size > 6 * 1024 * 1024) return reject(new Error('That file is too large. Use a file under 6 MB for PDF, or under 2 MB for a photo.'));
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (String(reader.result).length > 8000000) return reject(new Error('That file is too large. Use a file under 6 MB for PDF, or under 2 MB for a photo.'));
+        resolve(reader.result);
+      };
+      reader.onerror = () => reject(new Error('That PDF could not be read. Try a clear photo of the certificate instead.'));
+      reader.readAsDataURL(file);
+    });
+  }
+  if (!file.type.startsWith('image/')) return Promise.reject(new Error('That file type is not accepted. Use a PDF, JPG, or PNG.'));
+  if (file.size > 2 * 1024 * 1024) return Promise.reject(new Error('That file is too large. Use a file under 6 MB for PDF, or under 2 MB for a photo.'));
+  return fileToDoc(file);
+}
+function hustleParseHours(v) {
+  let h = {};
+  if (v && typeof v === 'object') h = v;
+  else if (typeof v === 'string' && v.trim()) { try { h = JSON.parse(v); } catch (e) { h = {}; } }
+  const out = {};
+  HUSTLE_DAY_KEYS.forEach((k, i) => {
+    const row = h[k] || h[HUSTLE_DAYS[i]] || {};
+    out[k] = {
+      closed: row.closed === true || (i === 6 && row.open == null && row.close == null && !row.closed),
+      open: row.open || '08:00',
+      close: row.close || '17:30',
+    };
+    if (i === 6 && row.open == null && row.close == null && row.closed == null) out[k].closed = true;
+  });
+  return out;
+}
+function hustleHoursRows(p) {
+  const h = hustleParseHours(p.hours);
+  return HUSTLE_DAY_KEYS.map((k, i) => `
+    <div class="hustle-hours-row" data-hday="${k}">
+      <span class="hustle-hours-day">${HUSTLE_DAYS[i]}</span>
+      <label class="check-row hustle-hours-closed"><input type="checkbox" data-hclosed ${h[k].closed ? 'checked' : ''}><span>Closed</span></label>
+      <input type="time" value="${esc(h[k].open)}" data-hopen aria-label="Open time ${HUSTLE_DAYS[i]}" ${h[k].closed ? 'disabled' : ''}>
+      <input type="time" value="${esc(h[k].close)}" data-hclose aria-label="Close time ${HUSTLE_DAYS[i]}" ${h[k].closed ? 'disabled' : ''}>
+    </div>`).join('');
+}
+function hustleCollectHours(form) {
+  const out = {};
+  form.querySelectorAll('[data-hday]').forEach(row => {
+    const closed = row.querySelector('[data-hclosed]').checked;
+    out[row.dataset.hday] = closed
+      ? { closed: true }
+      : { open: row.querySelector('[data-hopen]').value, close: row.querySelector('[data-hclose]').value };
+  });
+  return out;
+}
+function hustleSocialLinks(b) {
+  let v = b ? b.social_links : null;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { v = []; } }
+  if (Array.isArray(v)) return v.filter(x => x && x.url).map(x => ({ platform: x.platform, url: x.url }));
+  if (v && typeof v === 'object') return Object.entries(v).filter(([, u]) => u).map(([platform, url]) => ({ platform, url }));
+  return [];
+}
+function hustleSocialUrl(b, platform) {
+  const found = hustleSocialLinks(b).find(x => String(x.platform).toLowerCase() === platform);
+  return found ? found.url : '';
+}
+function hustleServicesList(b) {
+  if (!b) return [];
+  const v = b.services_text || b.products_services || b.services || b.products_and_services || '';
+  if (Array.isArray(v)) return v.map(String).map(s => s.trim()).filter(Boolean);
+  return String(v).split('\n').map(s => s.trim()).filter(Boolean);
+}
+function hustleServicesText(p) {
+  return hustleServicesList(p).join('\n');
+}
+function hustleWaDigits(b) {
+  const raw = String((b && (b.whatsapp || b.phone)) || '').replace(/\D/g, '');
+  if (!raw) return '';
+  if (raw.startsWith('0')) return '260' + raw.slice(1);
+  if (raw.length === 9) return '260' + raw;
+  return raw;
+}
+function hustleLocLine(b) {
+  return [b.province, b.district, b.city].filter(Boolean).join(' · ');
 }
 
 /**
@@ -5969,6 +6724,16 @@ function viewLandingWeb() {
       </div>
     </section>
 
+    <section class="lw-section" id="lw-hustle" hidden>
+      <div class="lw-head">
+        <div>
+          <h2>What's Your Hustle?</h2>
+          <p>The K10,000 Business Challenge for Zambian businesses.</p>
+        </div>
+      </div>
+      <div id="lw-hustle-body"></div>
+    </section>
+
     <section class="lw-section lw-cta">
       <div>
         <h2>Join 2911 Jobs</h2>
@@ -6038,6 +6803,35 @@ function viewLandingWeb() {
     }).join('');
     wrap.hidden = false;
   }).catch(() => {});
+  // Competition promo, from live data only.
+  getCurrentComp().then((comp) => {
+    const sec = document.getElementById('lw-hustle');
+    const body = document.getElementById('lw-hustle-body');
+    if (!sec || !body || !comp) return;
+    const phase = hustlePhase(comp);
+    let text = '', cta = '';
+    if (phase.key === 'before') {
+      text = `Applications open ${esc(fmtLusaka(comp.applications_open_at, false))}. Verified businesses compete for K10,000 with a 60 to 90 second pitch video. Voting is free, one vote per verified account.`;
+      cta = `<a class="btn btn-primary" href="#/hustle">See the competition</a>`;
+    } else if (phase.key === 'applications') {
+      text = `Applications are open until ${esc(fmtLusaka(comp.applications_close_at, false))}. Verified businesses compete for K10,000 with a 60 to 90 second pitch video.`;
+      cta = `<a class="btn btn-primary" href="#/hustle/apply">Enter your business</a><a class="btn btn-outline" href="#/hustle">See the competition</a>`;
+    } else if (phase.key === 'review') {
+      text = `Applications are closed. Voting opens ${esc(fmtLusaka(comp.voting_opens_at, false))}.`;
+      cta = `<a class="btn btn-primary" href="#/hustle">See the entries</a>`;
+    } else if (phase.key === 'voting') {
+      text = `Voting is open until ${esc(fmtLusaka(comp.voting_closes_at, false))}. Watch the pitches and vote for your favourite business. Voting is free, one vote per verified account.`;
+      cta = `<a class="btn btn-primary" href="#/hustle/leaderboard">Vote now</a>`;
+    } else if (phase.key === 'frozen' || phase.key === 'closed') {
+      text = 'Voting has closed. Final results follow verification.';
+      cta = `<a class="btn btn-primary" href="#/hustle/leaderboard">See the leaderboard</a>`;
+    } else if (phase.key === 'winner') {
+      text = `The winner was announced ${esc(fmtLusaka(comp.winner_announced_at, false))}.`;
+      cta = `<a class="btn btn-primary" href="#/hustle/leaderboard">See the winner</a>`;
+    } else return;
+    body.innerHTML = `<div class="card" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><span style="color:var(--amber);width:40px;height:40px;flex:0 0 40px;display:flex">${icon('trophy')}</span><span style="flex:1;min-width:220px"><b>${esc(phase.label)}</b><span class="small muted" style="display:block">${text}</span></span><span class="btn-row" style="margin:0">${cta}</span></div>`;
+    sec.hidden = false;
+  }).catch(() => {});
 }
 
 /** App landing for phones and the installed app: one short screen. */
@@ -6060,6 +6854,7 @@ function viewLandingApp() {
       <a class="lp-action" href="#/jobs"><span class="lp-action-ico">${icon('briefcase')}</span><b>Find work</b><span>Jobs near you</span></a>
       <a class="lp-action" href="#/post"><span class="lp-action-ico">${icon('users')}</span><b>Hire workers</b><span>Post a job in minutes</span></a>
       <a class="lp-action" href="#/experiences"><span class="lp-action-ico">${icon('compass')}</span><b>Explore Zambia</b><span>Tours, stays and transport</span></a>
+      <a class="lp-action" href="#/hustle"><span class="lp-action-ico">${icon('trophy')}</span><b>What's Your Hustle?</b><span>Win K10,000 for your business</span></a>
     </div>
 
     <div class="lp-title"><h2>Popular categories</h2><a href="#/categories">See all</a></div>
@@ -6073,6 +6868,7 @@ function viewLandingApp() {
     <div class="lp-title"><h2>Why people use 2911 Jobs</h2></div>
     <ul class="lp-trust">
       <li><span class="lp-trust-ico">${icon('shield')}</span><span><b>Checked profiles</b>Every worker's selfie is reviewed by our team.</span></li>
+      <li><span class="lp-trust-ico">${icon('trophy')}</span><span><b>Verified Zambian businesses</b>Real shops and services, with a K10,000 competition for verified businesses.</span></li>
       <li><span class="lp-trust-ico">${icon('star')}</span><span><b>Ratings both ways</b>Workers and hirers rate each other after each job.</span></li>
       <li><span class="lp-trust-ico">${icon('wallet')}</span><span><b>Mobile money</b>Pay or get paid with MTN MoMo or Airtel Money.</span></li>
     </ul>
@@ -6964,6 +7760,7 @@ async function viewAdmin() {
           ${mrow('#/admin/verifications', 'id', 'Verification Queue', s.selfies_pending || 0)}
           ${mrow('#/admin/reports', 'shield', 'Marketplace Moderation', s.reports_open || 0)}
           ${mrow('#/admin/businesses', 'grid', 'Business Applications', s.businesses_pending || 0)}
+          ${mrow('#/admin/hustle', 'trophy', 'Hustle Admin', 0)}
           ${mrow('#/admin/testers', 'check', 'My Testers', 0)}
           ${mrow('#/admin/jobs', 'briefcase', 'All Jobs', 0)}
           ${mrow('#/admin/categories', 'sliders', 'Categories', 0)}
@@ -9737,6 +10534,2113 @@ async function viewHostPayouts() {
 }
 
 /* ---------------- router ---------------- */
+/* ================= What's Your Hustle? (K10,000 Business Challenge) =================
+   Frontend for the competition module (UISpec Phase 1). Dates and phases come
+   from the competition API row, never hard coded. No mock votes, no fabricated
+   businesses, no fabricated stats: a metric with no events shows 0 or
+   "No data yet". */
+const HUSTLE_STEPS = ['Your business', 'Your story', 'Your pitch', 'Photos and summary', 'K10,000 plan', 'Review'];
+const HUSTLE_PRIZE = 10000;
+const HUSTLE_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const HUSTLE_DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const HUSTLE_QUESTIONS = [
+  { key: 'q1', label: "What's your hustle?", max: 200, rows: 2, ph: 'Your hustle in one line, e.g. I fix phones in Kamwala.' },
+  { key: 'q2', label: 'What does your business do?', max: 500, rows: 3, ph: 'What you sell or do, and who you serve.' },
+  { key: 'q3', label: 'When did you start?', max: 200, rows: 3, ph: 'The year and the story of the start, in your own words.' },
+  { key: 'q4', label: 'What inspired you?', max: 500, rows: 3, ph: '' },
+  { key: 'q5', label: 'What problem do you solve?', max: 500, rows: 3, ph: '' },
+  { key: 'q6', label: 'How many people do you employ?', max: null, rows: 0, ph: '' },
+  { key: 'q7', label: 'What is your biggest challenge?', max: 500, rows: 3, ph: '' },
+  { key: 'q8', label: 'Why should Zambia vote for you?', max: 500, rows: 3, ph: '' },
+  { key: 'q9', label: 'How exactly would you use K10,000?', max: 500, rows: 3, ph: 'Be specific. The spend plan in step 5 must match this answer.' },
+  { key: 'q10', label: 'What impact on your community?', max: 500, rows: 3, ph: 'Jobs, skills, or help your business brings to your community.' },
+];
+const HUSTLE_VIDEO_HOSTS = ['facebook.com', 'fb.watch', 'tiktok.com', 'youtube.com', 'youtu.be', 'instagram.com'];
+let hustleTimer = null;
+let hustleCompCache = null;
+let hustleLocCache = null;
+let hustleApplyState = null;
+let hustleMineCount = null;
+
+function parseServerDate(s) {
+  if (!s) return null;
+  if (s instanceof Date) return s;
+  const str = String(s).trim();
+  if (!str) return null;
+  const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(str);
+  const d = new Date(str.replace(' ', 'T') + (hasTz ? '' : 'Z'));
+  return isNaN(d) ? null : d;
+}
+function fmtLusaka(iso, withTime) {
+  const d = parseServerDate(iso);
+  if (!d) return '';
+  try {
+    const opts = { timeZone: 'Africa/Lusaka', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
+    if (withTime !== false) { opts.hour = '2-digit'; opts.minute = '2-digit'; opts.hour12 = false; }
+    return new Intl.DateTimeFormat('en-GB', opts).format(d) + ' CAT';
+  } catch (e) { return fmtDate(iso); }
+}
+function fmtLusakaTime(iso) {
+  const d = parseServerDate(iso);
+  if (!d) return '';
+  try { return new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lusaka', hour: '2-digit', minute: '2-digit', hour12: false }).format(d) + ' CAT'; }
+  catch (e) { return ''; }
+}
+/** Competition row, normalised so either {competition:{...}} or the bare row works. */
+function normComp(d) {
+  const c = (d && d.competition) || d || null;
+  if (!c) return null;
+  return {
+    id: c.id, title: c.title || "What's Your Hustle?",
+    prize_kwacha: c.prize_kwacha != null ? c.prize_kwacha : (c.prize != null ? c.prize : HUSTLE_PRIZE),
+    status: c.status || '',
+    applications_open_at: c.applications_open_at, applications_close_at: c.applications_close_at,
+    // The API names these voting_open_at / voting_close_at / winner_at /
+    // freeze_at; accept both spellings so the phase logic never sees blanks.
+    voting_opens_at: c.voting_opens_at || c.voting_open_at,
+    voting_closes_at: c.voting_closes_at || c.voting_close_at,
+    winner_announced_at: c.winner_announced_at || c.winner_at,
+    leaderboard_frozen_at: c.leaderboard_frozen_at || c.freeze_at,
+    winner_application_id: c.winner_application_id, winner: c.winner || null,
+    entry_count: c.entry_count != null ? c.entry_count : (c.entries_count != null ? c.entries_count : null),
+    server_time: c.server_time || c.now || null,
+    raw: c,
+  };
+}
+async function getCurrentComp(force) {
+  if (hustleCompCache && !force) return hustleCompCache;
+  try {
+    const d = await api('/api/hustle/competitions/current');
+    hustleCompCache = normComp(d);
+  } catch (e) { hustleCompCache = null; }
+  return hustleCompCache;
+}
+function hustlePhase(comp) {
+  if (!comp) return { key: 'none', label: 'No competition yet', badge: 'hustle-phase-closed' };
+  const now = Date.now();
+  const st = String(comp.status || '').toLowerCase();
+  if (st === 'archived') return { key: 'archived', label: 'Competition closed', badge: 'hustle-phase-closed' };
+  if (st === 'winner_announced' || comp.winner_application_id || (comp.winner_announced_at && parseServerDate(comp.winner_announced_at) && parseServerDate(comp.winner_announced_at).getTime() <= now)) {
+    return { key: 'winner', label: 'Winner announced', badge: 'hustle-phase-winner' };
+  }
+  if (st === 'frozen') return { key: 'frozen', label: 'Results under verification', badge: 'hustle-phase-frozen' };
+  const ao = parseServerDate(comp.applications_open_at), ac = parseServerDate(comp.applications_close_at);
+  const vo = parseServerDate(comp.voting_opens_at), vc = parseServerDate(comp.voting_closes_at);
+  if (ao && now < ao.getTime()) return { key: 'before', label: 'Coming soon', badge: 'hustle-phase-closed' };
+  if (ac && now <= ac.getTime()) return { key: 'applications', label: 'Applications open', badge: 'hustle-phase-open' };
+  if (vo && now < vo.getTime()) return { key: 'review', label: 'Applications closed', badge: 'hustle-phase-closed' };
+  if (vc && now <= vc.getTime()) {
+    if (comp.leaderboard_frozen_at) return { key: 'frozen', label: 'Results under verification', badge: 'hustle-phase-frozen' };
+    return { key: 'voting', label: 'Voting open', badge: 'hustle-phase-open' };
+  }
+  if (comp.leaderboard_frozen_at) return { key: 'frozen', label: 'Results under verification', badge: 'hustle-phase-frozen' };
+  if (st === 'voting_closed' || st === 'completed') return { key: 'closed', label: 'Voting closed', badge: 'hustle-phase-closed' };
+  return { key: 'applications', label: 'Applications open', badge: 'hustle-phase-open' };
+}
+function hustleNextBoundary(comp, phase) {
+  const map = {
+    before: ['Applications open in', comp.applications_open_at],
+    applications: ['Applications close in', comp.applications_close_at],
+    review: ['Voting opens in', comp.voting_opens_at],
+    voting: ['Voting closes in', comp.voting_closes_at],
+    frozen: ['Winner announced in', comp.winner_announced_at],
+    closed: ['Winner announced in', comp.winner_announced_at],
+  };
+  return map[phase.key] || null;
+}
+function hustlePhaseBadge(phase) {
+  return `<span class="badge hustle-phase ${phase.badge}">${esc(phase.label)}</span>`;
+}
+/** Countdown to the next phase boundary. Reloads once when it reaches zero. */
+function startHustleCountdown(el, comp) {
+  if (hustleTimer) { clearInterval(hustleTimer); hustleTimer = null; }
+  if (!el) return;
+  const phase = hustlePhase(comp);
+  const next = hustleNextBoundary(comp, phase);
+  if (!next || !next[1]) { el.innerHTML = ''; return; }
+  const target = parseServerDate(next[1]);
+  if (!target) { el.innerHTML = ''; return; }
+  const label = next[0];
+  const tick = () => {
+    const ms = target.getTime() - Date.now();
+    if (ms <= 0) {
+      clearInterval(hustleTimer); hustleTimer = null;
+      router();
+      return;
+    }
+    const s = Math.floor(ms / 1000);
+    const days = Math.floor(s / 86400), hrs = Math.floor((s % 86400) / 3600), mins = Math.floor((s % 3600) / 60), secs = s % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    el.innerHTML = `<div class="hustle-countdown-label">${esc(label)}</div><div class="hustle-countdown">
+      <div class="hustle-cd"><b>${days}</b><span>Days</span></div>
+      <div class="hustle-cd"><b>${pad(hrs)}</b><span>Hours</span></div>
+      <div class="hustle-cd"><b>${pad(mins)}</b><span>Minutes</span></div>
+      <div class="hustle-cd"><b>${pad(secs)}</b><span>Seconds</span></div></div>`;
+  };
+  tick();
+  hustleTimer = setInterval(tick, 1000);
+}
+/** Entry row, normalised across the entry and leaderboard shapes. */
+function normEntry(e) {
+  if (!e) return null;
+  const b = e.business || {};
+  return {
+    id: e.application_id || e.id,
+    application_id: e.application_id || e.id,
+    business_id: e.business_id || b.id,
+    business_name: e.business_name || b.name || '',
+    business_slug: e.business_slug || b.slug || '',
+    logo: e.business_logo || e.logo || b.logo || '',
+    category: e.category || b.category || '',
+    province: e.province || b.province || '',
+    district: e.district || b.district || '',
+    town: e.town || e.city || b.city || '',
+    tagline: e.tagline || b.tagline || '',
+    pitch_summary: e.pitch_summary || e.summary || '',
+    // The API returns the pitch as an object {id, video_url, video_platform,
+    // review_status}; read the link and platform out of it.
+    pitch_video_id: (e.pitch_video && e.pitch_video.id) || e.pitch_video_id || null,
+    pitch_review_status: (e.pitch_video && e.pitch_video.review_status) || e.pitch_review_status || '',
+    video_url: e.video_url || e.pitch_video_url || (e.pitch_video && e.pitch_video.video_url) || '',
+    video_platform: e.video_platform || (e.pitch_video && e.pitch_video.video_platform) || '',
+    photos: e.photos || e.pitch_photos || [],
+    vote_count: e.vote_count != null ? e.vote_count : (e.votes != null ? e.votes : null),
+    rank: e.rank != null ? e.rank : null,
+    status: e.status || '',
+    verified: e.verified != null ? e.verified : b.verified,
+    spend_items: e.spend_items || e.spend_plan || [],
+    answers: e.answers || e.answers_json || {},
+    // q6 is one string ("Employs 3 people. Full time, part time.") on the
+    // API; keep the raw count only when an older row still carries it.
+    employees_count: e.employees_count != null ? e.employees_count : (e.answers && e.answers.employees_count),
+    applicant_name: e.applicant_name || '',
+    approved_at: e.approved_at || e.created_at || '',
+    created_at: e.created_at || '',
+    raw: e,
+  };
+}
+function normEntries(d) {
+  const arr = Array.isArray(d) ? d : (d.entries || d.leaderboard || d.results || []);
+  return (arr || []).map(normEntry).filter(Boolean);
+}
+function hustleVideoPlatform(url) {
+  const u = String(url || '').toLowerCase();
+  if (u.includes('youtu')) return 'youtube';
+  if (u.includes('tiktok')) return 'tiktok';
+  if (u.includes('instagram')) return 'instagram';
+  if (u.includes('facebook') || u.includes('fb.watch')) return 'facebook';
+  return '';
+}
+function hustleVideoEmbed(url) {
+  const u = String(url || '');
+  let id = '';
+  let m = u.match(/[?&]v=([A-Za-z0-9_-]{6,})/);
+  if (m) id = m[1];
+  if (!id) { m = u.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/); if (m) id = m[1]; }
+  if (!id) { m = u.match(/youtube\.com\/shorts\/([A-Za-z0-9_-]{6,})/); if (m) id = m[1]; }
+  if (!id) return '';
+  return `<iframe src="https://www.youtube.com/embed/${esc(id)}" title="Pitch video" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
+}
+function hustleVideoTile(entry, tall) {
+  const url = entry.video_url || '';
+  const platform = (entry.video_platform || hustleVideoPlatform(url) || 'video');
+  const embed = hustleVideoEmbed(url);
+  if (embed) return `<div class="hustle-video${tall ? ' hustle-video-tall' : ''}">${embed}</div>`;
+  if (!url) return `<div class="hustle-video hustle-video-missing"><span class="hustle-video-ico">${icon('play')}</span><b>Video unavailable</b><span class="small muted">This pitch video link no longer works. The business has been asked for a new link.</span></div>`;
+  return `<div class="hustle-video hustle-video-link"><span class="hustle-video-ico">${icon('play')}</span><b>Watch the pitch on ${esc(platform.charAt(0).toUpperCase() + platform.slice(1))}</b><a class="btn btn-primary" href="${esc(url)}" target="_blank" rel="noopener">Watch the pitch</a></div>`;
+}
+function hustleEntryCard(e, showVotes) {
+  const photo = (e.photos && e.photos[0]) ? (typeof e.photos[0] === 'string' ? e.photos[0] : (e.photos[0].image || e.photos[0].url || '')) : '';
+  return `
+  <article class="product-card-g" data-hustle-entry="${e.application_id}">
+    <div class="pg-media">
+      ${photo ? `<img src="${esc(photo)}" alt="Pitch photo for ${esc(e.business_name)}" loading="lazy">` : `<div class="job-thumb product-thumb">${icon('trophy')}</div>`}
+      <span class="pg-cond">${esc(e.category || 'Business')}</span>
+    </div>
+    <div class="pg-body">
+      <h3>${esc(e.business_name)}</h3>
+      <div class="pg-meta">${icon('pin')}<span>${esc([e.province, e.town].filter(Boolean).join(' · '))}</span></div>
+      ${e.pitch_summary ? `<p class="small muted" style="margin:4px 0 0">${esc(e.pitch_summary)}</p>` : ''}
+      ${showVotes && e.vote_count != null ? `<div class="product-price" style="margin-top:6px">${Number(e.vote_count).toLocaleString('en-ZM')} votes</div>` : ''}
+      <div class="btn-row" style="margin-top:8px"><a class="btn btn-sm btn-primary" href="#/hustle/entry/${e.application_id}">View pitch</a><a class="btn btn-sm btn-outline" href="#/business/${esc(e.business_slug || e.business_id)}">Storefront</a></div>
+    </div>
+  </article>`;
+}
+function hustleLeaderRow(e, rank, showVotes, voteLabel) {
+  const n = rank != null ? rank : (e.rank != null ? e.rank : '');
+  return `
+  <div class="card job-card" style="margin-bottom:10px">
+    <span class="hustle-rank ${n <= 3 ? 'hustle-rank-top' : ''}">${n}</span>
+    ${e.logo ? `<img class="avatar md" src="${esc(e.logo)}" alt="${esc(e.business_name)} logo">` : `<span class="avatar md" aria-hidden="true">${esc((e.business_name || '?').trim().charAt(0).toUpperCase())}</span>`}
+    <span style="flex:1;min-width:0">
+      <b>${esc(e.business_name)}</b>
+      <span class="small muted" style="display:block">${esc([e.category, e.province].filter(Boolean).join(' · '))}</span>
+      <span class="btn-row" style="margin-top:6px"><a class="btn btn-sm btn-primary" href="#/hustle/entry/${e.application_id}">View Pitch</a><a class="btn btn-sm btn-outline" href="#/business/${esc(e.business_slug || e.business_id)}">View Storefront</a></span>
+    </span>
+    <span style="text-align:right;flex:0 0 auto">${showVotes && e.vote_count != null ? `<b style="font-size:18px;font-weight:800">${Number(e.vote_count).toLocaleString('en-ZM')}</b><span class="small muted" style="display:block">${esc(voteLabel || 'votes')}</span>` : `<span class="small muted">No votes yet</span>`}</span>
+  </div>`;
+}
+function hustleAppStatusLabel(s) {
+  const map = { draft: 'Draft', submitted: 'Under review', under_review: 'Under review', pending: 'Pending review', changes_requested: 'Changes requested', approved: 'Approved', rejected: 'Not approved', withdrawn: 'Withdrawn', disqualified: 'Disqualified' };
+  return map[s] || (s ? s.replace(/_/g, ' ') : '');
+}
+function hustleAppBadge(s) {
+  const cls = { draft: 'hustle-phase-closed', submitted: 'hustle-phase-open', under_review: 'hustle-phase-open', changes_requested: 'hustle-phase-frozen', approved: 'hustle-phase-open', rejected: 'hustle-phase-disqualified', withdrawn: 'hustle-phase-closed', disqualified: 'hustle-phase-disqualified' }[s] || 'hustle-phase-closed';
+  return `<span class="badge hustle-phase ${cls}">${esc(hustleAppStatusLabel(s))}</span>`;
+}
+/** Unread notification count, shown in the drawer, desktop menu and profile. */
+async function refreshNotifBadge() {
+  if (!currentUser) return;
+  try {
+    const d = await api('/api/hustle/notifications/unread-count');
+    const n = d.unread_count != null ? d.unread_count : (d.unread != null ? d.unread : 0);
+    document.querySelectorAll('.js-notif-badge').forEach((b) => {
+      if (n > 0) { b.textContent = n > 9 ? '9+' : String(n); b.hidden = false; }
+      else b.hidden = true;
+    });
+    const pf = document.getElementById('pf-notif-count');
+    if (pf) pf.textContent = n > 0 ? (n + (n === 1 ? ' new' : ' new')) : '';
+  } catch (e) { /* badge stays hidden when the call fails */ }
+}
+function shareHustleEntry(id, name) {
+  const url = PUBLIC_ORIGIN + '/#/hustle/entry/' + id;
+  openShareSheet({
+    heading: 'Share this entry',
+    url,
+    text: '"' + name + '" is competing for K10,000 in What\'s Your Hustle? on 2911 Jobs',
+    copiedMessage: 'Entry link copied. Paste it anywhere to share.',
+  });
+}
+/** Location hierarchy from the Experiences endpoint: provinces, districts, towns. */
+async function getHustleLocations(force) {
+  if (hustleLocCache && !force) return hustleLocCache;
+  try {
+    const d = await api('/api/experiences/locations');
+    const rows = d.locations || d.rows || [];
+    const byId = {};
+    rows.forEach(r => { byId[r.id] = r; });
+    const provinces = rows.filter(r => r.level === 'province').map(p => ({
+      name: p.name,
+      districts: rows.filter(r => r.level === 'district' && r.parent_id === p.id).map(dist => ({
+        name: dist.name,
+        towns: rows.filter(r => r.level === 'town' && r.parent_id === dist.id).map(t => t.name),
+      })),
+    }));
+    hustleLocCache = provinces.length ? provinces : null;
+  } catch (e) { hustleLocCache = null; }
+  return hustleLocCache;
+}
+function hustleMissingLabels(missing) {
+  const map = { trading_name: 'Trading name', business_type: 'Business type', year_started: 'Year started', province: 'Province', district: 'District', town: 'Town', city: 'Town', address: 'Street address', description: 'Description', phone: 'Phone number', whatsapp: 'WhatsApp number', email: 'Email', logo: 'Logo', cover: 'Cover photo', pacra_number: 'PACRA number', tpin: 'TPIN', owner_legal_name: 'Owner legal name', products_services: 'Products and services', services: 'Products and services', hours: 'Opening hours', hours_text: 'Opening hours', pacra_certificate: 'PACRA certificate', category: 'Category' };
+  return (missing || []).map(m => map[m] || String(m).replace(/_/g, ' '));
+}
+
+/* ---------------- Competition landing ---------------- */
+async function viewHustle() {
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading the competition…')}</div></div>`;
+  let comp = null;
+  try { comp = await getCurrentComp(true); } catch (e) { comp = null; }
+  if (!comp) {
+    app.innerHTML = `<div class="view"><div class="page">${errorHtml('The competition could not be loaded right now.')}</div></div>`;
+    return;
+  }
+  const phase = hustlePhase(comp);
+  const prize = fmtK(comp.prize_kwacha);
+  const winner = comp.winner || (comp.raw && comp.raw.winner) || null;
+  const winnerName = winner ? (winner.business_name || winner.name || '') : '';
+  const winnerEntryId = comp.winner_application_id || (winner && (winner.application_id || winner.id));
+  const appsOpen = phase.key === 'applications';
+  const votingOpen = phase.key === 'voting';
+  const heroBtns = phase.key === 'before'
+    ? `<a class="btn btn-primary" href="#rules" style="background:#fff;color:#0B1F3B">See the rules</a>`
+    : phase.key === 'winner'
+      ? (winnerEntryId
+        ? `<a class="btn btn-primary" href="#/hustle/entry/${winnerEntryId}" style="background:#fff;color:#0B1F3B">See the winning pitch</a><a class="btn btn-outline" href="#/hustle/leaderboard" style="color:#fff;border-color:#fff">Full leaderboard</a>`
+        : `<a class="btn btn-primary" href="#/hustle/leaderboard" style="background:#fff;color:#0B1F3B">Full leaderboard</a>`)
+      : votingOpen
+        ? `<a class="btn btn-primary" href="#/hustle/leaderboard" style="background:#fff;color:#0B1F3B">Vote now</a><a class="btn btn-outline" href="#/hustle/leaderboard" style="color:#fff;border-color:#fff">See the entries</a>`
+        : `<a class="btn btn-primary" href="#/hustle/apply" style="background:#fff;color:#0B1F3B">Apply Now</a><a class="btn btn-outline" href="#/hustle/leaderboard" style="color:#fff;border-color:#fff">See the entries</a>`;
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <section class="hustle-hero">
+      <div class="hustle-kicker">Powered by 2911 Jobs</div>
+      <h1>${phase.key === 'winner' ? "CONGRATULATIONS TO OUR K10,000 WINNER!" : "WHAT'S YOUR HUSTLE? WIN K10,000 TO GROW YOUR BUSINESS!"}</h1>
+      ${phase.key === 'winner' && winnerName ? `<div class="hustle-winner-name">${esc(winnerName)}</div>` : ''}
+      <p class="hustle-hero-sub">One Zambian business wins K10,000. Tell Zambia your hustle, show your work, and let the public vote.</p>
+      <div class="hustle-prize-line"><span class="muted">Prize:</span> ${esc(prize)}</div>
+      <div class="hustle-winner-line">Winner Announcement: December 31, 2026.</div>
+      <div id="hustle-countdown"></div>
+      <div style="margin:10px 0">${hustlePhaseBadge(phase)}</div>
+      <div class="btn-row">${heroBtns}</div>
+      <p class="hustle-hero-note">Free to enter. One vote per verified account. No payment needed to vote.</p>
+    </section>
+    <div class="card" style="background:var(--amber-tint);margin-top:14px">
+      <h3 style="margin-top:0">The prize</h3>
+      <div style="font-size:21px;font-weight:800;color:var(--green)">${esc(prize)}</div>
+      <p class="small" style="margin:6px 0 0">Paid by the owner of 2911 Jobs to the winning business. The winner shows exactly how they will use it in their application, and the spend plan is public on their entry page.</p>
+      <a class="small" href="#rules">How the winner is chosen</a>
+    </div>
+    <div class="section-title"><span>How it works</span></div>
+    <div class="steps">
+      <div class="card"><div class="step-n">1</div><div><h4>Apply</h4><p>A verified business tells its hustle story, records a 60 to 90 second pitch, and shows how it will use K10,000.</p></div></div>
+      <div class="card"><div class="step-n">2</div><div><h4>Vote</h4><p>The public votes in the app. One vote per verified account. Votes never change after confirmation.</p></div></div>
+      <div class="card"><div class="step-n">3</div><div><h4>Win</h4><p>The winner is announced on December 31, 2026, and the K10,000 is paid by the owner.</p></div></div>
+    </div>
+    <div class="card" id="rules">
+      <h3 style="margin-top:0">Rules</h3>
+      <ul style="margin:6px 0 0 18px;font-size:14px;line-height:1.6">
+        <li>Open to verified businesses on 2911 Jobs only. Your storefront must be verified before you apply.</li>
+        <li>One entry per business. One vote per verified account.</li>
+        <li>You cannot vote for your own business.</li>
+        <li>Votes never change after confirmation.</li>
+        <li>Your pitch video must be 60 to 90 seconds.</li>
+        <li>Your K10,000 spend plan must total exactly K10,000.</li>
+        <li>The admin may freeze the leaderboard while votes are verified. Frozen totals are the last verified totals, not live totals.</li>
+        <li>The admin may disqualify an entry for fraud or for breaking the rules. The reason is recorded and the business is told.</li>
+        <li>The winner is announced on December 31, 2026. The prize is K10,000, paid by the owner.</li>
+        <li>Storefronts stay live after the competition. Entering does not close your storefront.</li>
+      </ul>
+      <p class="small muted" style="margin:10px 0 0">Applications open ${esc(fmtLusaka(comp.applications_open_at))}. Applications close ${esc(fmtLusaka(comp.applications_close_at))}. Voting opens ${esc(fmtLusaka(comp.voting_opens_at))} and closes ${esc(fmtLusaka(comp.voting_closes_at))}. All times are Lusaka time.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Who can enter</h3>
+      <p class="small">Any verified business on 2911 Jobs, in any category and any province, with a verified storefront. Sole proprietors, business names, limited companies, and partnerships can all enter.</p>
+      <div class="chips">${MARKET_CATEGORIES.map(c => `<span class="chip">${esc(c)}</span>`).join('')}</div>
+      <a class="btn btn-sm btn-outline" href="#/businesses" style="margin-top:10px">Browse businesses</a>
+    </div>
+    <div id="hustle-pitches"></div>
+    <div id="hustle-preview"></div>
+    <div class="card" style="background:linear-gradient(135deg,#0B1F3B,#2563EB);color:#fff;margin-top:14px">
+      <h3 style="margin-top:0;color:#fff">${appsOpen ? 'Your hustle could win K10,000' : phase.key === 'voting' ? 'Voting is open' : phase.key === 'before' ? 'Applications open soon' : 'Voting has closed'}</h3>
+      <p class="small" style="color:rgba(255,255,255,.85);margin:4px 0 12px">${appsOpen ? 'Verified businesses only. It takes about 15 minutes to apply, and you can save a draft and come back.' : phase.key === 'voting' ? 'Find a business and vote.' : phase.key === 'before' ? 'Applications open on ' + esc(fmtLusaka(comp.applications_open_at)) + '.' : 'Final results follow verification.'}</p>
+      ${appsOpen ? `<a class="btn btn-primary" href="#/hustle/apply">Apply Now</a>` : phase.key === 'voting' ? `<a class="btn btn-primary" href="#/hustle/leaderboard">Vote now</a>` : phase.key === 'before' ? `<a class="btn btn-primary" href="#/business/apply">Open a storefront</a>` : ''}
+    </div>
+    <div class="safety-card" style="margin-top:14px">
+      <span class="safety-ico">${icon('shield')}</span>
+      <div><b>Stay safe</b><p class="small muted" style="margin:2px 0 0">Voting is free. No one from 2911 Jobs will ask you to pay to vote, or to pay to enter. Report anything that feels wrong.</p><a class="small" href="#/how">Help and safety</a></div>
+    </div>
+  </div></div>`;
+  startHustleCountdown(document.getElementById('hustle-countdown'), comp);
+  // Entries strip and leaderboard preview, loaded separately so a failure
+  // in one never takes down the hero, prize, rules or apply card.
+  api('/api/hustle/competitions/' + comp.id + '/entries').then((d) => {
+    const entries = normEntries(d);
+    const pitchSlot = document.getElementById('hustle-pitches');
+    const prevSlot = document.getElementById('hustle-preview');
+    if (!pitchSlot) return;
+    if (!entries.length) {
+      pitchSlot.innerHTML = appsOpen
+        ? emptyHtml('trophy', 'No pitches yet', 'Be the first verified business to enter. Applications are open.', `<a class="btn btn-sm btn-primary" href="#/hustle/apply">Apply Now</a>`)
+        : emptyHtml('trophy', 'No pitches yet', 'Applications open soon. Check back, or open a storefront to get ready.', `<a class="btn btn-sm btn-primary" href="#/business/apply">Open a storefront</a>`);
+      if (prevSlot) prevSlot.innerHTML = '';
+      return;
+    }
+    const showVotes = votingOpen || phase.key === 'frozen' || phase.key === 'closed' || phase.key === 'winner';
+    pitchSlot.innerHTML = `
+      <div class="section-title"><span>Watch the pitches</span><a href="#/hustle/leaderboard">See all</a></div>
+      <div class="hscroll">${entries.slice(0, 8).map(e => hustleEntryCard(e, showVotes)).join('')}</div>`;
+    if (prevSlot) {
+      const top = entries.slice(0, 3);
+      prevSlot.innerHTML = `
+        <div class="section-title"><span>${showVotes ? 'Top 10' : 'Latest entries'}</span><a href="#/hustle/leaderboard">Full leaderboard</a></div>
+        ${top.map((e, i) => hustleLeaderRow(e, i + 1, showVotes, phase.key === 'frozen' ? 'frozen votes' : phase.key === 'winner' ? 'final votes' : 'votes')).join('')}`;
+    }
+  }).catch((e) => {
+    const pitchSlot = document.getElementById('hustle-pitches');
+    if (pitchSlot) pitchSlot.innerHTML = errorHtml(e.message);
+  });
+}
+
+/* ---------------- Leaderboard ---------------- */
+async function viewHustleLeaderboard() {
+  const qp = new URLSearchParams((location.hash.split('?')[1] || ''));
+  const fCat = qp.get('category') || '', fProv = qp.get('province') || '', fDist = qp.get('district') || '';
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/hustle">Back to What's Your Hustle?</a>
+    <h1 class="page-title">Leaderboard</h1>
+    <p class="page-sub">Verified votes only. One vote per verified account.</p>
+    <div id="lb-banner"></div>
+    <div class="chips" id="lb-chips" style="margin:10px 0">
+      <button class="chip ${!fCat ? 'active' : ''}" data-lbcat="">All</button>
+      ${MARKET_CATEGORIES.map(c => `<button class="chip ${fCat === c ? 'active' : ''}" data-lbcat="${esc(c)}">${esc(c)}</button>`).join('')}
+    </div>
+    <div class="form-2col">
+      <div class="field"><label for="lb-province">Province</label><select id="lb-province"><option value="">All provinces</option></select></div>
+      <div class="field"><label for="lb-district">District</label><select id="lb-district" disabled><option value="">Choose a province first</option></select></div>
+    </div>
+    <div id="lb-clear" style="text-align:right"></div>
+    <div id="lb-list" style="margin-top:12px">${skeletonCards(3)}</div>
+    <p class="small muted" id="lb-foot"></p>
+  </div></div>`;
+  const comp = await getCurrentComp();
+  const phase = hustlePhase(comp);
+  const banner = document.getElementById('lb-banner');
+  if (banner && comp) {
+    const frozen = phase.key === 'frozen';
+    banner.innerHTML = `<div class="card" style="background:${frozen ? 'var(--amber-tint)' : 'var(--green-tint)'}">
+      <p class="small" style="margin:0">${frozen ? 'Results are under verification. These are the last frozen totals. Final results follow verification.' : phase.key === 'voting' ? 'Voting is open. Voting closes on ' + esc(fmtLusaka(comp.voting_closes_at)) + '.' : phase.key === 'winner' ? 'Final verified results. Winner announced December 31, 2026.' : phase.key === 'applications' ? 'Voting has not opened yet. Entries are ordered by newest first.' : 'Voting has closed. Final results follow verification.'}</p></div>`;
+  }
+  const provSel = document.getElementById('lb-province');
+  const distSel = document.getElementById('lb-district');
+  const locs = await getHustleLocations();
+  if (locs && provSel) {
+    provSel.innerHTML = '<option value="">All provinces</option>' + locs.map(p => `<option ${fProv === p.name ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+    const fillDist = (prov) => {
+      const p = (locs || []).find(x => x.name === prov);
+      if (!p) { distSel.innerHTML = '<option value="">Choose a province first</option>'; distSel.disabled = true; return; }
+      distSel.disabled = false;
+      distSel.innerHTML = '<option value="">All districts</option>' + p.districts.map(d => `<option ${fDist === d.name ? 'selected' : ''}>${esc(d.name)}</option>`).join('');
+    };
+    if (fProv) fillDist(fProv);
+    provSel.addEventListener('change', () => { fillDist(provSel.value); reload(); });
+    distSel.addEventListener('change', reload);
+  }
+  let cat = fCat, prov = fProv, dist = fDist;
+  let allEntries = [];
+  let shown = 10;
+  function render() {
+    const list = document.getElementById('lb-list');
+    const foot = document.getElementById('lb-foot');
+    const clear = document.getElementById('lb-clear');
+    if (!list) return;
+    let rows = allEntries.slice();
+    if (cat) rows = rows.filter(e => e.category === cat);
+    if (prov) rows = rows.filter(e => e.province === prov);
+    if (dist) rows = rows.filter(e => e.district === dist);
+    const votingDone = phase.key === 'voting' || phase.key === 'frozen' || phase.key === 'closed' || phase.key === 'winner';
+    const voteLabel = phase.key === 'frozen' ? 'frozen votes' : phase.key === 'winner' ? 'final votes' : 'votes';
+    if (clear) clear.innerHTML = (cat || prov || dist) ? `<button class="btn btn-ghost btn-sm" id="lb-clear-btn">Clear filters</button>` : '';
+    const clearBtn = document.getElementById('lb-clear-btn');
+    if (clearBtn) clearBtn.addEventListener('click', () => { location.hash = '#/hustle/leaderboard'; });
+    if (!rows.length) {
+      list.innerHTML = (cat || prov || dist)
+        ? emptyHtml('tag', 'No entries in this filter', 'Try another category, province, or district.', `<a class="btn btn-sm btn-primary" href="#/hustle/leaderboard">Clear filters</a>`)
+        : emptyHtml('trophy', 'No entries yet', 'No businesses have been approved for the competition yet. Check back soon.', `<a class="btn btn-sm btn-primary" href="#/hustle">Back to the competition</a>`);
+      if (foot) foot.textContent = '';
+      return;
+    }
+    const top = rows.slice(0, 10);
+    const rest = rows.slice(10, 10 + shown);
+    const heading = (cat || prov) ? 'Top 10 in ' + esc(cat || prov) : (votingDone ? 'Top 10' : 'Latest entries');
+    list.innerHTML = `
+      ${phase.key === 'winner' && comp && comp.winner_application_id ? `<div class="card" style="background:var(--amber-tint);margin-bottom:12px"><h3 style="margin-top:0">${icon('trophy')} CONGRATULATIONS TO OUR K10,000 WINNER!</h3>${(() => { const w = rows.find(e => String(e.application_id) === String(comp.winner_application_id)); return w ? `<p style="margin:4px 0"><b>${esc(w.business_name)}</b> · ${esc([w.category, w.province].filter(Boolean).join(' · '))}</p><p class="small" style="margin:0">${w.vote_count != null ? Number(w.vote_count).toLocaleString('en-ZM') + ' final votes' : ''}</p><div class="btn-row" style="margin-top:10px"><a class="btn btn-sm btn-primary" href="#/hustle/entry/${w.application_id}">View the winning pitch</a><a class="btn btn-sm btn-outline" href="#/business/${esc(w.business_slug || w.business_id)}">Visit the storefront</a></div>` : ''; })()}</div>` : ''}
+      <div class="section-title"><span>${heading}</span></div>
+      ${top.map((e, i) => hustleLeaderRow(e, i + 1, votingDone, voteLabel)).join('')}
+      ${rest.length ? `<div class="section-title"><span>All entries</span></div>${rest.map((e, i) => hustleLeaderRow(e, 11 + i, votingDone, voteLabel)).join('')}` : ''}
+      ${rows.length > 10 + shown ? `<button class="btn btn-outline full" id="lb-more">Load more (${rows.length - 10 - shown} left)</button>` : ''}`;
+    const more = document.getElementById('lb-more');
+    if (more) more.addEventListener('click', () => { shown += 20; render(); });
+    if (foot) foot.textContent = votingDone
+      ? 'Vote counts are verified votes only. Votes from unverified accounts, duplicate votes, and votes for disqualified entries are not counted. Last updated ' + relTime(new Date().toISOString()) + '.' + (phase.key === 'frozen' && comp.leaderboard_frozen_at ? ' Frozen on ' + fmtLusaka(comp.leaderboard_frozen_at) + '.' : '')
+      : 'Voting has not opened yet. Entries are ordered by newest first.';
+  }
+  async function reload() {
+    cat = document.querySelector('#lb-chips .chip.active')?.dataset.lbcat || '';
+    prov = provSel ? provSel.value : '';
+    dist = distSel ? distSel.value : '';
+    const q = new URLSearchParams();
+    if (cat) q.set('category', cat);
+    if (prov) q.set('province', prov);
+    if (dist) q.set('district', dist);
+    const qs = q.toString();
+    if (qs) history.replaceState(null, '', '#/hustle/leaderboard?' + qs);
+    render();
+  }
+  document.getElementById('lb-chips').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-lbcat]');
+    if (!chip) return;
+    document.querySelectorAll('#lb-chips .chip').forEach(c => c.classList.toggle('active', c === chip));
+    reload();
+  });
+  try {
+    if (!comp) throw new Error('The competition could not be loaded right now.');
+    const d = await api('/api/hustle/competitions/' + comp.id + '/leaderboard');
+    allEntries = normEntries(d);
+    if (!allEntries.length) {
+      const e2 = await api('/api/hustle/competitions/' + comp.id + '/entries').catch(() => null);
+      if (e2) allEntries = normEntries(e2);
+    }
+    // Newest first before voting opens; the leaderboard response is ranked
+    // by votes when voting is open or closed.
+    if (phase.key === 'applications' || phase.key === 'review' || phase.key === 'before') {
+      allEntries.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    }
+    render();
+  } catch (e) {
+    const list = document.getElementById('lb-list');
+    if (list) list.innerHTML = errorHtml(e.message);
+  }
+}
+
+/* ---------------- Entry page + voting ---------------- */
+async function viewHustleEntry(id) {
+  app.innerHTML = `<div class="view"><div class="page"><div id="entry-box">${skeletonCards(2)}</div></div></div>`;
+  const box = document.getElementById('entry-box');
+  let entry = null;
+  try {
+    const d = await api('/api/hustle/entries/' + id);
+    entry = normEntry(d.entry || d);
+  } catch (e) {
+    box.innerHTML = errorHtml(e.message);
+    return;
+  }
+  if (!entry || !entry.business_name) {
+    box.innerHTML = emptyHtml('search', 'Entry not found', 'This entry may have been removed, or it is not approved yet.');
+    return;
+  }
+  const comp = await getCurrentComp();
+  const phase = hustlePhase(comp);
+  // Own-business check: the entry detail never carries the owner id, so
+  // compare against the caller's own applications instead. The server
+  // still rejects a self-vote with 422; this only disables the button.
+  let isOwnEntry = false;
+  if (currentUser) {
+    try {
+      const mine = await api('/api/hustle/applications/mine');
+      isOwnEntry = (mine.applications || []).some(a => String(a.id) === String(entry.application_id));
+    } catch (e) { isOwnEntry = false; }
+  }
+  const votingOpen = phase.key === 'voting';
+  const frozen = phase.key === 'frozen';
+  const closed = phase.key === 'closed' || phase.key === 'winner';
+  const answers = entry.answers || {};
+  const spend = Array.isArray(entry.spend_items) ? entry.spend_items : [];
+  const photos = (entry.photos || []).map(p => typeof p === 'string' ? p : (p.image || p.url || ''));
+  const isOwner = isOwnEntry;
+  box.innerHTML = `
+    <a class="small" href="#/hustle/leaderboard">Back to Leaderboard</a>
+    <div style="margin-top:10px">${hustleVideoTile(entry, true)}</div>
+    <div class="card" style="margin-top:12px">
+      <h1 class="page-title" style="font-size:22px;margin:0">${esc(entry.business_name)}</h1>
+      <p class="small muted" style="margin:4px 0">${esc([entry.category, entry.province, entry.district, entry.town].filter(Boolean).join(' · '))}</p>
+      ${entry.verified ? bizBadge({ verified: true }) : ''}
+    </div>
+    <div class="card" id="vote-card">${skeletonCards(1)}</div>
+    <div class="card">
+      <h3 style="margin-top:0">Their hustle</h3>
+      ${entry.pitch_summary ? `<p style="font-weight:700;margin:0 0 10px">${esc(entry.pitch_summary)}</p>` : ''}
+      ${HUSTLE_QUESTIONS.map(q => {
+        const a = answers[q.key] || answers[q.label] || '';
+        if (q.key === 'q6') {
+          const a6 = answers.q6 || '';
+          if (!a6) return '';
+          return `<h4 style="margin:12px 0 2px">${esc(q.label)}</h4><p style="margin:0">${esc(a6)}</p>`;
+        }
+        return a ? `<h4 style="margin:12px 0 2px">${esc(q.label)}</h4><p style="margin:0;white-space:pre-wrap">${esc(a)}</p>` : '';
+      }).join('')}
+    </div>
+    ${spend.length ? `<div class="card"><h3 style="margin-top:0">How they will use K10,000</h3>
+      ${spend.map(s => `<div class="split" style="padding:6px 0;border-bottom:1px solid var(--line)"><span>${esc(s.label || s.name || '')}</span><b>${fmtK(s.amount || s.kwacha || 0)}</b></div>`).join('')}
+      <div class="split" style="padding:8px 0 0"><span><b>Total</b></span><b>${fmtK(spend.reduce((a, s) => a + Number(s.amount || s.kwacha || 0), 0))}</b></div></div>` : ''}
+    ${photos.length ? `<div class="card"><h3 style="margin-top:0">Photos</h3>
+      <img class="pd-main" id="entry-main-photo" src="${esc(photos[0])}" alt="Pitch photo" style="width:100%;height:300px;object-fit:cover;border-radius:20px">
+      ${photos.length > 1 ? `<div class="pd-thumbs" style="display:flex;gap:8px;margin-top:8px;overflow-x:auto">${photos.map((p, i) => `<img src="${esc(p)}" alt="Pitch photo ${i + 1}" data-entry-thumb="${esc(p)}" style="width:64px;height:64px;border-radius:12px;object-fit:cover;cursor:pointer">`).join('')}</div>` : ''}</div>` : ''}
+    <div class="card" style="display:flex;gap:12px;align-items:center">
+      ${entry.logo ? `<img class="biz-logo" src="${esc(entry.logo)}" alt="${esc(entry.business_name)} logo">` : `<div class="biz-logo biz-logo-fallback">${icon('tag')}</div>`}
+      <span style="flex:1;min-width:0"><b>${esc(entry.business_name)}</b><span class="small muted" style="display:block">${esc([entry.category, entry.province].filter(Boolean).join(' · '))}</span></span>
+      <a class="btn btn-sm btn-outline" href="#/business/${esc(entry.business_slug || entry.business_id)}">Visit the storefront</a>
+      <button class="btn btn-sm btn-outline" data-share-hustle-entry="${entry.application_id}" data-title="${esc(entry.business_name)}">${icon('share')} Share this entry</button>
+    </div>
+    <p class="small muted">Voting is free. One vote per verified account. Votes never change after confirmation.</p>`;
+  box.querySelectorAll('[data-entry-thumb]').forEach(t => t.addEventListener('click', () => {
+    const main = document.getElementById('entry-main-photo');
+    if (main) main.src = t.dataset.entryThumb;
+  }));
+  await renderVoteCard(entry, phase, comp);
+  async function renderVoteCard(entry, phase, comp) {
+    const card = document.getElementById('vote-card');
+    if (!card) return;
+    const votingOpenNow = phase.key === 'voting';
+    const frozenNow = phase.key === 'frozen';
+    const showCount = votingOpenNow || frozenNow || phase.key === 'closed' || phase.key === 'winner';
+    let myVote = null;
+    if (currentUser) {
+      try {
+        const mv = await api('/api/hustle/entries/' + entry.application_id + '/my-vote');
+        myVote = mv.voted === true || mv.has_voted === true || !!mv.my_vote || !!mv.vote;
+      } catch (e) {
+        try {
+          const mine = await api('/api/hustle/competitions/' + (comp ? comp.id : '') + '/votes/mine');
+          const v = mine.vote || mine.my_vote || null;
+          myVote = !!v;
+        } catch (e2) { myVote = null; }
+      }
+    }
+    const isOwn = isOwnEntry;
+    const disqualified = entry.status === 'disqualified';
+    let btnHtml = '', noteHtml = '';
+    if (disqualified) {
+      btnHtml = `<button class="btn btn-ghost full" disabled>Entry disqualified</button>`;
+      noteHtml = `<p class="small muted" style="margin:8px 0 0">This entry was disqualified. See the leaderboard for the current standings.</p>`;
+    } else if (myVote) {
+      btnHtml = `<button class="btn btn-outline full hustle-vote-voted" disabled>${icon('check')} You have voted</button>`;
+      noteHtml = `<p class="small muted" style="margin:8px 0 0">You have used your one vote in What's Your Hustle?. Votes never change after confirmation.</p><a class="small" href="#/hustle/leaderboard">See the leaderboard</a>`;
+    } else if (!votingOpenNow && !frozenNow) {
+      const label = phase.key === 'before' || phase.key === 'applications' || phase.key === 'review'
+        ? 'Voting opens on ' + fmtLusaka(comp ? comp.voting_opens_at : '', false)
+        : 'Voting has closed';
+      btnHtml = `<button class="btn btn-ghost full" disabled>${esc(label)}</button>`;
+      noteHtml = `<p class="small muted" style="margin:8px 0 0">${phase.key === 'winner' ? 'The winner was announced on December 31, 2026.' : phase.key === 'closed' || frozenNow ? 'Voting closed on ' + esc(fmtLusaka(comp ? comp.voting_closes_at : '', false)) + '. Final results follow verification.' : 'Applications are still being reviewed. Come back when voting opens.'}</p>`;
+    } else if (isOwn) {
+      btnHtml = `<button class="btn btn-ghost full" disabled>This is your business</button>`;
+      noteHtml = `<p class="small muted" style="margin:8px 0 0">You cannot vote for your own business.</p>`;
+    } else {
+      btnHtml = `<button class="btn btn-primary full" id="hustle-vote-btn" style="min-height:44px">Vote for This Business</button>`;
+      noteHtml = frozenNow ? `<p class="small muted" style="margin:8px 0 0">The leaderboard is frozen while votes are verified. Your vote is recorded for the audit record.</p>` : '';
+    }
+    card.innerHTML = `
+      ${showCount ? `<div style="display:flex;gap:16px;align-items:baseline"><span><b style="font-size:21px">${entry.vote_count != null ? Number(entry.vote_count).toLocaleString('en-ZM') : '0'}</b> <span class="small muted">${frozenNow ? 'frozen votes' : phase.key === 'winner' ? 'final votes' : 'votes'}</span></span>${entry.rank != null ? `<span class="small muted">Rank ${esc(String(entry.rank))}</span>` : ''}</div>` : `<p class="small muted" style="margin:0 0 8px">Voting opens on ${esc(fmtLusaka(comp ? comp.voting_opens_at : '', false))}.</p>`}
+      ${btnHtml}${noteHtml}`;
+    const voteBtn = document.getElementById('hustle-vote-btn');
+    if (voteBtn) voteBtn.addEventListener('click', () => openVoteDialog(entry, comp, card));
+  }
+  function openVoteDialog(entry, comp, card) {
+    if (!requireAuth('#/hustle/entry/' + entry.application_id)) return;
+    if (currentUser.selfie_status !== 'approved') {
+      card.innerHTML = emptyHtml('shield', 'Verify your account to vote', 'Voting is open to verified accounts only. Upload a verification selfie from your profile, and vote once it is approved.', `<a class="btn btn-sm btn-primary" href="#/profile/edit">Go to Edit Profile</a>`);
+      return;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'share-overlay';
+    overlay.innerHTML = `
+      <div class="share-sheet" role="dialog" aria-label="Confirm your vote">
+        <h3>Confirm your vote</h3>
+        <p>You are voting for <b>${esc(entry.business_name)}</b>. You have one vote in What's Your Hustle?, and votes never change after confirmation. Are you sure?</p>
+        <div style="display:flex;gap:10px;align-items:center;margin:10px 0">
+          ${entry.logo ? `<img class="avatar md" src="${esc(entry.logo)}" alt="">` : ''}
+          <b>${esc(entry.business_name)}</b>
+        </div>
+        <p class="ferr" id="vote-err" hidden></p>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="vote-yes">Yes, vote for ${esc(entry.business_name)}</button>
+          <button class="btn btn-ghost" id="vote-no">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('#vote-no').addEventListener('click', close);
+    overlay.querySelector('#vote-yes').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Voting…';
+      try {
+        const res = await api('/api/hustle/entries/' + entry.application_id + '/vote', { method: 'POST', body: '{}' });
+        close();
+        const newCount = res.vote_count != null ? res.vote_count : (entry.vote_count != null ? Number(entry.vote_count) + 1 : 1);
+        const newRank = res.rank != null ? res.rank : entry.rank;
+        card.innerHTML = `
+          <div style="text-align:center;padding:8px 0">
+            <div style="font-size:34px;color:var(--green)">${icon('check')}</div>
+            <h3 style="margin:8px 0">Thank you! Your vote has been counted.</h3>
+            <p class="small muted">${esc(entry.business_name)}${newRank != null ? ' is now Rank ' + esc(String(newRank)) + ' with ' + Number(newCount).toLocaleString('en-ZM') + ' votes.' : ' has ' + Number(newCount).toLocaleString('en-ZM') + ' votes.'}</p>
+            <p class="small muted">You have used your one vote in What's Your Hustle?. Votes never change after confirmation.${phase.key === 'frozen' ? ' The leaderboard is frozen while votes are verified, so your vote is not shown in the totals yet.' : ''}</p>
+            <div class="btn-row" style="justify-content:center"><a class="btn btn-primary" href="#/hustle/leaderboard">See the leaderboard</a><button class="btn btn-outline" id="vote-share">Share this entry</button></div>
+          </div>`;
+        document.getElementById('vote-share').addEventListener('click', () => shareHustleEntry(entry.application_id, entry.business_name));
+        entry.vote_count = newCount;
+        entry.rank = newRank;
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Yes, vote for ' + entry.business_name;
+        const ferr = overlay.querySelector('#vote-err');
+        ferr.textContent = err.message || 'Could not record your vote. Try again.';
+        ferr.hidden = false;
+      }
+    });
+  }
+}
+
+/* ---------------- My entry ---------------- */
+async function viewHustleMyEntry() {
+  if (!requireAuth('#/hustle/my-entry')) return;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading your entry…')}</div></div>`;
+  try {
+    const d = await api('/api/hustle/applications/mine');
+    const apps = d.applications || d || [];
+    if (!apps.length) { toast('Apply for What\'s Your Hustle? first.'); location.hash = '#/hustle/apply'; return; }
+    const a = apps[0];
+    if (a.status === 'draft') { toast('Continue your draft application.'); location.hash = '#/hustle/apply/' + a.id; return; }
+    const entry = normEntry(a);
+    const comp = await getCurrentComp();
+    app.innerHTML = `
+    <div class="view"><div class="page">
+      <a class="small" href="#/hustle">Back to What's Your Hustle?</a>
+      <h1 class="page-title">My competition entry</h1>
+      <div class="card">
+        <div style="display:flex;gap:10px;align-items:center">${hustleAppBadge(a.status)}<b>${esc(entry.business_name || '')}</b></div>
+        <p class="small" style="margin:10px 0 0">${a.status === 'submitted' || a.status === 'under_review' ? 'Your hustle has been submitted. Our team will review your application before it goes live for public voting.' : a.status === 'changes_requested' ? 'Our team asked for changes. See the note below, then edit your application.' : a.status === 'approved' ? 'Your pitch is approved.' + (comp && comp.voting_opens_at ? ' Voting opens on ' + esc(fmtLusaka(comp.voting_opens_at)) + '.' : '') : a.status === 'rejected' ? 'Your application was not approved. See the note below.' : ''}</p>
+        ${a.submitted_at ? `<p class="small muted">Submitted ${esc(fmtLusaka(a.submitted_at))}.</p>` : ''}
+        ${(a.review_note || a.admin_note || a.note) ? `<p class="small"><b>Admin note:</b> ${esc(a.review_note || a.admin_note || a.note)}</p>` : ''}
+        <div class="btn-row" style="margin-top:10px">
+          ${a.status === 'changes_requested' ? `<a class="btn btn-primary" href="#/hustle/apply/${a.id}">Edit application</a>` : ''}
+          ${a.status === 'approved' ? `<a class="btn btn-primary" href="#/hustle/entry/${a.id}">View your entry</a>` : ''}
+          <a class="btn btn-outline" href="#/hustle">Back to the competition</a>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Your application</h3>
+        ${entry.pitch_summary ? `<p style="font-weight:700">${esc(entry.pitch_summary)}</p>` : ''}
+        ${entry.video_url ? `<p class="small">Pitch video: <a href="${esc(entry.video_url)}" target="_blank" rel="noopener">Watch pitch (${esc(entry.video_platform || hustleVideoPlatform(entry.video_url) || 'video')})</a></p>` : ''}
+        ${HUSTLE_QUESTIONS.map(q => {
+          const ans = (entry.answers || {})[q.key] || '';
+          return ans ? `<h4 style="margin:12px 0 2px">${esc(q.label)}</h4><p style="margin:0;white-space:pre-wrap">${esc(ans)}</p>` : '';
+        }).join('')}
+      </div>
+    </div></div>`;
+  } catch (e) {
+    app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
+  }
+}
+
+/* ---------------- Notifications inbox ---------------- */
+async function viewNotifications() {
+  if (!requireAuth('#/notifications')) return;
+  const qp = new URLSearchParams((location.hash.split('?')[1] || ''));
+  let filter = qp.get('filter') || 'all';
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <h1 class="page-title">Notifications</h1>
+    <p class="page-sub">Updates about your businesses and the competition.</p>
+    <div class="chips" id="nt-chips">
+      <button class="chip ${filter === 'all' ? 'active' : ''}" data-ntfilter="all">All</button>
+      <button class="chip ${filter === 'unread' ? 'active' : ''}" data-ntfilter="unread">Unread</button>
+      <button class="chip ${filter === 'hustle' ? 'active' : ''}" data-ntfilter="hustle">Hustle</button>
+      <button class="chip ${filter === 'business' ? 'active' : ''}" data-ntfilter="business">Businesses</button>
+    </div>
+    <div style="text-align:right;margin:8px 0"><button class="btn btn-ghost btn-sm" id="nt-read-all">Mark all as read</button></div>
+    <div id="nt-invites"></div>
+    <div id="nt-list">${skeletonCards(3)}</div>
+    <div id="nt-more" style="margin-top:10px"></div>
+  </div></div>`;
+  const list = document.getElementById('nt-list');
+  let items = [], shown = 20;
+  const notifIcon = (n) => {
+    const k = String(n.kind || '');
+    if (k.includes('winner') || k.includes('voting') || k.includes('application') || k.includes('hustle')) return 'trophy';
+    if (k.includes('fraud') || k.includes('disqualif')) return 'shield';
+    if (k.includes('approv') || k.includes('verif')) return 'check';
+    if (k.includes('business')) return 'grid';
+    return 'bell';
+  };
+  const notifLink = (n) => {
+    if (n.link) return n.link;
+    const refType = n.related_type || n.ref_type, refId = n.related_id || n.ref_id;
+    if (refType === 'application' || refType === 'entry' || refType === 'hustle_application') return '#/hustle/entry/' + (refId || '');
+    if (refType === 'business') return '#/business/' + (refId || '') + '/manage';
+    if (refType === 'competition') return '#/hustle/leaderboard';
+    return '#/hustle';
+  };
+  function render() {
+    let rows = items.slice();
+    if (filter === 'unread') rows = rows.filter(n => !n.read_at);
+    if (filter === 'hustle') rows = rows.filter(n => String(n.kind || '').includes('hustle') || String(n.kind || '').includes('application') || String(n.kind || '').includes('voting') || String(n.kind || '').includes('winner'));
+    if (filter === 'business') rows = rows.filter(n => String(n.kind || '').includes('business'));
+    if (!rows.length) {
+      list.innerHTML = filter === 'unread'
+        ? emptyHtml('bell', 'No unread notifications', 'You are all caught up.', `<a class="btn btn-sm btn-primary" href="#/notifications">See all notifications</a>`)
+        : emptyHtml('bell', 'No notifications yet', 'Updates about your businesses and the competition will appear here.', `<a class="btn btn-sm btn-primary" href="#/hustle">See the competition</a>`);
+      document.getElementById('nt-more').innerHTML = '';
+      return;
+    }
+    const page = rows.slice(0, shown);
+    list.innerHTML = page.map(n => `
+      <div class="hustle-notif-row ${n.read_at ? '' : 'unread'}" data-notif="${n.id}" data-link="${esc(notifLink(n))}" tabindex="0" role="link">
+        <span class="hustle-notif-ico">${icon(notifIcon(n))}</span>
+        <span style="flex:1;min-width:0">
+          <b>${esc(n.title || 'Notification')}</b>
+          <span class="small muted" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(n.body || n.preview || '')}</span>
+        </span>
+        <span style="text-align:right;flex:0 0 auto"><span class="small muted">${esc(relTime(n.created_at))}</span>${n.read_at ? '' : '<span class="hustle-notif-dot" aria-label="Unread"></span>'}</span>
+      </div>`).join('');
+    document.getElementById('nt-more').innerHTML = rows.length > shown ? `<button class="btn btn-outline full" id="nt-more-btn">Load more (${rows.length - shown} left)</button>` : '';
+    const more = document.getElementById('nt-more-btn');
+    if (more) more.addEventListener('click', () => { shown += 20; render(); });
+    list.querySelectorAll('[data-notif]').forEach(row => {
+      const go = async () => {
+        // Announcements have ids like 'ann-3'; there is no per-user row to
+        // mark read, so only mark real notifications.
+        if (!String(row.dataset.notif).startsWith('ann-')) {
+          try { await api('/api/hustle/notifications/' + row.dataset.notif + '/read', { method: 'POST', body: '{}' }); } catch (e) {}
+        }
+        refreshNotifBadge();
+        location.hash = row.dataset.link;
+      };
+      row.addEventListener('click', go);
+      row.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    });
+  }
+  async function load() {
+    list.innerHTML = skeletonCards(3);
+    // Representative invites: the invitee accepts or declines here, in the
+    // inbox the invite message points to. Accept is a one-per-business cap.
+    try {
+      const inv = await api('/api/hustle/representative-invites');
+      const slot = document.getElementById('nt-invites');
+      const invites = inv.invites || [];
+      if (slot) slot.innerHTML = invites.length ? invites.map(v => `
+        <div class="card" style="margin-bottom:10px;border-color:var(--accent)">
+          <b>Representative invite</b>
+          <p class="small" style="margin:6px 0">${esc(v.business_name || 'A business')} invited you to be its authorised representative for What's Your Hustle?. As rep you can edit the storefront and help run the entry, but you cannot vote for it.</p>
+          <div class="btn-row">
+            <button class="btn btn-sm btn-primary" data-inv-accept="${v.business_id}">Accept</button>
+            <button class="btn btn-sm btn-ghost" data-inv-decline="${v.business_id}">Decline</button>
+          </div>
+        </div>`).join('') : '';
+      slot.querySelectorAll('[data-inv-accept]').forEach(btn => btn.addEventListener('click', async () => {
+        try { await api('/api/hustle/representative-invites/' + btn.dataset.invAccept + '/accept', { method: 'POST', body: '{}' }); toast('You are now the representative.'); load(); }
+        catch (e) { toast(e.message, true); }
+      }));
+      slot.querySelectorAll('[data-inv-decline]').forEach(btn => btn.addEventListener('click', async () => {
+        try { await api('/api/hustle/representative-invites/' + btn.dataset.invDecline + '/decline', { method: 'POST', body: '{}' }); toast('Invite declined.'); load(); }
+        catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { /* invites endpoint unavailable; the inbox still works */ }
+    try {
+      const d = await api('/api/hustle/notifications?limit=100');
+      items = d.notifications || d.items || [];
+      render();
+    } catch (e) { list.innerHTML = errorHtml(e.message); }
+  }
+  document.getElementById('nt-chips').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-ntfilter]');
+    if (!chip) return;
+    filter = chip.dataset.ntfilter;
+    document.querySelectorAll('#nt-chips .chip').forEach(c => c.classList.toggle('active', c === chip));
+    history.replaceState(null, '', '#/notifications' + (filter !== 'all' ? '?filter=' + filter : ''));
+    render();
+  });
+  document.getElementById('nt-read-all').addEventListener('click', async () => {
+    try {
+      await api('/api/hustle/notifications/read-all', { method: 'POST', body: '{}' });
+      items.forEach(n => { n.read_at = n.read_at || new Date().toISOString(); });
+      render();
+      refreshNotifBadge();
+      toast('All notifications marked as read.');
+    } catch (e) { toast(e.message, true); }
+  });
+  load();
+}
+
+/* ---------------- Completion flow for existing businesses ---------------- */
+const HUSTLE_COMPLETE_FIELDS = {
+  trading_name: 'bf-trading', business_type: 'bf-btype', year_started: 'bf-year',
+  province: 'bf-province', district: 'bf-district', town: 'bf-city', city: 'bf-city',
+  address: 'bf-address', description: 'bf-desc', phone: 'bf-phone', whatsapp: 'bf-whatsapp',
+  email: 'bf-email', logo: 'bf-logo', cover: 'bf-cover', category: 'bf-category',
+  products_services: 'bf-services', services: 'bf-services', hours: 'bf-hours-grid', hours_text: 'bf-hours',
+  pacra_number: 'bf-pacra', tpin: 'bf-tpin', owner_legal_name: 'bf-ownername',
+};
+async function viewBusinessComplete(id) {
+  if (!requireAuth('#/business/' + id + '/complete')) return;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Checking what is missing…')}</div></div>`;
+  try {
+    const data = await api('/api/businesses/mine');
+    const b = data.businesses.find(x => x.id === Number(id));
+    if (!b) { app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Business not found', 'This storefront is not yours, or it does not exist.', `<a class="btn btn-sm btn-primary" href="#/business/mine">My businesses</a>`)}</div></div>`; return; }
+    let missing = [];
+    try {
+      const c = await api('/api/hustle/businesses/' + b.id + '/completeness');
+      missing = c.missing || c.missing_fields || [];
+    } catch (e) { missing = []; }
+    if (!missing.length) {
+      app.innerHTML = `<div class="view"><div class="page">${emptyHtml('check', 'Your business is complete', 'Nothing is missing. You can apply for What\'s Your Hustle? now.', `<a class="btn btn-sm btn-primary" href="#/hustle/apply">Apply for What's Your Hustle?</a>`)}</div></div>`;
+      return;
+    }
+    const labels = hustleMissingLabels(missing);
+    app.innerHTML = `
+    <div class="view"><div class="page">
+      <a class="small" href="#/business/${b.id}/manage">Back to My businesses</a>
+      <h1 class="page-title">Finish onboarding to enter</h1>
+      <p class="page-sub">${missing.length} thing${missing.length === 1 ? '' : 's'} left: ${esc(labels.join(', '))}. Only the missing fields are shown, already filled in where we have them.</p>
+      ${businessFormHtml(b, true)}
+    </div></div>`;
+    const form = document.getElementById('business-form');
+    // Hide every field that is not missing, so the owner only sees the gap.
+    const keepIds = new Set(missing.map(m => HUSTLE_COMPLETE_FIELDS[m]).filter(Boolean));
+    const keepHours = missing.includes('hours') || missing.includes('hours_text');
+    form.querySelectorAll('.field, .form-2col').forEach(wrap => {
+      const inputs = wrap.querySelectorAll('input, select, textarea');
+      if (!inputs.length) return;
+      const anyKeep = Array.from(inputs).some(inp => keepIds.has(inp.id)) || (keepHours && wrap.querySelector('#bf-hours-grid'));
+      if (!anyKeep) wrap.style.display = 'none';
+    });
+    wireBusinessForm(form, b);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/businesses/' + b.id, { method: 'PATCH', body: JSON.stringify(collectBusinessData(form)) });
+        const c2 = await api('/api/hustle/businesses/' + b.id + '/completeness').catch(() => ({ missing: [] }));
+        if ((c2.missing || []).length) { toast('Saved. A few things are still missing.'); viewBusinessComplete(id); return; }
+        toast('Onboarding complete. You can apply now.');
+        location.hash = '#/hustle/apply';
+      } catch (e2) { toast(e2.message, true); }
+    });
+  } catch (e) {
+    app.innerHTML = `<div class="view"><div class="page">${errorHtml(e.message)}</div></div>`;
+  }
+}
+
+/* ---------------- Apply wizard ---------------- */
+function hustleDraftKey(compId, bizId) { return 'pw_hustle_draft_' + compId + '_' + (bizId || 'any'); }
+function hustleLoadDraft(compId, bizId) {
+  try {
+    const raw = localStorage.getItem(hustleDraftKey(compId, bizId));
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (d.saved_at && Date.now() - d.saved_at > 90 * 86400 * 1000) { localStorage.removeItem(hustleDraftKey(compId, bizId)); return null; }
+    return d;
+  } catch (e) { return null; }
+}
+function hustleSaveDraftLocal() {
+  const s = hustleApplyState;
+  if (!s) return;
+  try {
+    localStorage.setItem(hustleDraftKey(s.compId, s.businessId), JSON.stringify({ ...s.data, applicationId: s.applicationId, step: s.step, saved_at: Date.now() }));
+  } catch (e) { /* storage full: photos are the usual cause, the text draft still saves next time */ }
+}
+/** q6 is two inputs in the wizard (a head count and a team story) but one
+ * answer on the API: the API only accepts keys q1 to q10, so the count is
+ * folded into the q6 string. */
+function hustleSerializeQ6(count, text) {
+  const n = count === '' || count == null ? null : Number(count);
+  const t = String(text || '').trim();
+  const head = n != null && !Number.isNaN(n) ? 'Employs ' + n + (n === 1 ? ' person. ' : ' people. ') : '';
+  return (head + t).trim();
+}
+function hustleParseQ6(q6) {
+  const s = String(q6 || '');
+  const m = s.match(/^Employs (\d+) (?:person|people)\.\s*/);
+  return { count: m ? Number(m[1]) : '', text: m ? s.slice(m[0].length).trim() : s };
+}
+/** Save the wizard draft to the server. PATCH takes answers, pitch_summary
+ * and spend_items only; the pitch link and photos have their own endpoints
+ * and are synced separately, only when they changed, so an approved pitch
+ * is never reset to pending by an unchanged re-save. */
+async function hustleSaveDraftServer() {
+  const s = hustleApplyState;
+  if (!s || !s.applicationId) return;
+  try {
+    await api('/api/hustle/applications/' + s.applicationId, { method: 'PATCH', body: JSON.stringify(hustleApplyPayload(s)) });
+  } catch (e) { /* local draft is the fallback */ }
+  await hustleSyncPitch(s);
+  await hustleSyncPhotos(s);
+}
+async function hustleSyncPitch(s) {
+  const url = (s.data.video_url || '').trim();
+  if (!url || url === s.syncedVideoUrl) return;
+  try {
+    await api('/api/hustle/applications/' + s.applicationId + '/pitch', { method: 'POST', body: JSON.stringify({ video_url: url }) });
+    s.syncedVideoUrl = url;
+  } catch (e) { /* local draft keeps the link; submit reports the problem */ }
+}
+async function hustleSyncPhotos(s) {
+  const d = s.data;
+  for (let i = 0; i < d.photos.length; i++) {
+    const p = d.photos[i];
+    if (typeof p !== 'string' || !p.startsWith('data:')) continue;
+    try {
+      const res = await api('/api/hustle/applications/' + s.applicationId + '/photos', { method: 'POST', body: JSON.stringify({ image: p }) });
+      const photo = res.photo || {};
+      if (photo.url) {
+        d.photos[i] = photo.url;
+        if (photo.id) s.photoIds[photo.url] = photo.id;
+      }
+    } catch (e) { /* keep the data URI locally; submit reports the problem */ }
+  }
+}
+function hustleApplyPayload(s) {
+  const d = s.data;
+  const answers = {};
+  for (const k of Object.keys(d.answers || {})) {
+    if (/^q([1-9]|10)$/.test(k)) answers[k] = d.answers[k];
+  }
+  answers.q6 = hustleSerializeQ6(d.employees_count, d.employees_text);
+  const body = { answers, pitch_summary: d.summary || '' };
+  // The server rejects a spend plan whose total is not exactly the prize,
+  // so only send the plan once it adds up.
+  const spend = d.spend || [];
+  const total = spend.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+  if (spend.length && spend.every(r => r.label && Number(r.amount) > 0) && total === HUSTLE_PRIZE) body.spend_items = spend;
+  return body;
+}
+async function viewHustleApply(editId) {
+  if (!requireAuth('#/hustle/apply')) return;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading the application…')}</div></div>`;
+  const comp = await getCurrentComp();
+  if (!comp) { app.innerHTML = `<div class="view"><div class="page">${errorHtml('The competition could not be loaded right now.')}</div></div>`; return; }
+  const phase = hustlePhase(comp);
+  if (phase.key !== 'applications') {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('trophy', 'Applications are closed', 'Applications for this round closed on ' + esc(fmtLusaka(comp.applications_close_at, false)) + '. The next round will appear here.', `<a class="btn btn-sm btn-primary" href="#/hustle">Back to the competition</a>`)}</div></div>`;
+    return;
+  }
+  let mine = [];
+  try { mine = (await api('/api/businesses/mine')).businesses || []; } catch (e) { mine = []; }
+  const verified = mine.filter(b => b.status === 'active' && (b.verified || b.verification_status === 'verified'));
+  if (!mine.length) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('grid', 'You need a storefront first', 'Open a business storefront, get it verified, then come back to apply.', `<a class="btn btn-sm btn-primary" href="#/business/apply">Open a storefront</a>`)}</div></div>`;
+    return;
+  }
+  if (!verified.length) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Your storefront is not verified yet', 'The competition is open to verified businesses only. Your verification is under review, or was not approved. See the note on your dashboard.', `<a class="btn btn-sm btn-primary" href="#/business/mine">My businesses</a>`)}</div></div>`;
+    return;
+  }
+  let myApps = [];
+  try { myApps = (await api('/api/hustle/applications/mine')).applications || []; } catch (e) { myApps = []; }
+  const submitted = myApps.find(a => ['submitted', 'under_review', 'approved'].includes(a.status));
+  if (submitted && !editId) {
+    toast('You have already applied for this business.');
+    location.hash = '#/hustle/my-entry';
+    return;
+  }
+  // Completeness per verified business (live check, not stored state).
+  const compChecks = {};
+  for (const b of verified) {
+    try {
+      const c = await api('/api/hustle/businesses/' + b.id + '/completeness');
+      compChecks[b.id] = { complete: !!c.complete, missing: c.missing || [] };
+    } catch (e) { compChecks[b.id] = { complete: true, missing: [] }; }
+  }
+  const qp = new URLSearchParams((location.hash.split('?')[1] || ''));
+  let step = Math.min(6, Math.max(1, Number(qp.get('step') || 1) || 1));
+  let draft = null, serverDraft = null;
+  if (editId) {
+    serverDraft = myApps.find(a => String(a.id) === String(editId)) || null;
+    if (!serverDraft) {
+      try { const d = await api('/api/hustle/applications/' + editId); serverDraft = d.application || d; } catch (e) {}
+    }
+  }
+  if (serverDraft) {
+    const a = serverDraft;
+    const q6 = hustleParseQ6((a.answers || {}).q6);
+    draft = {
+      businessId: a.business_id, applicationId: a.id, step: step,
+      applicant_type: a.applicant_type || 'owner', applicant_name: a.applicant_name || '',
+      answers: a.answers || {}, employees_count: q6.count, employees_text: q6.text,
+      video_url: (a.pitch_video && a.pitch_video.video_url) || a.video_url || '',
+      summary: a.pitch_summary || a.summary || '',
+      photos: (a.photos || []).map(p => typeof p === 'string' ? p : (p.image || p.url || '')),
+      spend: a.spend_items || a.spend_plan || [],
+      saved_at: Date.now(),
+    };
+    step = Math.min(6, Math.max(1, Number(qp.get('step') || a.step || 1) || 1));
+  } else {
+    draft = hustleLoadDraft(comp.id, verified[0].id) || hustleLoadDraft(comp.id, 'any');
+    if (draft && draft.applicationId) {
+      const done = myApps.find(a => String(a.id) === String(draft.applicationId));
+      if (done && ['submitted', 'under_review', 'approved'].includes(done.status)) {
+        toast('You have already applied for this business.');
+        location.hash = '#/hustle/my-entry';
+        return;
+      }
+    }
+  }
+  const firstBiz = verified[0];
+  const draftApp = serverDraft || (draft && draft.applicationId ? myApps.find(a => String(a.id) === String(draft.applicationId)) : null);
+  const draftPhotoIds = {};
+  (draftApp && draftApp.photos ? draftApp.photos : []).forEach(p => {
+    const url = typeof p === 'string' ? p : (p.url || p.image || '');
+    if (p && p.id && url) draftPhotoIds[url] = p.id;
+  });
+  hustleApplyState = {
+    compId: comp.id, comp, businessId: draft && draft.businessId ? draft.businessId : firstBiz.id,
+    applicationId: draft && draft.applicationId ? draft.applicationId : null,
+    // The pitch link already on the server, so a re-save does not reset an
+    // approved pitch to pending; and server photo ids, so removing a photo
+    // removes it on the server too.
+    syncedVideoUrl: (draftApp && draftApp.pitch_video && draftApp.pitch_video.video_url) || (draft && draft.video_url) || '',
+    photoIds: draftPhotoIds,
+    step,
+    data: {
+      applicant_type: (draft && draft.applicant_type) || 'owner',
+      applicant_name: (draft && draft.applicant_name) || '',
+      answers: (draft && draft.answers) || {},
+      employees_count: draft ? draft.employees_count : '',
+      employees_text: draft ? (draft.employees_text || '') : '',
+      video_url: (draft && draft.video_url) || '',
+      summary: (draft && draft.summary) || '',
+      photos: (draft && draft.photos) || [],
+      spend: (draft && draft.spend && draft.spend.length) ? draft.spend : [{ label: '', amount: '' }, { label: '', amount: '' }, { label: '', amount: '' }],
+    },
+    business: verified.find(b => b.id === hustleApplyState?.businessId) || firstBiz,
+    adminNote: serverDraft ? (serverDraft.review_note || serverDraft.admin_note || serverDraft.note || '') : '',
+    adminStep: serverDraft ? serverDraft.step : null,
+  };
+  if (hustleApplyState.adminStep) hustleApplyState.step = hustleApplyState.adminStep;
+  renderWizard();
+  function renderWizard() {
+    const s = hustleApplyState;
+    const b = verified.find(x => x.id === s.businessId) || firstBiz;
+    s.business = b;
+    const check = compChecks[b.id] || { complete: true, missing: [] };
+    app.innerHTML = `
+    <div class="view"><div class="page">
+      <a class="small" href="#/hustle">Back to What's Your Hustle?</a>
+      <h1 class="page-title">Apply for What's Your Hustle?</h1>
+      <p class="page-sub">Tell Zambia your hustle. About 15 minutes, and you can save a draft and come back.</p>
+      ${s.adminNote ? `<div class="card" style="background:var(--amber-tint)"><p class="small" style="margin:0"><b>Our team asked for changes:</b> ${esc(s.adminNote)}</p></div>` : ''}
+      <div class="wiz-steps" id="hustle-wiz-steps">
+        ${HUSTLE_STEPS.map((t, i) => `<div class="wiz-step ${i + 1 === s.step ? 'active' : ''} ${i + 1 < s.step ? 'done' : ''}" data-hstep="${i + 1}"><span class="n">${i + 1 < s.step ? '✓' : i + 1}</span>${t}</div>`).join('')}
+      </div>
+      <div class="card" id="hustle-wiz-body" style="padding:20px"></div>
+      <div class="form-actions" id="hustle-wiz-nav">
+        <button class="btn btn-ghost" type="button" id="hustle-back">Back</button>
+        <button class="btn btn-outline" type="button" id="hustle-save-draft">Save draft</button>
+        <button class="btn btn-primary" type="button" id="hustle-next" style="flex:1">${s.step === 6 ? 'Submit application' : 'Continue'}</button>
+      </div>
+    </div></div>`;
+    document.querySelectorAll('#hustle-wiz-steps .wiz-step').forEach(el => el.addEventListener('click', () => {
+      const n = Number(el.dataset.hstep);
+      if (n < s.step) { s.step = n; hustleSaveDraftLocal(); renderWizard(); }
+    }));
+    renderStepBody(check);
+    document.getElementById('hustle-back').addEventListener('click', () => {
+      if (s.step === 1) { location.hash = '#/hustle'; return; }
+      s.step -= 1; hustleSaveDraftLocal(); renderWizard();
+    });
+    document.getElementById('hustle-save-draft').addEventListener('click', async () => {
+      collectStep(s.step);
+      hustleSaveDraftLocal();
+      await hustleSaveDraftServer();
+      toast('Draft saved. Come back any time to finish it.');
+    });
+    document.getElementById('hustle-next').addEventListener('click', async () => {
+      const btn = document.getElementById('hustle-next');
+      if (!validateStep(s.step, check)) return;
+      collectStep(s.step);
+      if (s.step === 1 && !s.applicationId) {
+        try {
+          const created = await api('/api/hustle/competitions/' + s.compId + '/applications', { method: 'POST', body: JSON.stringify({ business_id: s.businessId }) });
+          s.applicationId = created.application ? created.application.id : created.id;
+        } catch (e) { /* server draft creation failed: keep going on the local draft, submit creates it */ }
+      }
+      hustleSaveDraftLocal();
+      await hustleSaveDraftServer();
+      if (s.step === 6) { submitApplication(); return; }
+      s.step += 1;
+      history.replaceState(null, '', '#/hustle/apply' + (s.applicationId ? '/' + s.applicationId : '') + '?step=' + s.step);
+      renderWizard();
+    });
+    if (s.step === 5) updateSpendTotal();
+  }
+  function businessSummaryCard(b) {
+    return `<div class="card" style="background:var(--fill);display:flex;gap:12px;align-items:center;margin-bottom:12px">
+      ${b.logo ? `<img class="biz-logo" src="${esc(b.logo)}" alt="">` : `<div class="biz-logo biz-logo-fallback">${icon('tag')}</div>`}
+      <span style="flex:1;min-width:0"><b>${esc(b.name)}</b> ${bizBadge(b)}
+      <span class="small muted" style="display:block">${esc([b.category, b.province, b.district, b.city].filter(Boolean).join(' · '))}${b.year_started ? ' · Since ' + esc(String(b.year_started)) : ''}</span></span></div>`;
+  }
+  function renderStepBody(check) {
+    const s = hustleApplyState;
+    const body = document.getElementById('hustle-wiz-body');
+    const b = s.business;
+    const d = s.data;
+    if (s.step === 1) {
+      body.innerHTML = `
+        <p class="small" style="margin-top:0">These details come from your verified storefront. Change them on your storefront page, not here. <a href="#/business/${b.id}/manage">Edit storefront</a></p>
+        ${verified.length > 1 ? `<div class="field"><label for="hz-biz">Which business is applying?</label>
+          <select id="hz-biz">${verified.map(x => {
+            const cx = compChecks[x.id] || { complete: true, missing: [] };
+            return `<option value="${x.id}" ${x.id === s.businessId ? 'selected' : ''} ${cx.complete ? '' : 'disabled'}>${esc(x.name)}${cx.complete ? '' : ' (Finish onboarding to enter)'}</option>`;
+          }).join('')}</select>
+          <div class="hint">A verified but incomplete storefront is listed but cannot be chosen. Finish its onboarding first.</div></div>` : ''}
+        ${businessSummaryCard(b)}
+        ${!check.complete ? `<div class="card" style="background:var(--amber-tint)"><p class="small" style="margin:0"><b>Finish onboarding to enter.</b> ${check.missing.length} thing${check.missing.length === 1 ? '' : 's'} left: ${esc(hustleMissingLabels(check.missing).join(', '))}.</p><a class="btn btn-sm btn-primary" href="#/business/${b.id}/complete" style="margin-top:8px">Finish onboarding</a></div>` : ''}
+        <div class="field"><label for="hz-applicant">Who is applying?</label>
+          <select id="hz-applicant">
+            <option value="owner" ${d.applicant_type === 'owner' ? 'selected' : ''}>I am the owner</option>
+            <option value="representative" ${d.applicant_type === 'representative' ? 'selected' : ''}>I am an authorised representative</option>
+          </select></div>
+        <div class="field" id="hz-repname-wrap" ${d.applicant_type === 'representative' ? '' : 'hidden'}>
+          <label for="hz-repname">Your name as representative *</label>
+          <input id="hz-repname" maxlength="120" value="${esc(d.applicant_name || '')}" placeholder="Your full name">
+          <div class="hint">The owner named you as a representative. Your name shows on the entry as the applicant, with the business name.</div></div>`;
+      const bizSel = document.getElementById('hz-biz');
+      if (bizSel) bizSel.addEventListener('change', () => { s.businessId = Number(bizSel.value); hustleSaveDraftLocal(); renderWizard(); });
+      const appSel = document.getElementById('hz-applicant');
+      appSel.addEventListener('change', () => { document.getElementById('hz-repname-wrap').hidden = appSel.value !== 'representative'; });
+    }
+    if (s.step === 2) {
+      body.innerHTML = `
+        ${b.year_started ? `<p class="small muted" style="margin-top:0">Year started on your storefront: ${esc(String(b.year_started))}</p>` : ''}
+        ${HUSTLE_QUESTIONS.map(q => {
+          if (q.key === 'q6') return `
+            <div class="field"><label for="hz-q6n">How many people do you employ? *</label>
+              <input id="hz-q6n" type="number" min="0" max="999" value="${esc(String(d.employees_count ?? ''))}" placeholder="0">
+              <div class="hint">The number is the count; the text below is the story. Both are required.</div></div>
+            <div class="field"><label for="hz-q6t">Tell us about your team *</label>
+              <textarea id="hz-q6t" rows="2" maxlength="200" placeholder="Full time, part time, or family help.">${esc(d.employees_text || '')}</textarea>
+              <div class="hint"><span class="hz-count" data-count-for="hz-q6t">${String(d.employees_text || '').length}</span>/200 characters</div></div>`;
+          return `
+            <div class="field"><label for="hz-${q.key}">${esc(q.label)} *</label>
+              <textarea id="hz-${q.key}" rows="${q.rows}" maxlength="${q.max}" placeholder="${esc(q.ph)}">${esc(d.answers[q.key] || '')}</textarea>
+              <div class="hint"><span class="hz-count" data-count-for="hz-${q.key}">${String(d.answers[q.key] || '').length}</span>/${q.max} characters</div></div>`;
+        }).join('')}`;
+      body.querySelectorAll('textarea[maxlength]').forEach(ta => ta.addEventListener('input', () => {
+        const c = body.querySelector(`[data-count-for="${ta.id}"]`);
+        if (c) c.textContent = ta.value.length;
+      }));
+    }
+    if (s.step === 3) {
+      const platform = d.video_url ? (hustleVideoPlatform(d.video_url) || '') : '';
+      body.innerHTML = `
+        <div class="field"><label for="hz-video">Pitch video link *</label>
+          <input id="hz-video" type="url" value="${esc(d.video_url || '')}" placeholder="https://www.tiktok.com/@yourbusiness/video/... or a Facebook, YouTube, or Instagram link">
+          <div class="hint">Paste the link to your 60 to 90 second pitch video on Facebook, TikTok, YouTube, or Instagram. Record it on your phone first, then paste the link here. Anyone with the link can watch it.</div>
+          <div class="field-error" id="hz-video-err" hidden></div></div>
+        <div class="btn-row"><button class="btn btn-outline" type="button" id="hz-check-link">Check link</button>
+        ${d.video_url ? `<button class="btn btn-ghost" type="button" id="hz-remove-link">Remove link</button>` : ''}</div>
+        <div id="hz-link-preview" style="margin-top:10px">${platform ? `<p class="small">Platform: <b>${esc(platform)}</b></p><a class="btn btn-sm btn-outline" href="${esc(d.video_url)}" target="_blank" rel="noopener">Watch pitch</a>` : ''}</div>`;
+      document.getElementById('hz-check-link').addEventListener('click', () => {
+        const v = document.getElementById('hz-video').value.trim();
+        const err = document.getElementById('hz-video-err');
+        const host = (() => { try { return new URL(v).hostname.replace(/^www\./, '').toLowerCase(); } catch (e) { return ''; } })();
+        const ok = HUSTLE_VIDEO_HOSTS.some(h => host === h || host.endsWith('.' + h));
+        if (!v || !ok) { err.textContent = 'That link is not accepted. Paste a link to your pitch video on Facebook, TikTok, YouTube, or Instagram.'; err.hidden = false; return; }
+        err.hidden = true;
+        const p = hustleVideoPlatform(v);
+        document.getElementById('hz-link-preview').innerHTML = `<p class="small">Platform: <b>${esc(p)}</b></p><a class="btn btn-sm btn-outline" href="${esc(v)}" target="_blank" rel="noopener">Watch pitch</a>`;
+        toast('Link looks good. Tap Watch pitch to check the video.');
+      });
+      const rm = document.getElementById('hz-remove-link');
+      if (rm) rm.addEventListener('click', () => { d.video_url = ''; hustleSaveDraftLocal(); renderWizard(); });
+    }
+    if (s.step === 4) {
+      body.innerHTML = `
+        <div class="field"><label for="hz-photos">Pitch photos (up to 5) *</label>
+          <input id="hz-photos" type="file" accept="image/*" multiple ${d.photos.length >= 5 ? 'disabled' : ''}>
+          <div class="hint">Photos of your business, your work, your team, or your products. JPG or PNG, up to 2 MB each, same as product photos.</div></div>
+        <div class="pd-thumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          ${d.photos.map((p, i) => `<span style="position:relative"><img src="${esc(p)}" alt="Pitch photo ${i + 1}" style="width:64px;height:64px;border-radius:12px;object-fit:cover"><button class="btn btn-ghost btn-sm" type="button" data-hz-photo-rm="${i}" aria-label="Remove photo ${i + 1}" style="position:absolute;top:-8px;right:-8px;padding:2px 6px">×</button></span>`).join('')}
+        </div>
+        <p class="small muted">${d.photos.length}/5 photos${d.photos.length >= 5 ? '. Remove one to add another.' : ''}</p>
+        <div class="field"><label for="hz-summary">Pitch summary *</label>
+          <textarea id="hz-summary" rows="3" maxlength="300" placeholder="Your hustle in two or three sentences. This shows on your entry card and in search.">${esc(d.summary || '')}</textarea>
+          <div class="hint"><span class="hz-count" data-count-for="hz-summary">${String(d.summary || '').length}</span>/300 characters. This is the first thing voters read. Make it specific.</div></div>`;
+      body.querySelectorAll('[data-hz-photo-rm]').forEach(btn => btn.addEventListener('click', async () => {
+        const idx = Number(btn.dataset.hzPhotoRm);
+        const removed = d.photos[idx];
+        if (removed && hustleApplyState.applicationId && hustleApplyState.photoIds[removed]) {
+          const photoId = hustleApplyState.photoIds[removed];
+          try { await api('/api/hustle/applications/' + hustleApplyState.applicationId + '/photos/' + photoId, { method: 'DELETE' }); } catch (e) { /* the local copy is still removed */ }
+          delete hustleApplyState.photoIds[removed];
+        }
+        d.photos.splice(idx, 1);
+        hustleSaveDraftLocal(); renderWizard();
+      }));
+      document.getElementById('hz-photos').addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files || []);
+        for (const f of files) {
+          if (d.photos.length >= 5) { toast('5 of 5 photos. Remove one to add another.', true); break; }
+          if (!f.type.startsWith('image/')) { toast('That file is not a photo. Use JPG or PNG.', true); continue; }
+          if (f.size > 2 * 1024 * 1024) { toast('That photo is too large. Use a photo under 2 MB.', true); continue; }
+          try { d.photos.push(await fileToDoc(f)); } catch (err) { toast('Could not read that photo.', true); }
+        }
+        hustleSaveDraftLocal(); renderWizard();
+      });
+      const sum = document.getElementById('hz-summary');
+      sum.addEventListener('input', () => { const c = body.querySelector('[data-count-for="hz-summary"]'); if (c) c.textContent = sum.value.length; });
+    }
+    if (s.step === 5) {
+      body.innerHTML = `
+        <h3 style="margin-top:0">How will you use K10,000?</h3>
+        <p class="small muted" style="margin-top:0">List exactly how you will spend the K10,000. The lines must total exactly K10,000. Your plan is public on your entry page.</p>
+        ${d.answers.q9 ? `<div class="card" style="background:var(--fill)"><p class="small" style="margin:0"><b>Your answer in step 2:</b> ${esc(d.answers.q9)}</p></div>` : ''}
+        <div id="hz-spend-rows">${d.spend.map((row, i) => `
+          <div class="hustle-spend-row" data-spend-row="${i}">
+            <input type="text" maxlength="80" placeholder="e.g. New stock" value="${esc(row.label || '')}" aria-label="What this money is for" data-spend-label>
+            <span class="hustle-spend-k">K</span>
+            <input type="number" min="1" placeholder="Amount" value="${row.amount === '' ? '' : esc(String(row.amount))}" aria-label="Amount in Kwacha" data-spend-amount>
+            <button class="btn btn-ghost" type="button" data-spend-rm="${i}" aria-label="Remove this line">Remove</button>
+          </div>`).join('')}</div>
+        <button class="btn btn-outline" type="button" id="hz-add-line" ${d.spend.length >= 10 ? 'disabled' : ''}>Add a line</button>
+        <div class="hustle-spend-total" id="hz-spend-total"></div>
+        <p class="small muted" id="hz-spend-note">Add lines until the total is exactly K10,000.</p>`;
+      body.querySelectorAll('[data-spend-rm]').forEach(btn => btn.addEventListener('click', () => {
+        d.spend.splice(Number(btn.dataset.spendRm), 1);
+        if (!d.spend.length) d.spend.push({ label: '', amount: '' });
+        collectStep(5); hustleSaveDraftLocal(); renderWizard();
+      }));
+      document.getElementById('hz-add-line').addEventListener('click', () => {
+        collectStep(5);
+        if (d.spend.length < 10) d.spend.push({ label: '', amount: '' });
+        hustleSaveDraftLocal(); renderWizard();
+      });
+      body.querySelectorAll('[data-spend-label], [data-spend-amount]').forEach(inp => inp.addEventListener('input', () => { collectStep(5); updateSpendTotal(); }));
+      updateSpendTotal();
+    }
+    if (s.step === 6) {
+      const b2 = s.business;
+      body.innerHTML = `
+        <h3 style="margin-top:0">Review your application</h3>
+        ${businessSummaryCard(b2)}
+        <p class="small"><b>Applying as:</b> ${esc(d.applicant_type === 'representative' ? 'Authorised representative' + (d.applicant_name ? ' (' + d.applicant_name + ')' : '') : 'Owner')}</p>
+        ${HUSTLE_QUESTIONS.map(q => {
+          if (q.key === 'q6') return `<h4 style="margin:12px 0 2px">${esc(q.label)}</h4><p style="margin:0">${d.employees_count != null && d.employees_count !== '' ? 'Employs ' + esc(String(d.employees_count)) + ' people. ' : ''}${esc(d.employees_text || '')}</p>`;
+          return `<h4 style="margin:12px 0 2px">${esc(q.label)} <a class="small" href="#" data-hz-edit-step="2">Edit</a></h4><p style="margin:0;white-space:pre-wrap">${esc(d.answers[q.key] || '')}</p>`;
+        }).join('')}
+        <h4 style="margin:14px 0 2px">Pitch video <a class="small" href="#" data-hz-edit-step="3">Edit</a></h4>
+        <p style="margin:0">${d.video_url ? `<a href="${esc(d.video_url)}" target="_blank" rel="noopener">Watch pitch (${esc(hustleVideoPlatform(d.video_url) || 'video')})</a>` : 'No link yet.'}</p>
+        <h4 style="margin:14px 0 2px">Photos and summary <a class="small" href="#" data-hz-edit-step="4">Edit</a></h4>
+        <p style="margin:0">${esc(d.summary || '')}</p>
+        <div class="pd-thumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${d.photos.map((p, i) => `<img src="${esc(p)}" alt="Pitch photo ${i + 1}" style="width:64px;height:64px;border-radius:12px;object-fit:cover">`).join('')}</div>
+        <h4 style="margin:14px 0 2px">K10,000 plan <a class="small" href="#" data-hz-edit-step="5">Edit</a></h4>
+        ${d.spend.map(row => `<div class="split" style="padding:4px 0"><span>${esc(row.label || '')}</span><b>${fmtK(row.amount || 0)}</b></div>`).join('')}
+        <div class="split" style="padding:8px 0 0"><span><b>Total</b></span><b>${fmtK(d.spend.reduce((a, r) => a + Number(r.amount || 0), 0))}</b></div>`;
+      body.querySelectorAll('[data-hz-edit-step]').forEach(a => a.addEventListener('click', (e) => {
+        e.preventDefault();
+        s.step = Number(a.dataset.hzEditStep);
+        hustleSaveDraftLocal(); renderWizard();
+      }));
+    }
+  }
+  function collectStep(step) {
+    const s = hustleApplyState, d = s.data;
+    const body = document.getElementById('hustle-wiz-body');
+    if (!body) return;
+    if (step === 1) {
+      const bizSel = document.getElementById('hz-biz');
+      if (bizSel) s.businessId = Number(bizSel.value);
+      const appSel = document.getElementById('hz-applicant');
+      if (appSel) d.applicant_type = appSel.value;
+      const rep = document.getElementById('hz-repname');
+      if (rep) d.applicant_name = rep.value.trim();
+    }
+    if (step === 2) {
+      HUSTLE_QUESTIONS.forEach(q => {
+        if (q.key === 'q6') {
+          const n = document.getElementById('hz-q6n');
+          const t = document.getElementById('hz-q6t');
+          if (n) d.employees_count = n.value === '' ? '' : Number(n.value);
+          if (t) d.employees_text = t.value.trim();
+        } else {
+          const ta = document.getElementById('hz-' + q.key);
+          if (ta) d.answers[q.key] = ta.value.trim();
+        }
+      });
+    }
+    if (step === 3) {
+      const v = document.getElementById('hz-video');
+      if (v) d.video_url = v.value.trim();
+    }
+    if (step === 4) {
+      const sum = document.getElementById('hz-summary');
+      if (sum) d.summary = sum.value.trim();
+    }
+    if (step === 5) {
+      const rows = Array.from(body.querySelectorAll('[data-spend-row]'));
+      d.spend = rows.map(r => ({
+        label: (r.querySelector('[data-spend-label]') || {}).value ? r.querySelector('[data-spend-label]').value.trim() : '',
+        amount: (r.querySelector('[data-spend-amount]') || {}).value ? Number(r.querySelector('[data-spend-amount]').value) : '',
+      }));
+    }
+  }
+  function spendTotal() {
+    return hustleApplyState.data.spend.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+  }
+  function updateSpendTotal() {
+    const bar = document.getElementById('hz-spend-total');
+    if (!bar) return;
+    const total = spendTotal();
+    const nextBtn = document.getElementById('hustle-next');
+    bar.classList.toggle('exact', total === HUSTLE_PRIZE);
+    bar.innerHTML = `<span>Total: <b>${fmtK(total)}</b></span><span>${total === HUSTLE_PRIZE ? 'Total is exactly K10,000' : total < HUSTLE_PRIZE ? fmtK(HUSTLE_PRIZE - total) + ' left to reach K10,000' : fmtK(total - HUSTLE_PRIZE) + ' over K10,000'}</span>`;
+    const note = document.getElementById('hz-spend-note');
+    if (note) note.textContent = total === HUSTLE_PRIZE ? '' : 'Add lines until the total is exactly K10,000.';
+    if (nextBtn && hustleApplyState.step === 5) nextBtn.disabled = total !== HUSTLE_PRIZE;
+  }
+  function fieldErr(input, msg) {
+    if (!input) return;
+    input.classList.add('invalid');
+    const wrap = input.closest('.field') || input.parentElement;
+    let ferr = wrap.querySelector('.field-error');
+    if (!ferr) { ferr = document.createElement('div'); ferr.className = 'field-error'; wrap.appendChild(ferr); }
+    ferr.textContent = msg;
+  }
+  function validateStep(step, check) {
+    const s = hustleApplyState, d = s.data;
+    const body = document.getElementById('hustle-wiz-body');
+    body.querySelectorAll('.field-error').forEach(el => el.remove());
+    body.querySelectorAll('.invalid').forEach(el => el.classList.remove('invalid'));
+    let firstBad = null;
+    const fail = (input, msg) => { fieldErr(input, msg); if (!firstBad) firstBad = input; };
+    if (step === 1) {
+      collectStep(1);
+      if (!check.complete) { toast('Finish onboarding to enter. ' + check.missing.length + ' things left.', true); return false; }
+      if (d.applicant_type === 'representative') {
+        const rep = document.getElementById('hz-repname');
+        if (!d.applicant_name) { fail(rep, 'Add your name as representative.'); toast('Add your name as representative.', true); return false; }
+      }
+      return true;
+    }
+    if (step === 2) {
+      collectStep(2);
+      for (const q of HUSTLE_QUESTIONS) {
+        if (q.key === 'q6') {
+          if (d.employees_count === '' || d.employees_count == null || Number(d.employees_count) < 0) { fail(document.getElementById('hz-q6n'), 'Answer this question before you continue.'); }
+          if (!d.employees_text) { fail(document.getElementById('hz-q6t'), 'Answer this question before you continue.'); }
+        } else if (!d.answers[q.key]) {
+          fail(document.getElementById('hz-' + q.key), 'Answer this question before you continue.');
+        }
+      }
+      if (firstBad) { firstBad.scrollIntoView({ block: 'center' }); toast('Check the highlighted fields, then continue.', true); return false; }
+      return true;
+    }
+    if (step === 3) {
+      collectStep(3);
+      const v = d.video_url;
+      const err = document.getElementById('hz-video-err');
+      if (!v) { if (err) { err.textContent = 'Add your pitch video link.'; err.hidden = false; } toast('Add your pitch video link.', true); return false; }
+      const host = (() => { try { return new URL(v).hostname.replace(/^www\./, '').toLowerCase(); } catch (e) { return ''; } })();
+      if (!HUSTLE_VIDEO_HOSTS.some(h => host === h || host.endsWith('.' + h))) {
+        if (err) { err.textContent = 'That link is not accepted. Paste a link to your pitch video on Facebook, TikTok, YouTube, or Instagram.'; err.hidden = false; }
+        toast('That link is not accepted.', true); return false;
+      }
+      return true;
+    }
+    if (step === 4) {
+      collectStep(4);
+      if (!d.photos.length) { toast('Add at least 1 photo.', true); return false; }
+      if (!d.summary || d.summary.length < 20) { fail(document.getElementById('hz-summary'), 'Write a short summary, at least 20 characters.'); toast('Write a short summary, at least 20 characters.', true); return false; }
+      return true;
+    }
+    if (step === 5) {
+      collectStep(5);
+      for (const row of d.spend) {
+        if (!row.label) { toast('Name what this money is for.', true); return false; }
+        if (!row.amount || Number(row.amount) <= 0) { toast('Enter an amount above K0.', true); return false; }
+      }
+      const total = spendTotal();
+      if (total !== HUSTLE_PRIZE) {
+        toast('Your lines must total exactly K10,000. You are ' + fmtK(Math.abs(HUSTLE_PRIZE - total)) + (total < HUSTLE_PRIZE ? ' under.' : ' over.'), true);
+        return false;
+      }
+      return true;
+    }
+    return true;
+  }
+  async function submitApplication() {
+    const s = hustleApplyState;
+    const btn = document.getElementById('hustle-next');
+    btn.disabled = true;
+    btn.textContent = 'Submitting…';
+    try {
+      let appId = s.applicationId;
+      if (!appId) {
+        // Create the draft with the business only, then sync the answers,
+        // pitch link and photos through their own endpoints.
+        const created = await api('/api/hustle/competitions/' + s.compId + '/applications', { method: 'POST', body: JSON.stringify({ business_id: s.businessId }) });
+        appId = created.application ? created.application.id : created.id;
+        s.applicationId = appId;
+      } else {
+        await api('/api/hustle/applications/' + appId, { method: 'PATCH', body: JSON.stringify(hustleApplyPayload(s)) });
+      }
+      await hustleSyncPitch(s);
+      await hustleSyncPhotos(s);
+      await api('/api/hustle/applications/' + appId + '/submit', { method: 'POST', body: '{}' });
+      try { localStorage.removeItem(hustleDraftKey(s.compId, s.businessId)); localStorage.removeItem(hustleDraftKey(s.compId, 'any')); } catch (e) {}
+      const now = new Date();
+      app.innerHTML = `
+      <div class="view"><div class="page">
+        <div class="card" style="text-align:center;padding:28px 20px">
+          <div style="font-size:40px;color:var(--green)">${icon('check')}</div>
+          <h2 style="margin:10px 0">Your hustle has been submitted successfully! Our team will review your application before it goes live for public voting.</h2>
+          <p class="small muted">What happens next: our team reviews your pitch, photos, and K10,000 plan. If we need changes, we will tell you what to fix. If it is approved, your entry goes live for public voting and we will notify you.</p>
+          <p class="small muted">Submitted ${esc(fmtLusaka(now.toISOString()))}.</p>
+          <div class="btn-row" style="justify-content:center"><a class="btn btn-primary" href="#/hustle/my-entry">View your entry status</a><a class="btn btn-outline" href="#/hustle">Back to the competition</a></div>
+        </div>
+      </div></div>`;
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Submit application';
+      toast(e.message, true);
+    }
+  }
+}
+
+/* ---------------- Hustle admin ---------------- */
+function hustleAdminGuard() {
+  if (!currentUser || !currentUser.is_admin) {
+    app.innerHTML = `<div class="view"><div class="page">${emptyHtml('shield', 'Not authorized', 'This page is for the 2911 Jobs team only.')}</div></div>`;
+    return false;
+  }
+  return true;
+}
+async function viewAdminHustle() {
+  if (!requireAuth('#/admin/hustle')) return;
+  if (!hustleAdminGuard()) return;
+  app.innerHTML = `<div class="view"><div class="page"><div id="admin-body">${loadingHtml('Loading stats…')}</div></div></div>`;
+  const body = document.getElementById('admin-body');
+  try {
+    const sd = await api('/api/admin/hustle/stats').catch(() => ({}));
+    const s = sd.stats || {};
+    const apps = s.applications_by_status || {};
+    // Businesses pending verification and pitches awaiting review come from
+    // their own lists; the stats endpoint does not count them.
+    let businessesPending = 0, pitchesPending = 0;
+    try {
+      const bd = await api('/api/admin/businesses');
+      businessesPending = (bd.businesses || bd.items || []).filter(b => b.verification_status === 'pending').length;
+    } catch (e) { businessesPending = 0; }
+    try {
+      const allApps = await hustleAdminApps('');
+      pitchesPending = allApps.filter(a => {
+        const e = normEntry(a);
+        return e.video_url && e.pitch_review_status !== 'approved' && e.pitch_review_status !== 'rejected' && e.pitch_review_status !== 'changes_requested';
+      }).length;
+    } catch (e) { pitchesPending = 0; }
+    const tile = (bg, ic, label, val) => `<div class="dash-tile" style="background:${bg}"><div class="l">${icon(ic)} ${label}</div><div class="n">${val}</div></div>`;
+    const mrow = (href, ic, label, badge) => `<a href="${href}">${icon(ic)}<span>${label}</span>${badge ? `<span class="dash-badge">${badge}</span>` : ''}<span class="chev">${icon('chevR')}</span></a>`;
+    const pending = (apps.submitted || 0) + (apps.under_review || 0);
+    body.innerHTML = `
+      <a class="small" href="#/admin">Back to Admin</a>
+      <div class="admin-dash" style="margin-top:10px">
+        <div class="dash-head"><h2>Hustle Admin</h2><span>What's Your Hustle? K10,000 Business Challenge.</span></div>
+        <div class="dash-tiles">
+          ${tile('#2563EB', 'grid', 'Businesses pending', businessesPending)}
+          ${tile('#F59E0B;color:#0B1F3B', 'clipboard', 'Applications pending', pending)}
+          ${tile('#0D9488', 'play', 'Pitches pending', pitchesPending)}
+          ${tile('#10B981', 'check', 'Total votes', s.votes_cast != null ? s.votes_cast : 0)}
+          ${tile('#E0245E', 'shield', 'Fraud flags open', s.flagged_votes_open != null ? s.flagged_votes_open : 0)}
+          ${tile('#16294F', 'chart', 'Valid votes', s.valid_votes != null ? s.valid_votes : 0)}
+        </div>
+        <div class="dash-menu">
+          ${mrow('#/admin/businesses', 'grid', 'Business verification', businessesPending || 0)}
+          ${mrow('#/admin/hustle/applications', 'clipboard', 'Applications', pending)}
+          ${mrow('#/admin/hustle/pitches', 'play', 'Pitch review', pitchesPending || 0)}
+          ${mrow('#/admin/hustle/votes', 'chart', 'Vote monitoring', 0)}
+          ${mrow('#/admin/hustle/fraud', 'shield', 'Fraud review', s.flagged_votes_open || 0)}
+          ${mrow('#/admin/hustle/finalists', 'star', 'Finalists review', 0)}
+          ${mrow('#/admin/hustle/settings', 'sliders', 'Competition settings', 0)}
+          ${mrow('#/admin/hustle/exports', 'download', 'Exports', 0)}
+          ${mrow('#/admin/audit', 'clipboard', 'Audit Log', 0)}
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Applications by status</h3>
+        ${Object.keys(apps).length ? Object.entries(apps).map(([k, v]) => `<div class="split" style="padding:7px 0;border-bottom:1px solid var(--line)"><span style="text-transform:capitalize">${esc(k.replace(/_/g, ' '))}</span><b>${v}</b></div>`).join('') : '<p class="small muted">No applications yet.</p>'}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Totals</h3>
+        <div class="split" style="padding:7px 0;border-bottom:1px solid var(--line)"><span>Voters</span><b>${s.voters != null ? s.voters : 0}</b></div>
+        <div class="split" style="padding:7px 0;border-bottom:1px solid var(--line)"><span>Valid votes</span><b>${s.valid_votes != null ? s.valid_votes : 0}</b></div>
+        <div class="split" style="padding:7px 0;border-bottom:1px solid var(--line)"><span>Storefront views</span><b>${s.storefront_views != null ? s.storefront_views : 0}</b></div>
+        <div class="split" style="padding:7px 0"><span>Businesses</span><b>${s.businesses != null ? s.businesses : 0}</b></div>
+      </div>`;
+  } catch (e) {
+    body.innerHTML = emptyHtml('info', 'Could not load stats', e.message);
+  }
+}
+async function hustleAdminApps(status) {
+  const d = await api('/api/admin/hustle/applications' + (status ? '?status=' + status : ''));
+  return d.applications || d.items || [];
+}
+async function viewAdminHustleApplications() {
+  if (!requireAuth('#/admin/hustle/applications')) return;
+  if (!hustleAdminGuard()) return;
+  let current = 'submitted';
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/admin/hustle">Back to Hustle admin</a>
+    <h1 class="page-title">Applications</h1>
+    <p class="page-sub">Oldest first. Every decision is logged.</p>
+    <div class="chips" id="ha-filter">
+      <button class="chip active" data-hastatus="submitted">Pending</button>
+      <button class="chip" data-hastatus="changes_requested">Changes requested</button>
+      <button class="chip" data-hastatus="approved">Approved</button>
+      <button class="chip" data-hastatus="rejected">Rejected</button>
+      <button class="chip" data-hastatus="">All</button>
+    </div>
+    <div id="ha-list" style="margin-top:12px">${skeletonCards(2)}</div>
+  </div></div>`;
+  const list = document.getElementById('ha-list');
+  async function load(status) {
+    list.innerHTML = skeletonCards(2);
+    try {
+      const apps = await hustleAdminApps(status);
+      list.innerHTML = apps.length
+        ? `<p class="small muted">${apps.length} application${apps.length === 1 ? '' : 's'}</p>` + apps.map(a => {
+          const e = normEntry(a);
+          return `<div class="card" style="margin-bottom:10px">
+            <b>${esc(e.business_name)}</b> ${hustleAppBadge(a.status)}
+            <span class="small muted" style="display:block">by ${esc(a.applicant_name || e.applicant_name || '')} · ${esc(e.category)} · ${esc(e.province || '')} · submitted ${esc(fmtDate(a.submitted_at || a.created_at))}</span>
+            <details style="margin-top:6px"><summary class="small">Read application</summary>
+              <div class="small" style="margin-top:6px">${e.pitch_summary ? `<p><b>Summary:</b> ${esc(e.pitch_summary)}</p>` : ''}${(e.answers ? Object.entries(e.answers) : []).map(([k, v]) => `<p style="margin:4px 0"><b>${esc(k.replace(/_/g, ' '))}:</b> ${esc(String(v))}</p>`).join('')}${e.video_url ? `<p>Pitch: <a href="${esc(e.video_url)}" target="_blank" rel="noopener">Watch pitch</a></p>` : ''}</div>
+            </details>
+            <div class="btn-row" style="margin-top:8px">
+              <button class="btn btn-sm btn-primary" data-ha-approve="${a.id}">Approve</button>
+              <button class="btn btn-sm btn-outline" data-ha-changes="${a.id}">Request changes</button>
+              <button class="btn btn-sm btn-outline" data-ha-reject="${a.id}">Reject</button>
+            </div>
+          </div>`;
+        }).join('')
+        : emptyHtml('clipboard', 'Nothing here', 'No applications in this state right now.');
+      list.querySelectorAll('[data-ha-approve]').forEach(btn => btn.addEventListener('click', async () => {
+        try { await api('/api/admin/hustle/applications/' + btn.dataset.haApprove, { method: 'PATCH', body: JSON.stringify({ decision: 'approve' }) }); toast('Application approved.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+      list.querySelectorAll('[data-ha-changes]').forEach(btn => btn.addEventListener('click', async () => {
+        const note = prompt('What should the business fix? The business sees this note.') || '';
+        if (!note.trim()) return;
+        try { await api('/api/admin/hustle/applications/' + btn.dataset.haChanges, { method: 'PATCH', body: JSON.stringify({ decision: 'changes_requested', note }) }); toast('Changes requested.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+      list.querySelectorAll('[data-ha-reject]').forEach(btn => btn.addEventListener('click', async () => {
+        const note = prompt('Why is this application rejected? The business sees this note.') || '';
+        if (!note.trim()) return;
+        try { await api('/api/admin/hustle/applications/' + btn.dataset.haReject, { method: 'PATCH', body: JSON.stringify({ decision: 'rejected', note }) }); toast('Application rejected.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { list.innerHTML = errorHtml(e.message); }
+  }
+  document.getElementById('ha-filter').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-hastatus]');
+    if (!chip) return;
+    current = chip.dataset.hastatus;
+    document.querySelectorAll('#ha-filter .chip').forEach(c => c.classList.toggle('active', c === chip));
+    load(current);
+  });
+  load(current);
+}
+async function viewAdminHustlePitches() {
+  if (!requireAuth('#/admin/hustle/pitches')) return;
+  if (!hustleAdminGuard()) return;
+  let current = '';
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/admin/hustle">Back to Hustle admin</a>
+    <h1 class="page-title">Pitch review</h1>
+    <p class="page-sub">Open each video link to check the 60 to 90 second rule.</p>
+    <div class="chips" id="hp-filter">
+      <button class="chip active" data-hpstatus="">All</button>
+      <button class="chip" data-hpstatus="approved">Approved</button>
+      <button class="chip" data-hpstatus="changes_requested">Changes requested</button>
+      <button class="chip" data-hpstatus="rejected">Rejected</button>
+    </div>
+    <div id="hp-list" style="margin-top:12px">${skeletonCards(2)}</div>
+  </div></div>`;
+  const list = document.getElementById('hp-list');
+  async function load(status) {
+    list.innerHTML = skeletonCards(2);
+    try {
+      const apps = (await hustleAdminApps('')).map(a => ({ raw: a, e: normEntry(a) })).filter(x => x.e.video_url);
+      const rows = status ? apps.filter(x => x.e.pitch_review_status === status) : apps;
+      list.innerHTML = rows.length ? rows.map(({ raw: a, e }) => {
+        return `<div class="card" style="margin-bottom:10px">
+          <b>${esc(e.business_name)}</b> ${hustleAppBadge(e.pitch_review_status || 'pending')}
+          ${e.video_url ? `<p class="small" style="margin:6px 0"><a href="${esc(e.video_url)}" target="_blank" rel="noopener">Watch pitch (${esc(e.video_platform || hustleVideoPlatform(e.video_url) || 'video')})</a></p>` : '<p class="small muted">No pitch link yet.</p>'}
+          ${e.photos.length ? `<div class="pd-thumbs" style="display:flex;gap:8px;flex-wrap:wrap">${e.photos.map(p => `<img src="${esc(typeof p === 'string' ? p : (p.image || p.url || ''))}" alt="Pitch photo" style="width:64px;height:64px;border-radius:12px;object-fit:cover">`).join('')}</div>` : ''}
+          ${e.pitch_summary ? `<p class="small" style="margin:6px 0 0">${esc(e.pitch_summary)}</p>` : ''}
+          ${e.spend_items.length ? `<p class="small" style="margin:6px 0 0">Spend plan total: <b>${fmtK(e.spend_items.reduce((x, s) => x + Number(s.amount || 0), 0))}</b></p>` : ''}
+          <div class="btn-row" style="margin-top:8px">
+            <button class="btn btn-sm btn-primary" data-hp-approve="${e.pitch_video_id || ''}" ${e.pitch_video_id ? '' : 'disabled'}>Approve pitch</button>
+            <button class="btn btn-sm btn-outline" data-hp-reject="${e.pitch_video_id || ''}" ${e.pitch_video_id ? '' : 'disabled'}>Reject pitch</button>
+          </div>
+        </div>`;
+      }).join('') : emptyHtml('play', 'Nothing here', 'No pitches in this state right now.');
+      list.querySelectorAll('[data-hp-approve]').forEach(btn => btn.addEventListener('click', async () => {
+        try { await api('/api/admin/hustle/pitches/' + btn.dataset.hpApprove, { method: 'PATCH', body: JSON.stringify({ decision: 'approved' }) }); toast('Pitch approved.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+      list.querySelectorAll('[data-hp-reject]').forEach(btn => btn.addEventListener('click', async () => {
+        const note = prompt('Why is this pitch rejected? The business sees this note.') || '';
+        if (!note.trim()) return;
+        try { await api('/api/admin/hustle/pitches/' + btn.dataset.hpReject, { method: 'PATCH', body: JSON.stringify({ decision: 'rejected', note }) }); toast('Pitch rejected.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { list.innerHTML = errorHtml(e.message); }
+  }
+  document.getElementById('hp-filter').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-hpstatus]');
+    if (!chip) return;
+    current = chip.dataset.hpstatus;
+    document.querySelectorAll('#hp-filter .chip').forEach(c => c.classList.toggle('active', c === chip));
+    load(current);
+  });
+  load(current);
+}
+async function viewAdminHustleVotes() {
+  if (!requireAuth('#/admin/hustle/votes')) return;
+  if (!hustleAdminGuard()) return;
+  let current = 'all';
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/admin/hustle">Back to Hustle admin</a>
+    <h1 class="page-title">Vote monitoring</h1>
+    <p class="page-sub">Vote totals come only from recorded votes. There is no button that adds or changes votes.</p>
+    <div id="hv-stats">${skeletonCards(1)}</div>
+    <div class="chips" id="hv-filter">
+      <button class="chip active" data-hvfilter="all">All votes</button>
+      <button class="chip" data-hvfilter="flagged">Flagged only</button>
+      <button class="chip" data-hvfilter="today">Today</button>
+    </div>
+    <div class="searchbar" style="margin:10px 0">${icon('search')}<input id="hv-q" type="search" placeholder="Search by voter id or business name" aria-label="Search votes"></div>
+    <div id="hv-list" style="margin-top:12px">${skeletonCards(2)}</div>
+    <div id="hv-more" style="margin-top:10px"></div>
+  </div></div>`;
+  let votes = [], shown = 20, q = '';
+  function render() {
+    const list = document.getElementById('hv-list');
+    let rows = votes.slice();
+    if (current === 'flagged') rows = rows.filter(v => v.flagged || (v.flags && v.flags.length));
+    if (current === 'today') rows = rows.filter(v => String(v.created_at || '').slice(0, 10) === new Date().toISOString().slice(0, 10));
+    if (q) rows = rows.filter(v => String(v.voter_id || '').toLowerCase().includes(q) || String(v.business_name || v.entry_name || '').toLowerCase().includes(q));
+    const page = rows.slice(0, shown);
+    list.innerHTML = page.length ? page.map(v => `
+      <div class="card" style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+        <span style="flex:1;min-width:0"><b>${esc('Voter ' + (v.voter_id || ''))}</b> ${v.flagged || (v.flags && v.flags.length) ? `<span class="badge badge-app-pending">Flagged</span>` : ''}
+        <span class="small muted" style="display:block">Voter id ${esc(String(v.voter_id || ''))} · for ${esc(v.business_name || v.entry_name || '')} · ${esc(relTime(v.created_at))}</span></span>
+        ${v.application_id ? `<a class="btn btn-sm btn-outline" href="#/hustle/entry/${v.application_id}">Entry</a>` : ''}
+      </div>`).join('') : emptyHtml('chart', 'No votes here', 'No votes match this filter yet.');
+    document.getElementById('hv-more').innerHTML = rows.length > shown ? `<button class="btn btn-outline full" id="hv-more-btn">Load more (${rows.length - shown} left)</button>` : '';
+    const more = document.getElementById('hv-more-btn');
+    if (more) more.addEventListener('click', () => { shown += 20; render(); });
+  }
+  document.getElementById('hv-filter').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-hvfilter]');
+    if (!chip) return;
+    current = chip.dataset.hvfilter;
+    document.querySelectorAll('#hv-filter .chip').forEach(c => c.classList.toggle('active', c === chip));
+    render();
+  });
+  let qt;
+  document.getElementById('hv-q').addEventListener('input', (e) => { clearTimeout(qt); qt = setTimeout(() => { q = e.target.value.trim().toLowerCase(); render(); }, 300); });
+  try {
+    const d = await api('/api/admin/hustle/votes');
+    votes = d.votes || d.items || [];
+    const stats = document.getElementById('hv-stats');
+    if (stats) {
+      const today = votes.filter(v => String(v.created_at || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
+      stats.innerHTML = `<div class="stat-grid">
+        <div class="card stat-card"><h3>${votes.length}</h3><p class="small muted">Total verified votes</p></div>
+        <div class="card stat-card"><h3>${today}</h3><p class="small muted">Votes today</p></div>
+        <div class="card stat-card"><h3>${votes.filter(v => v.flagged || (v.flags && v.flags.length)).length}</h3><p class="small muted">Flagged votes</p></div>
+      </div>`;
+    }
+    render();
+  } catch (e) {
+    document.getElementById('hv-list').innerHTML = errorHtml(e.message);
+  }
+}
+async function viewAdminHustleFraud() {
+  if (!requireAuth('#/admin/hustle/fraud')) return;
+  if (!hustleAdminGuard()) return;
+  let current = 'open';
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/admin/hustle">Back to Hustle admin</a>
+    <h1 class="page-title">Fraud review</h1>
+    <p class="page-sub">Each decision is per vote or per entry, with a reason.</p>
+    <div class="chips" id="hf-filter">
+      <button class="chip active" data-hffilter="open">Open</button>
+      <button class="chip" data-hffilter="reviewed">Reviewed</button>
+      <button class="chip" data-hffilter="all">All</button>
+    </div>
+    <div id="hf-list" style="margin-top:12px">${skeletonCards(2)}</div>
+  </div></div>`;
+  const list = document.getElementById('hf-list');
+  async function load(filter) {
+    list.innerHTML = skeletonCards(2);
+    try {
+      // The API returns votes, each with a nested flags array. One card per
+      // flagged vote; the open/reviewed filter reads the flag statuses.
+      const d = await api('/api/admin/hustle/votes');
+      let votes = (d.votes || d.items || []).filter(v => v.flags && v.flags.length);
+      if (filter === 'open') votes = votes.filter(v => v.flags.some(f => f.status === 'open' || f.status === 'reviewing'));
+      if (filter === 'reviewed') votes = votes.filter(v => v.flags.some(f => f.status !== 'open' && f.status !== 'reviewing'));
+      list.innerHTML = votes.length ? votes.map(v => {
+        const openFlags = v.flags.filter(f => f.status === 'open' || f.status === 'reviewing');
+        const flag = openFlags[0] || v.flags[0];
+        return `
+        <div class="card" style="margin-bottom:10px">
+          <b>${esc(flag.reason || 'Flag')}</b>
+          <span class="small muted" style="display:block">Voter id ${esc(String(v.voter_id || ''))}${v.business_name ? ' · ' + esc(v.business_name) : ''} ${v.application_id ? `· <a href="#/hustle/entry/${v.application_id}">entry</a>` : ''} · ${esc(relTime(v.created_at))}</span>
+          ${flag.detector ? `<p class="small" style="margin:6px 0 0">Detected by ${esc(flag.detector)} · status ${esc(flag.status)}</p>` : ''}
+          ${flag.resolution ? `<p class="small" style="margin:6px 0 0">Resolution: ${esc(flag.resolution)}</p>` : ''}
+          ${v.is_valid === false ? '<p class="small" style="margin:6px 0 0"><b>Vote invalidated.</b></p>' : ''}
+          <div class="btn-row" style="margin-top:8px">
+            ${openFlags.length ? `<button class="btn btn-sm btn-outline" data-hf-dismiss="${v.id}">Dismiss flag</button>` : ''}
+            ${v.application_id ? `<button class="btn btn-sm btn-danger" data-hf-disqualify="${v.application_id}">Disqualify entry</button>` : ''}
+          </div>
+        </div>`;
+      }).join('') : emptyHtml('shield', 'No fraud flags', 'No open fraud flags. New flags appear here.');
+      list.querySelectorAll('[data-hf-dismiss]').forEach(btn => btn.addEventListener('click', async () => {
+        const reason = prompt('Why is this flag being dismissed? This is recorded.') || '';
+        if (!reason.trim()) return;
+        try { await api('/api/admin/hustle/votes/' + btn.dataset.hfDismiss + '/flag', { method: 'PATCH', body: JSON.stringify({ action: 'clear', reason: reason.trim() }) }); toast('Flag dismissed.'); load(current); }
+        catch (e) { toast(e.message, true); }
+      }));
+      list.querySelectorAll('[data-hf-disqualify]').forEach(btn => btn.addEventListener('click', () => openDisqualifyDialog(btn.dataset.hfDisqualify, () => load(current))));
+    } catch (e) { list.innerHTML = errorHtml(e.message); }
+  }
+  document.getElementById('hf-filter').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-hffilter]');
+    if (!chip) return;
+    current = chip.dataset.hffilter;
+    document.querySelectorAll('#hf-filter .chip').forEach(c => c.classList.toggle('active', c === chip));
+    load(current);
+  });
+  load(current);
+}
+function openDisqualifyDialog(applicationId, done) {
+  const overlay = document.createElement('div');
+  overlay.className = 'share-overlay';
+  overlay.innerHTML = `
+    <div class="share-sheet" role="dialog" aria-label="Disqualify this entry">
+      <h3>Disqualify this entry?</h3>
+      <p class="small">Disqualifying removes this entry from the leaderboard and from voting. The business is told the reason. This is recorded in the audit log and cannot be undone from here.</p>
+      <div class="field"><label for="dq-reason">Reason (the business sees this) *</label>
+        <textarea id="dq-reason" rows="3" maxlength="500" placeholder="Be specific. e.g. Votes were bought. Evidence: ..."></textarea></div>
+      <div class="btn-row">
+        <button class="btn btn-danger" id="dq-confirm" disabled>Disqualify entry</button>
+        <button class="btn btn-ghost" id="dq-cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const reason = overlay.querySelector('#dq-reason');
+  const confirm = overlay.querySelector('#dq-confirm');
+  reason.addEventListener('input', () => { confirm.disabled = reason.value.trim().length < 10; });
+  overlay.querySelector('#dq-cancel').addEventListener('click', () => overlay.remove());
+  confirm.addEventListener('click', async () => {
+    confirm.disabled = true;
+    try {
+      await api('/api/admin/hustle/entries/' + applicationId + '/disqualify', { method: 'POST', body: JSON.stringify({ reason: reason.value.trim() }) });
+      toast('Entry disqualified.');
+      overlay.remove();
+      if (done) done();
+    } catch (e) { toast(e.message, true); confirm.disabled = false; }
+  });
+}
+async function viewAdminHustleFinalists() {
+  if (!requireAuth('#/admin/hustle/finalists')) return;
+  if (!hustleAdminGuard()) return;
+  app.innerHTML = `<div class="view"><div class="page">
+    <a class="small" href="#/admin/hustle">Back to Hustle admin</a>
+    <h1 class="page-title">Finalists review</h1>
+    <div class="card"><p class="small" style="margin:0">Finalists are the Top 10 by verified votes. Review each finalist's pitch, photos, and spend plan before the winner is published. The winner is the highest verified vote count after fraud review, unless disqualified.</p></div>
+    <div id="hf-list" style="margin-top:12px">${skeletonCards(3)}</div>
+    <div id="hf-publish" style="margin-top:12px"></div>
+  </div></div>`;
+  const comp = await getCurrentComp();
+  const phase = hustlePhase(comp);
+  try {
+    const d = await api('/api/hustle/competitions/' + comp.id + '/leaderboard');
+    const rows = normEntries(d).slice(0, 10);
+    const list = document.getElementById('hf-list');
+    if (!rows.length) { list.innerHTML = emptyHtml('star', 'No finalists yet', 'Finalists appear here once voting opens. The Top 10 by verified votes will be listed.'); }
+    else {
+      list.innerHTML = rows.map((e, i) => `
+        <div class="card" style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+          <span class="hustle-rank ${i < 3 ? 'hustle-rank-top' : ''}">${i + 1}</span>
+          <span style="flex:1;min-width:0"><b>${esc(e.business_name)}</b><span class="small muted" style="display:block">${esc([e.category, e.province].filter(Boolean).join(' · '))} · ${e.vote_count != null ? Number(e.vote_count).toLocaleString('en-ZM') + ' votes' : 'No votes yet'}</span></span>
+          <a class="btn btn-sm btn-outline" href="#/hustle/entry/${e.application_id}">Review</a>
+          <button class="btn btn-sm btn-danger" data-hf-disqualify="${e.application_id}">Disqualify</button>
+        </div>`).join('');
+      list.querySelectorAll('[data-hf-disqualify]').forEach(btn => btn.addEventListener('click', () => openDisqualifyDialog(btn.dataset.hfDisqualify, () => viewAdminHustleFinalists())));
+    }
+    const pub = document.getElementById('hf-publish');
+    if (pub && phase.key === 'frozen' && rows.length) {
+      const leader = rows[0];
+      pub.innerHTML = `<div class="card" style="background:var(--amber-tint)">
+        <h3 style="margin-top:0">Publish winner</h3>
+        <p class="small">Current leader: <b>${esc(leader.business_name)}</b> with ${leader.vote_count != null ? Number(leader.vote_count).toLocaleString('en-ZM') + ' verified votes' : 'no votes recorded'}.</p>
+        <button class="btn btn-primary" id="hf-publish-btn">Publish winner</button>
+      </div>`;
+      document.getElementById('hf-publish-btn').addEventListener('click', () => {
+        const overlay = document.createElement('div');
+        overlay.className = 'share-overlay';
+        overlay.innerHTML = `
+          <div class="share-sheet" role="dialog" aria-label="Publish the winner">
+            <h3>Publish the winner?</h3>
+            <p class="small">This announces <b>${esc(leader.business_name)}</b> as the winner of K10,000, on December 31, 2026. The leaderboard and landing page update immediately. This cannot be undone from here.</p>
+            <div class="btn-row"><button class="btn btn-primary" id="hf-confirm">Publish winner</button><button class="btn btn-ghost" id="hf-cancel">Cancel</button></div>
+          </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#hf-cancel').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('#hf-confirm').addEventListener('click', async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api('/api/admin/hustle/competitions/' + comp.id + '/finalise', { method: 'POST', body: JSON.stringify({ application_id: leader.application_id }) });
+            toast('Winner published.');
+            overlay.remove();
+            viewAdminHustleFinalists();
+          } catch (err) { toast(err.message, true); e.currentTarget.disabled = false; }
+        });
+      });
+    }
+  } catch (e) {
+    document.getElementById('hf-list').innerHTML = errorHtml(e.message);
+  }
+}
+/** datetime-local has no timezone, so the settings form shows the Lusaka
+ * wall time, not the browser's local time, and the save sends it back with
+ * an explicit +02:00 offset. Otherwise a Lusaka admin in another timezone
+ * would shift every date by the timezone gap. */
+function hustleDtLocal(iso) {
+  const d = parseServerDate(iso);
+  if (!d) return '';
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lusaka', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d);
+  const g = (t) => parts.find(p => p.type === t).value;
+  return g('year') + '-' + g('month') + '-' + g('day') + 'T' + g('hour') + ':' + g('minute');
+}
+function hustleLusakaDate(iso) {
+  const d = parseServerDate(iso);
+  if (!d) return '';
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lusaka', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+  const g = (t) => parts.find(p => p.type === t).value;
+  return g('year') + '-' + g('month') + '-' + g('day');
+}
+function hustleLusakaIso(local) {
+  if (!local) return undefined;
+  return local + ':00+02:00';
+}
+async function viewAdminHustleSettings() {
+  if (!requireAuth('#/admin/hustle/settings')) return;
+  if (!hustleAdminGuard()) return;
+  app.innerHTML = `<div class="view"><div class="page">${loadingHtml('Loading settings…')}</div></div>`;
+  let comp = await getCurrentComp(true);
+  if (!comp) { app.innerHTML = `<div class="view"><div class="page">${errorHtml('The competition could not be loaded right now.')}</div></div>`; return; }
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/admin/hustle">Back to Hustle admin</a>
+    <h1 class="page-title">Competition settings</h1>
+    <p class="page-sub">Dates are data, never hard coded. All times are Lusaka time.</p>
+    <form class="card" id="hs-form" style="padding:20px">
+      <h3 style="margin-top:0">Dates and phases</h3>
+      <div class="form-2col">
+        <div class="field"><label for="hs-ao">Applications open</label><input id="hs-ao" type="datetime-local" value="${esc(hustleDtLocal(comp.applications_open_at))}"></div>
+        <div class="field"><label for="hs-ac">Applications close</label><input id="hs-ac" type="datetime-local" value="${esc(hustleDtLocal(comp.applications_close_at))}"></div>
+        <div class="field"><label for="hs-vo">Voting open</label><input id="hs-vo" type="datetime-local" value="${esc(hustleDtLocal(comp.voting_opens_at))}"></div>
+        <div class="field"><label for="hs-vc">Voting close</label><input id="hs-vc" type="datetime-local" value="${esc(hustleDtLocal(comp.voting_closes_at))}"></div>
+      </div>
+      <p class="small muted">Winner Announcement: December 31, 2026 at <input id="hs-wt" type="time" value="${esc(comp.winner_announced_at ? fmtLusakaTime(comp.winner_announced_at).slice(0, 5) : '18:00')}" style="width:90px"> CAT.</p>
+      <div class="field-error" id="hs-date-err" hidden></div>
+      <h3>Announcements</h3>
+      <div class="field"><label for="hs-ann">Current announcement</label>
+        <textarea id="hs-ann" rows="3" maxlength="500" placeholder="e.g. Voting opens tomorrow at 09:00. Get ready to vote for your favourite business."></textarea></div>
+      <div class="field"><label for="hs-ann-kind">Type</label>
+        <select id="hs-ann-kind"><option value="general">General</option><option value="voting_opened">Voting opened</option><option value="voting_closing_soon">Voting closing soon</option><option value="results_announced">Results announced</option><option value="winner_announced">Winner announced</option></select></div>
+      <button class="btn btn-primary" type="button" id="hs-publish-ann">Publish announcement</button>
+      <h3 style="margin-top:20px">Leaderboard visibility</h3>
+      <p class="small">${comp.leaderboard_frozen_at ? 'Frozen on ' + esc(fmtLusaka(comp.leaderboard_frozen_at)) + '. Votes are still recorded.' : 'Live.'}</p>
+      ${comp.leaderboard_frozen_at ? '' : `<button class="btn btn-outline" type="button" id="hs-freeze">Freeze now</button>`}
+      <h3 style="margin-top:20px">Prize payment status</h3>
+      <div id="hs-prize-body"><p class="small muted">Loading results…</p></div>
+      <button class="btn btn-primary" type="submit" style="margin-top:12px">Save settings</button>
+    </form>
+  </div></div>`;
+  document.getElementById('hs-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ao = document.getElementById('hs-ao').value, ac = document.getElementById('hs-ac').value;
+    const vo = document.getElementById('hs-vo').value, vc = document.getElementById('hs-vc').value;
+    const wt = document.getElementById('hs-wt').value;
+    const err = document.getElementById('hs-date-err');
+    const bad = (msg) => { err.textContent = msg; err.hidden = false; };
+    err.hidden = true;
+    if (ao && ac && ac <= ao) return bad('Applications close must be after applications open.');
+    if (vo && ac && vo <= ac) return bad('Voting must open after applications close.');
+    if (vo && vc && vc <= vo) return bad('Voting close must be after voting open.');
+    try {
+      await api('/api/admin/hustle/competitions/' + comp.id, { method: 'PATCH', body: JSON.stringify({
+        applications_open_at: hustleLusakaIso(ao), applications_close_at: hustleLusakaIso(ac),
+        voting_open_at: hustleLusakaIso(vo), voting_close_at: hustleLusakaIso(vc),
+        winner_at: wt ? (comp.winner_announced_at ? hustleLusakaDate(comp.winner_announced_at) : '2026-12-31') + 'T' + wt + ':00+02:00' : undefined,
+      }) });
+      hustleCompCache = null;
+      toast('Competition settings saved.');
+    } catch (e2) { toast(e2.message, true); }
+  });
+  document.getElementById('hs-publish-ann').addEventListener('click', async () => {
+    const body = document.getElementById('hs-ann').value.trim();
+    if (!body) { toast('Write the announcement first.', true); return; }
+    try {
+      await api('/api/admin/hustle/announcements', { method: 'POST', body: JSON.stringify({ kind: document.getElementById('hs-ann-kind').value, title: 'Announcement from 2911 Jobs', body, competition_id: comp.id }) });
+      toast('Announcement published.');
+      document.getElementById('hs-ann').value = '';
+    } catch (e) { toast(e.message, true); }
+  });
+  const freezeBtn = document.getElementById('hs-freeze');
+  if (freezeBtn) freezeBtn.addEventListener('click', async () => {
+    if (!confirm('Freeze the leaderboard now? This is permanent. There is no unfreeze.')) return;
+    try {
+      await api('/api/admin/hustle/competitions/' + comp.id + '/freeze', { method: 'POST', body: '{}' });
+      hustleCompCache = null;
+      toast('Leaderboard frozen.');
+      viewAdminHustleSettings();
+    } catch (e) { toast(e.message, true); }
+  });
+  // Prize payment tracks the winner's result row, not the competition.
+  (async () => {
+    const wrap = document.getElementById('hs-prize-body');
+    if (!wrap) return;
+    let rows = [];
+    try { const d = await api('/api/admin/hustle/competitions/' + comp.id + '/results'); rows = d.results || []; } catch (e) { rows = []; }
+    const winner = rows.find(r => r.is_winner) || rows[0];
+    if (!winner) { wrap.innerHTML = '<p class="small muted">No results yet. Prize payment tracking opens once the leaderboard is frozen.</p>'; return; }
+    wrap.innerHTML = `
+      <p class="small" style="margin-top:0">Winner: <b>${esc(winner.business_name)}</b> · Rank ${winner.rank} · ${Number(winner.final_vote_count).toLocaleString('en-ZM')} final votes</p>
+      <div class="form-2col">
+        <div class="field"><label for="hs-prize">Prize payment</label>
+          <select id="hs-prize"><option value="unpaid" ${winner.prize_payment_status === 'unpaid' ? 'selected' : ''}>Not yet paid</option><option value="processing" ${winner.prize_payment_status === 'processing' ? 'selected' : ''}>Being arranged</option><option value="paid" ${winner.prize_payment_status === 'paid' ? 'selected' : ''}>Paid</option><option value="failed" ${winner.prize_payment_status === 'failed' ? 'selected' : ''}>Failed</option></select></div>
+        <div class="field"><label for="hs-prize-method">Payment method (optional)</label><input id="hs-prize-method" maxlength="60" value="${esc(winner.prize_payment_method || '')}" placeholder="e.g. MTN MoMo"></div>
+      </div>
+      <div class="field"><label for="hs-prize-ref">Payment reference (required when marking paid)</label><input id="hs-prize-ref" maxlength="120" value="${esc(winner.prize_payment_reference || '')}"></div>
+      <p class="small muted">The payment date is recorded automatically when the prize is marked paid.</p>
+      <button class="btn btn-primary" type="button" id="hs-prize-save">Save prize status</button>`;
+    document.getElementById('hs-prize-save').addEventListener('click', async () => {
+      const status = document.getElementById('hs-prize').value;
+      const ref = document.getElementById('hs-prize-ref').value.trim();
+      const method = document.getElementById('hs-prize-method').value.trim();
+      try {
+        await api('/api/admin/hustle/results/' + winner.id + '/prize', { method: 'PATCH', body: JSON.stringify({ prize_payment_status: status, prize_payment_reference: ref || undefined, prize_payment_method: method || undefined }) });
+        toast('Prize status saved.');
+      } catch (e) { toast(e.message, true); }
+    });
+  })();
+}
+async function viewAdminHustleExports() {
+  if (!requireAuth('#/admin/hustle/exports')) return;
+  if (!hustleAdminGuard()) return;
+  const comp = await getCurrentComp();
+  app.innerHTML = `
+  <div class="view"><div class="page">
+    <a class="small" href="#/admin/hustle">Back to Hustle admin</a>
+    <h1 class="page-title">Exports</h1>
+    <p class="page-sub">Generated from real data at download time. Admin only, never shared publicly.</p>
+    <div id="hx-list">${skeletonCards(2)}</div>
+  </div></div>`;
+  const list = document.getElementById('hx-list');
+  let counts = {};
+  try { const sd = await api('/api/admin/hustle/stats').catch(() => ({})); counts = sd.stats || {}; } catch (e) {}
+  const hasApps = Object.values(counts.applications_by_status || {}).some(v => v > 0);
+  const hasVotes = counts.votes_cast > 0;
+  const empty = !hasApps && !hasVotes;
+  // The API returns one multi-section CSV (entries, votes, results); there
+  // is no per-kind export, so there is one download button.
+  list.innerHTML = `<div class="card" style="margin-bottom:10px">
+      <b>Full competition export (CSV)</b>
+      <p class="small muted" style="margin:4px 0 10px">One file with three sections: entries (one row per application, with business, applicant, category, province, district, submitted date, status, and vote count), votes (one row per verified vote, with voter id, entry, and time), and results (rank, business, final vote count, winner, and prize payment status).</p>
+      <button class="btn btn-outline" id="hx-download" ${empty ? 'disabled' : ''}>Download</button>
+      ${empty ? '<span class="small muted" style="margin-left:8px">No data yet.</span>' : ''}
+    </div>`;
+  const btn = document.getElementById('hx-download');
+  if (btn) btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/admin/hustle/competitions/' + (comp ? comp.id : '') + '/export', { credentials: 'include' });
+      if (!res.ok) throw new Error('Export failed.');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'hustle-export.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast('Export downloaded.');
+    } catch (e) { toast(e.message, true); }
+    btn.disabled = false;
+  });
+}
+
+/* __HUSTLE_PART4__ */
 const routes = [
   [/^#\/?$/, () => (currentUser ? viewHome() : viewLanding())],
   [/^#\/jobs$/, viewBrowse],
@@ -9762,7 +12666,22 @@ const routes = [
   [/^#\/business\/apply$/, viewBusinessApply],
   [/^#\/business\/mine$/, viewMyBusinesses],
   [/^#\/business\/(\d+)\/manage$/, (m) => viewBusinessManage(m[1])],
+  [/^#\/business\/(\d+)\/complete$/, (m) => viewBusinessComplete(m[1])],
   [/^#\/business\/([a-z0-9-]+)$/, (m) => viewBusiness(m[1])],
+  [/^#\/hustle$/, viewHustle],
+  [/^#\/hustle\/apply(\/(\d+))?(\?.*)?$/, (m) => viewHustleApply(m[2])],
+  [/^#\/hustle\/leaderboard(\?.*)?$/, viewHustleLeaderboard],
+  [/^#\/hustle\/entry\/(\d+)/, (m) => viewHustleEntry(m[1])],
+  [/^#\/hustle\/my-entry$/, viewHustleMyEntry],
+  [/^#\/notifications(\?.*)?$/, viewNotifications],
+  [/^#\/admin\/hustle\/applications$/, viewAdminHustleApplications],
+  [/^#\/admin\/hustle\/pitches$/, viewAdminHustlePitches],
+  [/^#\/admin\/hustle\/votes$/, viewAdminHustleVotes],
+  [/^#\/admin\/hustle\/fraud$/, viewAdminHustleFraud],
+  [/^#\/admin\/hustle\/finalists$/, viewAdminHustleFinalists],
+  [/^#\/admin\/hustle\/settings$/, viewAdminHustleSettings],
+  [/^#\/admin\/hustle\/exports$/, viewAdminHustleExports],
+  [/^#\/admin\/hustle$/, viewAdminHustle],
   [/^#\/admin\/businesses$/, viewAdminBusinesses],
   [/^#\/job\/(\d+)\/edit$/, (m) => viewJobEdit(m[1])],
   [/^#\/job\/(\d+)\/track$/, (m) => viewTrackDelivery(m[1])],
@@ -9804,6 +12723,7 @@ const routes = [
 async function router() {
   if (chatTimer) { clearInterval(chatTimer); chatTimer = null; }
   if (supportTimer) { clearInterval(supportTimer); supportTimer = null; }
+  if (hustleTimer) { clearInterval(hustleTimer); hustleTimer = null; }
   supAdminChatId = null;
   supAdminOnline = false;
   stopAdsRotation();
@@ -9849,6 +12769,13 @@ document.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     shareBusiness(businessShareBtn.dataset.shareBusiness, businessShareBtn.dataset.title || 'Storefront on 2911 Jobs');
+    return;
+  }
+  const hustleShareBtn = e.target.closest('[data-share-hustle-entry]');
+  if (hustleShareBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    shareHustleEntry(hustleShareBtn.dataset.shareHustleEntry, hustleShareBtn.dataset.title || 'Entry on 2911 Jobs');
     return;
   }
   const expShareBtn = e.target.closest('[data-share-experience]');

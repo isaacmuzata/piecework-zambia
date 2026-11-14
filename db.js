@@ -716,6 +716,245 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_exp_listings_lat_lng ON experience_listings(lat, lng)`,
   `CREATE INDEX IF NOT EXISTS idx_exp_media_listing_sort ON experience_listing_media(listing_id, sort, id)`,
   `CREATE INDEX IF NOT EXISTS idx_exp_units_property_status ON experience_property_units(property_id, status)`,
+  // 2911 Hustle ("What's Your Hustle?" K10,000 Business Challenge, Phase 1,
+  // 2026-11-13): 12 new hustle_ tables + hustle_announcements (Database
+  // Design sections 1-13, migration order 14.2). Additive only; FK-ordered.
+  // Business representatives: Hustle-scoped, NOT experience_business_staff
+  // (that table is tourism-scoped; reusing it would grant Experiences
+  // powers). One active rep per business at launch (enforced in code).
+  `CREATE TABLE IF NOT EXISTS hustle_business_reps (
+    business_id   INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role          TEXT NOT NULL DEFAULT 'representative'
+                  CHECK (role IN ('representative', 'manager')),
+    invited_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status        TEXT NOT NULL DEFAULT 'invited'
+                  CHECK (status IN ('invited', 'active', 'revoked')),
+    invited_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    accepted_at   TEXT,
+    revoked_at    TEXT,
+    revoked_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (business_id, user_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_reps_user ON hustle_business_reps(user_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_reps_business ON hustle_business_reps(business_id, status)`,
+  // Who opened a PACRA/verification document (mirrors experience_document_views).
+  `CREATE TABLE IF NOT EXISTS hustle_document_views (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES business_documents(id) ON DELETE CASCADE,
+    viewer_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    viewed_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_doc_views_doc ON hustle_document_views(document_id, viewed_at)`,
+  // Competitions: generic container, one row per contest. Dates are UTC
+  // TEXT; status is the source of truth for what is open right now.
+  // No winner columns here: the winner lives in hustle_results.
+  `CREATE TABLE IF NOT EXISTS hustle_competitions (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                  TEXT NOT NULL,
+    slug                  TEXT NOT NULL UNIQUE,
+    tagline               TEXT DEFAULT '',
+    description           TEXT NOT NULL DEFAULT '',
+    rules_text            TEXT NOT NULL DEFAULT '',
+    prize_kwacha          INTEGER NOT NULL DEFAULT 10000,
+    prize_currency        TEXT NOT NULL DEFAULT 'ZMW',
+    eligibility_json      TEXT NOT NULL DEFAULT '{}',
+    applications_open_at  TEXT,
+    applications_close_at TEXT,
+    voting_open_at        TEXT,
+    voting_close_at       TEXT,
+    freeze_at             TEXT,
+    winner_at             TEXT,
+    status                TEXT NOT NULL DEFAULT 'draft'
+                          CHECK (status IN ('draft', 'applications_open', 'applications_closed',
+                                           'voting_open', 'voting_closed', 'frozen',
+                                           'winner_announced', 'archived')),
+    created_by            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at            TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_competitions_status ON hustle_competitions(status, voting_open_at)`,
+  // One application per business per competition (UNIQUE). The 10
+  // questions live as JSON; the K10,000 breakdown as child rows.
+  `CREATE TABLE IF NOT EXISTS hustle_applications (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    competition_id    INTEGER NOT NULL REFERENCES hustle_competitions(id) ON DELETE CASCADE,
+    business_id       INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    submitted_by      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    answers_json      TEXT NOT NULL DEFAULT '{}',
+    questions_version INTEGER NOT NULL DEFAULT 1,
+    pitch_summary     TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'draft'
+                      CHECK (status IN ('draft', 'submitted', 'under_review', 'changes_requested',
+                                       'approved', 'rejected', 'disqualified', 'withdrawn')),
+    reviewed_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at       TEXT,
+    review_note       TEXT DEFAULT '',
+    disqualified_reason TEXT DEFAULT '',
+    submitted_at      TEXT,
+    approved_at       TEXT,
+    withdrawn_at      TEXT,
+    created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  // One LIVE entry per business: a withdrawn or rejected application does
+  // not block a fresh one (the UI offers "Apply again" after a rejection,
+  // and deleting a draft must not lock the business out). The partial
+  // index, not a table UNIQUE, is what enforces this.
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_hustle_apps_one_live ON hustle_applications(competition_id, business_id) WHERE status NOT IN ('withdrawn', 'rejected')`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_apps_competition ON hustle_applications(competition_id, status, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_apps_business ON hustle_applications(business_id, competition_id)`,
+  `CREATE TABLE IF NOT EXISTS hustle_spend_items (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL REFERENCES hustle_applications(id) ON DELETE CASCADE,
+    label          TEXT NOT NULL,
+    amount         INTEGER NOT NULL,
+    note           TEXT DEFAULT '',
+    sort           INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_spend_app ON hustle_spend_items(application_id, sort, id)`,
+  // Pitch photos: base64 in Turso like product_photos, max 5 per
+  // application. Video is a social media LINK only, never bytes, never
+  // a duration/size (Database Design section 7).
+  `CREATE TABLE IF NOT EXISTS hustle_pitch_photos (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL REFERENCES hustle_applications(id) ON DELETE CASCADE,
+    image          TEXT NOT NULL,
+    mime           TEXT NOT NULL DEFAULT 'image/jpeg',
+    sort           INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_pitch_photos_app ON hustle_pitch_photos(application_id, sort, id)`,
+  `CREATE TABLE IF NOT EXISTS hustle_pitch_videos (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id   INTEGER NOT NULL UNIQUE REFERENCES hustle_applications(id) ON DELETE CASCADE,
+    video_url        TEXT NOT NULL,
+    video_platform   TEXT NOT NULL
+                     CHECK (video_platform IN ('facebook', 'tiktok', 'youtube', 'instagram')),
+    status           TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending', 'approved', 'rejected', 'changes_requested')),
+    reviewed_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at      TEXT,
+    review_note      TEXT DEFAULT '',
+    uploaded_by      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  // Votes: one per voter per competition (UNIQUE). No counter column
+  // anywhere: counts are always COUNT(*) on read.
+  `CREATE TABLE IF NOT EXISTS hustle_votes (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    competition_id              INTEGER NOT NULL REFERENCES hustle_competitions(id) ON DELETE CASCADE,
+    application_id              INTEGER NOT NULL REFERENCES hustle_applications(id) ON DELETE CASCADE,
+    business_id                 INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    voter_id                    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    voter_selfie_status_at_vote TEXT NOT NULL,
+    ip_hash                     TEXT NOT NULL DEFAULT '',
+    device_fingerprint          TEXT NOT NULL DEFAULT '',
+    after_freeze                INTEGER NOT NULL DEFAULT 0,
+    is_valid                    INTEGER NOT NULL DEFAULT 1,
+    invalidated_by              INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    invalidated_at              TEXT,
+    invalidation_reason         TEXT DEFAULT '',
+    created_at                  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (voter_id, competition_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_votes_competition ON hustle_votes(competition_id, application_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_votes_application ON hustle_votes(application_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_votes_voter ON hustle_votes(voter_id, created_at DESC)`,
+  // Fraud flags: a review record, never an auto-invalidation. vote_id is
+  // SET NULL so the flag survives the vote it refers to.
+  `CREATE TABLE IF NOT EXISTS hustle_vote_flags (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    vote_id        INTEGER REFERENCES hustle_votes(id) ON DELETE SET NULL,
+    voter_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    application_id INTEGER REFERENCES hustle_applications(id) ON DELETE SET NULL,
+    competition_id INTEGER NOT NULL REFERENCES hustle_competitions(id) ON DELETE CASCADE,
+    reason         TEXT NOT NULL,
+    detector       TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'open'
+                   CHECK (status IN ('open', 'reviewing', 'confirmed_fraud', 'dismissed')),
+    reviewed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at    TEXT,
+    resolution     TEXT DEFAULT '',
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_flags_competition ON hustle_vote_flags(competition_id, status, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_flags_vote ON hustle_vote_flags(vote_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_flags_voter ON hustle_vote_flags(voter_id, status)`,
+  // Results: winner + every finalist, frozen vote counts snapshotted at
+  // freeze time. Exactly one winner per competition (enforced in code).
+  `CREATE TABLE IF NOT EXISTS hustle_results (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    competition_id          INTEGER NOT NULL REFERENCES hustle_competitions(id) ON DELETE CASCADE,
+    application_id          INTEGER NOT NULL REFERENCES hustle_applications(id) ON DELETE CASCADE,
+    business_id             INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    rank                    INTEGER NOT NULL,
+    final_vote_count        INTEGER NOT NULL,
+    is_winner               INTEGER NOT NULL DEFAULT 0,
+    verified_at             TEXT,
+    verified_by             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    published_at            TEXT,
+    prize_payment_status    TEXT NOT NULL DEFAULT 'unpaid'
+                            CHECK (prize_payment_status IN ('unpaid', 'processing', 'paid', 'failed')),
+    prize_paid_at           TEXT,
+    prize_payment_reference TEXT DEFAULT '',
+    prize_payment_method    TEXT DEFAULT '',
+    created_at              TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (competition_id, application_id),
+    UNIQUE (competition_id, rank)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_results_competition ON hustle_results(competition_id, rank)`,
+  // In-app notification inbox (no inbox existed before Hustle).
+  `CREATE TABLE IF NOT EXISTS hustle_notifications (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind           TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    body           TEXT NOT NULL,
+    link           TEXT DEFAULT '',
+    related_type   TEXT DEFAULT '',
+    related_id     INTEGER,
+    read_at        TEXT,
+    sent_via       TEXT NOT NULL DEFAULT 'in_app',
+    delivery_status TEXT NOT NULL DEFAULT 'sent'
+                   CHECK (delivery_status IN ('pending', 'sent', 'failed', 'skipped')),
+    sent_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_notifications_user ON hustle_notifications(user_id, read_at, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_notifications_related ON hustle_notifications(related_type, related_id)`,
+  // Storefront analytics events. No number is ever shown unless an event
+  // row backs it. Vote casts are NOT events (votes are counted from
+  // hustle_votes, so a second count can never disagree).
+  `CREATE TABLE IF NOT EXISTS hustle_events (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id    INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    event_type     TEXT NOT NULL
+                   CHECK (event_type IN ('storefront_view', 'product_view', 'contact_click',
+                                        'whatsapp_click', 'pitch_view', 'application_view')),
+    actor_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    ref_type       TEXT DEFAULT '',
+    ref_id         INTEGER,
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_events_business ON hustle_events(business_id, event_type, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_events_ref ON hustle_events(ref_type, ref_id, created_at)`,
+  // Announcements: ONE row per announcement, shown in every member's
+  // inbox by union. No per-user fan-out (Architecture 6.3).
+  `CREATE TABLE IF NOT EXISTS hustle_announcements (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    competition_id INTEGER REFERENCES hustle_competitions(id) ON DELETE CASCADE,
+    kind           TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    body           TEXT NOT NULL,
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_hustle_announcements_competition ON hustle_announcements(competition_id, created_at DESC)`,
 ];
 
 // Distance matching: precise coordinates are optional on users and jobs.
@@ -766,6 +1005,36 @@ const OPTIONAL_COLUMNS = [
   ['jobs', 'requires_food_license', 'INTEGER DEFAULT 0'],
   ['products', 'business_id', 'INTEGER'],
   ['products', 'negotiable', 'INTEGER NOT NULL DEFAULT 0'],
+  // Hustle business profile extension (Database Design section 1):
+  // trading name, province/district, optional location link, business
+  // type, year started, website, social links, registration number,
+  // draft flag, plus the two pinned columns the completeness check
+  // needs (structured hours, products/services list).
+  ['businesses', 'trading_name', "TEXT DEFAULT ''"],
+  ['businesses', 'province', "TEXT DEFAULT ''"],
+  ['businesses', 'district', "TEXT DEFAULT ''"],
+  ['businesses', 'location_id', 'INTEGER REFERENCES experience_locations(id) ON DELETE SET NULL'],
+  ['businesses', 'business_type', "TEXT DEFAULT ''"],
+  ['businesses', 'year_started', 'INTEGER'],
+  ['businesses', 'website', "TEXT DEFAULT ''"],
+  ['businesses', 'social_links', "TEXT DEFAULT '[]'"],
+  ['businesses', 'registration_number', "TEXT DEFAULT ''"],
+  ['businesses', 'is_draft', 'INTEGER NOT NULL DEFAULT 0'],
+  ['businesses', 'hours_json', "TEXT DEFAULT ''"],
+  ['businesses', 'services_text', "TEXT DEFAULT ''"],
+  // Hustle per-document review state (Database Design section 3). The
+  // CHECK sits on a NEW column, so no table rebuild is needed; the
+  // business-level verification_status CHECK is deliberately untouched.
+  ['business_documents', 'status', "TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'changes_requested'))"],
+  ['business_documents', 'reviewed_by', 'INTEGER'],
+  ['business_documents', 'reviewed_at', 'TEXT'],
+  ['business_documents', 'review_note', "TEXT DEFAULT ''"],
+  ['business_documents', 'mime', "TEXT DEFAULT ''"],
+  ['business_documents', 'size_bytes', 'INTEGER NOT NULL DEFAULT 0'],
+  ['business_documents', 'filename', "TEXT DEFAULT ''"],
+  // Hustle goods/service split (Database Design section 4). Services
+  // ignore the untouched condition CHECK; the CHECK is not widened.
+  ['products', 'listing_type', "TEXT NOT NULL DEFAULT 'goods' CHECK (listing_type IN ('goods', 'service'))"],
   ['jobs', 'is_draft', 'INTEGER DEFAULT 0'],
   ['jobs', 'expected_duration', "TEXT DEFAULT ''"],
   ['jobs', 'start_time', "TEXT DEFAULT ''"],
@@ -786,6 +1055,86 @@ async function init() {
       await client.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
   }
+  // Hustle indexes on the new business/product columns (Database Design
+  // sections 1 and 4). Created here, after OPTIONAL_COLUMNS, because the
+  // SCHEMA batch above runs before the columns exist.
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_hustle_businesses_province ON businesses(province, status)`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_hustle_businesses_district ON businesses(district, status)`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_hustle_products_business ON products(business_id, status, created_at DESC)`);
+  // Hustle backfills (Database Design section 14.2, order 12). Each is
+  // idempotent: it only touches rows whose new column is still at its
+  // default. No backfill fabricates a value: province/district come
+  // from the city lookup, location_id from a town name match, and
+  // is_draft is 0 for every pre-existing (submitted) business.
+  // city = 'Other' stays blank on province/district/location_id.
+  const CITY_PROVINCE = {
+    Lusaka: ['Lusaka Province', 'Lusaka District'],
+    Kitwe: ['Copperbelt', 'Kitwe District'],
+    Ndola: ['Copperbelt', 'Ndola District'],
+    Kabwe: ['Central', 'Kabwe District'],
+    Chipata: ['Eastern', 'Chipata District'],
+    Livingstone: ['Southern', 'Livingstone District'],
+    Chingola: ['Copperbelt', 'Chingola District'],
+    Luanshya: ['Copperbelt', 'Luanshya District'],
+    Kasama: ['Northern', 'Kasama District'],
+    Solwezi: ['North-Western', 'Solwezi District'],
+    Mongu: ['Western', 'Mongu District'],
+    Choma: ['Southern', 'Choma District'],
+  };
+  for (const [city, [province, district]] of Object.entries(CITY_PROVINCE)) {
+    await client.execute(
+      `UPDATE businesses SET province = ?, district = ? WHERE city = ? AND (province IS NULL OR province = '')`,
+      [province, district, city]
+    );
+  }
+  await client.execute(
+    `UPDATE businesses SET location_id = (
+       SELECT id FROM experience_locations
+       WHERE level = 'town' AND name = businesses.city AND active = 1 LIMIT 1)
+     WHERE location_id IS NULL AND city != 'Other'`
+  );
+  // Document review-state backfill from the parent business (section 3):
+  // approved/rejected follow verification_status, everything else stays
+  // pending. The note marks backfilled rows so a later reader can tell
+  // them from a real per-document review.
+  await client.execute(
+    `UPDATE business_documents SET status = 'approved',
+       review_note = 'Backfilled from business verification_status at migration.'
+     WHERE status = 'pending' AND business_id IN
+       (SELECT id FROM businesses WHERE verification_status = 'verified')`
+  );
+  await client.execute(
+    `UPDATE business_documents SET status = 'rejected',
+       review_note = 'Backfilled from business verification_status at migration.'
+     WHERE status = 'pending' AND business_id IN
+       (SELECT id FROM businesses WHERE verification_status = 'rejected')`
+  );
+  // mime/size_bytes backfill from the stored data URI (exact byte size).
+  const undocd = await client.execute(
+    `SELECT id, image FROM business_documents WHERE mime IS NULL OR mime = ''`
+  );
+  for (const d of undocd.rows) {
+    const raw = String(d.image || '');
+    const m = /^data:([^;,]+);base64,(.*)$/s.exec(raw);
+    const mime = m ? m[1] : '';
+    let size = 0;
+    if (m) { try { size = Buffer.from(m[2], 'base64').length; } catch { size = 0; } }
+    await client.execute(
+      `UPDATE business_documents SET mime = ?, size_bytes = ? WHERE id = ?`,
+      [mime, size, d.id]
+    );
+  }
+  // products.business_id backfill (section 4): only where the seller
+  // owns exactly one active storefront. Zero or 2-3 storefronts stay
+  // NULL for the owner to assign by hand.
+  await client.execute(
+    `UPDATE products SET business_id = (
+       SELECT id FROM businesses
+       WHERE owner_id = products.seller_id AND status = 'active' LIMIT 1)
+     WHERE business_id IS NULL AND (
+       SELECT COUNT(*) FROM businesses
+       WHERE owner_id = products.seller_id AND status = 'active') = 1`
+  );
   // Email uniqueness (v110): one account per address, case-insensitive
   // (addresses are stored lowercased). Partial so the many members with
   // no email at all are unaffected.
