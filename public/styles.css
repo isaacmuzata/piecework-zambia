@@ -445,6 +445,12 @@ img.avatar{display:block}
 .promo-card .promo-text{position:relative;padding:20px;background:linear-gradient(transparent,rgba(16,27,53,.88));width:100%}
 .promo-card h3{font-size:18px;font-weight:800;letter-spacing:-.02em}
 .promo-card p{font-size:13px;opacity:.9}
+/* Direct-child chevron (Hustle and giveaway promos): icon() returns a bare
+   viewBox-only SVG with no width/height. Without this rule it defaults to
+   ~150px wide as a flex item and squeezes .promo-text to its padding, so
+   the headline stacks one letter per line (Nov 20, 2026). Same pattern as
+   .entry-card>svg below. */
+.promo-card>svg{width:18px;height:18px;flex:0 0 18px;opacity:.85}
 
 /* ---------- ads banner ---------- */
 .ads-banner{position:relative;border-radius:22px;overflow:hidden;margin:0 0 16px;min-height:150px;background:linear-gradient(135deg,var(--navy),var(--cta));box-shadow:var(--shadow)}

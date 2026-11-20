@@ -1881,6 +1881,15 @@ async function experiencesTests(adminCookie, memberCookie, memberId, otherId) {
       '.exp-status-suspended'].every((t) => css.includes(t))
     && css.includes('.exp-owner-banner') && css.includes('.exp-photo-grid'),
     '');
+
+  // Hustle home promo (Nov 20, 2026): the promo card's chevron is a bare
+  // viewBox-only SVG. Without a sizing rule it defaults to ~150px wide as
+  // a flex item and squeezes .promo-text to its padding, so the headline
+  // stacks one letter per line. The rule must stay in the served CSS.
+  check('HUSTLE-FE: promo-card chevron SVG is sized so the Hustle headline cannot collapse',
+    css.includes('.promo-card>svg{width:18px;height:18px;flex:0 0 18px')
+    && appJs.includes('hustle-promo') && appJs.includes("icon('chevR')"),
+    '');
 }
 
 // 2911 Experiences Phase 3 (2026-11-08): host onboarding, verification,
